@@ -419,6 +419,11 @@ func TestReportAsksForTheJudgementNotJustTheNumber(t *testing.T) {
 	if !strings.Contains(got, "why") {
 		t.Errorf("the summary must ask why, not only how much:\n%s", got)
 	}
+	// Addressed to the reader, since an agent read the old "say why" as a prompt and tried to answer
+	// a linter. The question is the same one; who holds it is what this pins.
+	if !strings.Contains(got, "ask yourself") || !strings.Contains(got, "nothing collects it") {
+		t.Errorf("the question must read as the reader's own, with no reply expected:\n%s", got)
+	}
 }
 
 // TestAimNeverExceedsTheMax: the ideal is the max less a margin, but a max already under one line

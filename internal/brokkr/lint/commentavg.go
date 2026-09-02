@@ -192,9 +192,11 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		// Name the band as a claim with a reason owed, not as spare room; no mean can judge prose.
+		// The band is where the READER judges, so the question is addressed to them: one agent read
+		// "say why" as a prompt and tried to answer this check, which has nowhere to put a reply.
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
-			"  Cut to %.1f; stopping short claims the prose earns its length, which this check cannot judge — say why.\n",
+			"  Cut to %.1f. Stopping short claims the prose earns its length, which this check cannot judge —\n"+
+			"  so ask yourself why each block you keep earns its lines. That answer is yours; nothing collects it.\n",
 			len(viols), aim)
 		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)
