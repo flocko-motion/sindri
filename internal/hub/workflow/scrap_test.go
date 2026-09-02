@@ -86,7 +86,9 @@ func sayingWhileDown(word string) observe.Observation {
 // newEngine wires ONE stub as both halves of the split seam, so a test still asserts against a
 // single recorder — the split is about who may call what, not about having two fixtures.
 func newEngine(st *store.Store, d *stubDeps, sources ...tasks.Source) *Engine {
-	return New(st, d, d, sources...)
+	// Background as the lifetime: a test IS an entrypoint, and no fixture here turns on the engine
+	// outliving it. A case that needs the lifetime cancelled builds its own.
+	return New(context.Background(), st, d, d, sources...)
 }
 
 // testGate is the passing gate every fixture gets unless it declares its own. A project MUST declare

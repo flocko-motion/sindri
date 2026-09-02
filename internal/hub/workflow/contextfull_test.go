@@ -65,10 +65,10 @@ func TestAFullWorkerIsClearedAndPreparedForTheNextTask(t *testing.T) {
 	}
 }
 
-// TestAWorkerUnderTheThresholdIsHandedWork is the control: nothing about the fullness gate should
-// stop an ordinary claim from working exactly as it always has.
-func TestAWorkerUnderTheThresholdIsHandedWork(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 1000, ctxWindow: 200_000, ctxOK: true}
+// TestAnEmptyWorkerSessionIsHandedWork is the control: an ordinary claim onto a session with nothing
+// in it works exactly as it always has, with no preparation in the way.
+func TestAnEmptyWorkerSessionIsHandedWork(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 0, ctxWindow: 200_000, ctxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")

@@ -146,7 +146,7 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// CALL time, so neither has to exist yet.
 	h.sit = situation.NewGatherer(h.store, harness{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = workflow.New(h.store, workflowDeps{h}, harness{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
+	h.wf = workflow.New(h.lifetime, h.store, workflowDeps{h}, harness{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})
 	// Before watch: watchdog.sweep calls h.status.sweep at its own tail, on the very first beat, so
 	// this must exist before that goroutine starts — building it takes no dependency of its own.

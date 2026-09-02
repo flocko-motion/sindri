@@ -141,7 +141,8 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 		e.deps.Notify()
 		return nil
 	}
-	if err := e.assignReview(project, id, prID, reviewer, requirement); err != nil {
+	// The hub's lifetime: a submit reaches here through a port carrying no context of its own.
+	if _, err := e.assignReview(e.lifetime, project, id, prID, reviewer, requirement); err != nil {
 		return err
 	}
 	return nil
@@ -149,22 +150,33 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 
 // assignReview gives one reviewer one PR. The review record stays with the PR's project; the
 // reviewer's own roster row, workspace, state and notes are read and written under its own home.
-func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirement string) error {
+// fired says the session was cleared first, so the caller answers DirPreparing — the directive
+// itself has already gone out behind the clear.
+func (e *Engine) assignReview(ctx context.Context, project string, id int64, prID, reviewer, requirement string) (fired bool, err error) {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
 	if err != nil || !ok {
-		return err
+		return false, err
 	}
 	if err := ps.AssignReview(id, reviewer); err != nil {
-		return err
+		return false, err
 	}
 	home, a, found := e.reviewerHome(project, reviewer)
 	hs := e.store.For(home)
+	// Every route to a review passes here, so the preparation belongs here and nowhere else: twice
+	// would be worse than never, a second clear landing on the directive the first one delivered.
+	fired, prepErr := e.clearForFreshStart(ctx, home, reviewer)
+	if prepErr != nil {
+		// The review still goes out: a crowded reviewer beats a PR nobody was told about.
+		fmt.Fprintf(os.Stderr, "hub: preparing %s's session for %s: %v\n", reviewer, prID, prepErr)
+		_ = ps.LogPR(prID, "review-prepare-failed", fmt.Sprintf("%s was handed it unprepared: %v", reviewer, prepErr))
+		fired = false
+	}
 	// A review IS a reviewer's claim: it has been somewhere and looked at a whole diff, which is the
 	// vantage point the note grant pays for (-> store.GrantNotes). Its subsystems are often nobody's
 	// task, so this is the role most likely to notice something with no other home.
 	if err := hs.GrantNotes(reviewer, NotesPerClaim); err != nil {
-		return err
+		return false, err
 	}
 	// The hub preps the terrain so the reviewer never faces a stale tree; on failure it is told
 	// not to trust /workspace. A GlobalProject reviewer gets plain files instead (-> git.ArchiveTree).
@@ -188,9 +200,19 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	// board shows it working, not idle
 	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}, store.ReasonClaimed, "assigned to review "+prID)
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.hn.Say(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
+	msg := MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut)
+	if fired {
+		// Sent here, not from the goroutine below: it must land BEHIND the clear that just discarded
+		// the session, and this path is already blocked on that clear anyway.
+		if sayErr := e.hn.Say(home, reviewer, msg, MailAndPush); sayErr != nil {
+			return false, fmt.Errorf("deliver %s to %s after clearing it: %w", prID, reviewer, sayErr)
+		}
+		e.deps.Notify()
+		return true, nil
+	}
+	go e.hn.Say(home, reviewer, msg, MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
-	return nil
+	return false, nil
 }
 
 // reviewerHome resolves a reviewer's own roster row: its own project first, else GlobalProject's.
@@ -262,23 +284,18 @@ func (e *Engine) reviewDirective(ctx context.Context, project, name string) (str
 		}
 		return DirPreparing, true, nil
 	}
-	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
-	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no
-	// model switch) to run against it.
+	// Claim FIRST — same reason claimNext claims before it prepares: assignReview holds the review
+	// before it clears, so a session discarded mid-way cannot lose the claim with it.
 	req, _ := e.ReviewPrompt(project)
-	if err := e.assignReview(project, id, prID, name, req); err != nil {
-		return "", false, err
-	}
-	pr, _, _ := ps.GetPR(prID)
-	dir := DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project))
-	fired, err := e.compactIfDue(ctx, project, name, dir)
+	fired, err := e.assignReview(ctx, project, id, prID, name, req)
 	if err != nil {
 		return "", false, err
 	}
 	if fired {
 		return DirPreparing, true, nil
 	}
-	return dir, true, nil
+	pr, _, _ := ps.GetPR(prID)
+	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR

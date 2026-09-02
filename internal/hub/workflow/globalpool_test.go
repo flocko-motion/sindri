@@ -132,7 +132,7 @@ func TestAssignReviewResolvesAGlobalReviewersOwnRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.assignReview("repo", rid, "pr-1", "ori", "look again"); err != nil {
+	if _, err := e.assignReview(t.Context(), "repo", rid, "pr-1", "ori", "look again"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -204,7 +204,7 @@ func TestAssignReviewMaterialisesAGlobalReviewersWorkspaceAsPlainFiles(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.assignReview("repo", rid, "pr-1", "ori", "look"); err != nil {
+	if _, err := e.assignReview(t.Context(), "repo", rid, "pr-1", "ori", "look"); err != nil {
 		t.Fatal(err)
 	}
 

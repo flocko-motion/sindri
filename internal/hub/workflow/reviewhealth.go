@@ -69,7 +69,9 @@ func (e *Engine) AssignPendingReviews(project string) {
 			return
 		}
 		req, _ := e.ReviewPrompt(project)
-		if err := e.assignReview(project, id, prID, reviewer, req); err != nil {
+		// The hub's lifetime, not a caller's: this repair tick carries no context of its own, and the
+		// clear this may fire must still end if the hub does.
+		if _, err := e.assignReview(e.lifetime, project, id, prID, reviewer, req); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: assigning %s to %s: %v\n", prID, reviewer, err)
 			return
 		}

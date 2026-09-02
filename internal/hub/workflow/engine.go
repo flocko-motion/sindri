@@ -129,13 +129,19 @@ type Engine struct {
 	pre        preflight           // serialises the reference-move PR checks (-> prcheck.go)
 	runCancels runCancelSet        // run ids killed mid-execution (-> execrun.go)
 	refWarn    refFallbackWarn     // which repo roots have already been warned about an unconfigured reference (-> pr.go)
+	// lifetime is the hub's own, held for the same reason Hub holds it: the engine's FLEET-SIDE work
+	// — steering a session from a port whose signature carries no context (-> RequestReview,
+	// AssignPendingReviews) — has no caller context to inherit, and must still stop when the hub does.
+	// Anything reached from an agent's own request takes that request's context instead.
+	lifetime context.Context
 }
 
-// New builds the workflow engine over the hub's store, its Deps, and the external task sources the
-// composition root wires in — the engine never names them.
-func New(st *store.Store, deps Deps, hn Harness, sources ...tasks.Source) *Engine {
+// New builds the workflow engine over the hub's lifetime, its store, its Deps, and the external task
+// sources the composition root wires in — the engine never names them. The lifetime is a parameter
+// rather than a default so no path can quietly invent a root of its own (-> arch's context guard).
+func New(lifetime context.Context, st *store.Store, deps Deps, hn Harness, sources ...tasks.Source) *Engine {
 	return &Engine{store: st, deps: deps, hn: hn, sit: situation.NewGatherer(st, hn), sources: sources,
-		pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
+		pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}, lifetime: lifetime}
 }
 
 // WithGates installs the submit path's quality gates, chainable alongside New. An engine with

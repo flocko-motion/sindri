@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -256,6 +257,14 @@ func (e *Engine) reject(project, prID, feedback, voice string) error {
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
+	// A rejection is a NEW ROUND on the same task, and a round starts fresh like a claim does: the
+	// reasoning that produced the rejected work is what the feedback is asking to be reconsidered.
+	// e.lifetime because a verdict reaches here through a port carrying no context of its own.
+	if _, clearErr := e.clearForFreshStart(e.lifetime, project, pr.Agent); clearErr != nil {
+		// The feedback still goes out — a worker told nothing would sit on a rejected PR for ever.
+		fmt.Fprintf(os.Stderr, "hub: clearing %s for its next round on %s: %v\n", pr.Agent, pr.ID, clearErr)
+		_ = ps.LogPR(pr.ID, "reject-prepare-failed", fmt.Sprintf("%s starts its round unprepared: %v", pr.Agent, clearErr))
+	}
 	// From whoever ruled: an agent weights feedback by who it is from.
 	_ = e.hn.Say(project, pr.Agent, msg, MailAndPush.From(who))
 	e.deps.Notify()

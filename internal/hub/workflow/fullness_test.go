@@ -48,9 +48,9 @@ func TestPrepareAssignmentSendsNothingAfterAFailedSwitch(t *testing.T) {
 	}
 }
 
-// TestPrepareAssignmentDeliversAfterACompaction: no model switch wanted, so compaction runs instead,
-// and dir follows it. fired must read true.
-func TestPrepareAssignmentDeliversAfterACompaction(t *testing.T) {
+// TestPrepareAssignmentDeliversAfterTheClear: no model switch wanted, so the clear runs instead, and
+// dir follows it. fired must read true.
+func TestPrepareAssignmentDeliversAfterTheClear(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e := newEngine(nil, deps)
 
@@ -59,19 +59,22 @@ func TestPrepareAssignmentDeliversAfterACompaction(t *testing.T) {
 		t.Fatalf("prepareAssignment: %v", err)
 	}
 	if !fired {
-		t.Error("fired = false, want true — compaction is due")
+		t.Error("fired = false, want true — the session holds something to discard")
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin) fired", deps.cleared)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — preparation is the clear, never compaction", deps.compacted)
 	}
 	if len(deps.injectedText) != 1 || deps.injectedText[0] != "you hold td-abc123" {
-		t.Errorf("injectedText = %v, want the claimed directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the claimed directive delivered after the clear", deps.injectedText)
 	}
 }
 
-// TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction: fill past ContextFullFraction is too
-// far gone to summarise, so the clear wins wherever both would apply, and dir follows it.
-func TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction(t *testing.T) {
+// TestPrepareAssignmentClearsAFullSessionToo: a nearly-full session prepares the same way a lightly
+// used one does — the clear — so nothing about fill changes which preparation fires.
+func TestPrepareAssignmentClearsAFullSessionToo(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true, compactThreshold: 75_000}
 	e := newEngine(nil, deps)
 
@@ -80,7 +83,7 @@ func TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction(t *testing.T) 
 		t.Fatalf("prepareAssignment: %v", err)
 	}
 	if !fired {
-		t.Error("fired = false, want true — past ContextFullFraction")
+		t.Error("fired = false, want true — the session holds something to discard")
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
 		t.Errorf("cleared = %v, want exactly one Clear(dvalin) fired", deps.cleared)
@@ -89,14 +92,14 @@ func TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction(t *testing.T) 
 		t.Errorf("injectedText = %v, want the claimed directive delivered once the clear answered", deps.injectedText)
 	}
 	if len(deps.compacted) != 0 {
-		t.Errorf("compacted = %v, want none — the clear pre-empts it", deps.compacted)
+		t.Errorf("compacted = %v, want none — preparation is the clear, never compaction", deps.compacted)
 	}
 }
 
-// TestPrepareAssignmentSkipsBothWhenNeitherApplies: the ordinary case — no tier mismatch, fill
-// under threshold — fires nothing and reports fired=false, so the caller answers with dir directly.
-func TestPrepareAssignmentSkipsBothWhenNeitherApplies(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 1_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+// TestPrepareAssignmentSkipsBothOnAnEmptySession: no tier mismatch and nothing to discard fires
+// nothing and reports fired=false, so the caller answers with dir directly.
+func TestPrepareAssignmentSkipsBothOnAnEmptySession(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 0, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
@@ -106,8 +109,8 @@ func TestPrepareAssignmentSkipsBothWhenNeitherApplies(t *testing.T) {
 	if fired {
 		t.Error("fired = true, want false — nothing is due")
 	}
-	if len(deps.compacted) != 0 || len(deps.modelSet) != 0 {
-		t.Errorf("compacted = %v, modelSet = %v, want neither to have fired", deps.compacted, deps.modelSet)
+	if len(deps.cleared) != 0 || len(deps.modelSet) != 0 {
+		t.Errorf("cleared = %v, modelSet = %v, want neither to have fired", deps.cleared, deps.modelSet)
 	}
 }
 

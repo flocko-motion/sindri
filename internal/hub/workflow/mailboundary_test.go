@@ -151,11 +151,11 @@ func TestMailDefersPastAnArmedClearForAReviewer(t *testing.T) {
 	}
 }
 
-// TestMailDefersPastCompactionOnAClaim: the claim comes first (-> claimNext), so the task is
+// TestMailDefersPastTheClearOnAClaim: the claim comes first (-> claimNext), so the task is
 // already the agent's by the time prepareAssignment fires a due compaction — but the reply for
 // THIS call is DirPreparing, not the claim text, so mail waits for the ask that actually reads it
 // rather than being read into a reply nobody's session treats as the fresh context.
-func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
+func TestMailDefersPastTheClearOnAClaim(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	addUnreadMail(t, ps, "dvalin")
@@ -165,22 +165,22 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if dir != DirPreparing {
-		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the clear it also triggers", dir)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
 		t.Errorf("state.Task = %q, want td-abc123 — claimed even though this ask doesn't say so", st.Task)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired alongside the claim", deps.compacted)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin) fired alongside the claim", deps.cleared)
 	}
 	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
-		t.Errorf("injectedText = %v, want the claimed directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the claimed directive delivered after the clear", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount("dvalin"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
 	}
 
-	// The queued /compact has landed and the agent is now "working" on what it already holds; the
+	// The queued /clear has landed and the agent is now "working" on what it already holds; the
 	// next ask reads the mail that waited it out.
 	deps.ctxTokens = 2_000
 	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
@@ -188,7 +188,7 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if !strings.Contains(dir, "something happened") {
-		t.Errorf("directive = %q, want mail delivered once the compaction has landed", dir)
+		t.Errorf("directive = %q, want mail delivered once the clear has landed", dir)
 	}
 	assertMailRead(t, ps, "dvalin")
 }
@@ -234,7 +234,7 @@ func TestMailDefersPastAModelChange(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	e := New(st, deps, deps)
+	e := New(context.Background(), st, deps, deps)
 	addUnreadMail(t, ps, agent)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
@@ -268,9 +268,9 @@ func TestMailDefersPastAModelChange(t *testing.T) {
 	assertMailRead(t, ps, agent)
 }
 
-// TestMailDefersPastCompactionBetweenSubtasks is TestMailDefersPastCompactionOnAClaim's counterpart
+// TestMailDefersPastTheClearBetweenSubtasks is TestMailDefersPastTheClearOnAClaim's counterpart
 // for a held feature (claimNextSubtask), the other half of the boundary this bug hit in practice.
-func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
+func TestMailDefersPastTheClearBetweenSubtasks(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
 	st, err := store.Open(root + "/s.db")
@@ -303,36 +303,36 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	addUnreadMail(t, ps, agent)
 
 	deps := &stubDeps{root: root, ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(st, deps, deps)
+	e := New(context.Background(), st, deps, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if dir != DirPreparing {
-		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the clear it also triggers", dir)
 	}
 	if held, _ := ps.GetState(agent); held.Task != "td-next" {
 		t.Errorf("state.Task = %q, want td-next — claimed even though this ask doesn't say so", held.Task)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
-		t.Errorf("compacted = %v, want exactly one Compact(%s) fired alongside the claim", deps.compacted, agent)
+	if len(deps.cleared) != 1 || deps.cleared[0] != agent {
+		t.Errorf("cleared = %v, want exactly one Clear(%s) fired alongside the claim", deps.cleared, agent)
 	}
 	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-next") {
-		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the clear", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount(agent); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
 	}
 
-	// The queued /compact has landed; the next ask reads the mail that waited it out.
+	// The queued /clear has landed; the next ask reads the mail that waited it out.
 	deps.ctxTokens = 2_000
 	dir, err = e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if !strings.Contains(dir, "something happened") {
-		t.Errorf("directive = %q, want mail delivered once the compaction has landed", dir)
+		t.Errorf("directive = %q, want mail delivered once the clear has landed", dir)
 	}
 	assertMailRead(t, ps, agent)
 }
@@ -402,9 +402,9 @@ func TestSeveralUnreadMessagesAllServeAndAllMarkRead(t *testing.T) {
 	assertMailRead(t, ps, "dvalin")
 }
 
-// TestMailDefersPastCompactionOnAReviewClaim mirrors the worker case for a reviewer about to be
-// handed a new PR rather than a new task — the same rule, following the same shape.
-func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
+// TestMailDefersPastAClearOnAReviewClaim mirrors the worker case for a reviewer about to be handed a
+// new PR — the same rule, following the same shape, except that a review prepares by CLEARING.
+func TestMailDefersPastAClearOnAReviewClaim(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 	addUnreadMail(t, ps, "rune")
@@ -414,31 +414,32 @@ func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if dir != DirPreparing {
-		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the clear it also triggers", dir)
 	}
 	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
 		t.Errorf("ReviewingPR = %q, want pr-1 — claimed even though this ask doesn't say so", held)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
-		t.Errorf("compacted = %v, want exactly one Compact(rune) fired alongside the claim", deps.compacted)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "rune" {
+		t.Errorf("cleared = %v, want exactly one Clear(rune) fired alongside the claim", deps.cleared)
 	}
 	// Searched rather than counted: assignReview pushes its own "you have a review" note from a
 	// goroutine, so the number of deliveries here is not this test's to fix.
 	if !deliveredContaining(deps, "check the gate") {
-		t.Errorf("injectedText = %v, want the review directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the review directive delivered after the clear", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount("rune"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
 	}
 
-	// The queued /compact has landed; the next ask reads the mail that waited it out.
+	// The clear has landed; the next ask reads the mail that waited it out. A held review is answered
+	// straight from the hold, so nothing prepares twice.
 	deps.ctxTokens = 2_000
 	dir, err = e.AgentDirective(context.Background(), "repo", "rune")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if !strings.Contains(dir, "something happened") {
-		t.Errorf("directive = %q, want mail delivered once the compaction has landed", dir)
+		t.Errorf("directive = %q, want mail delivered once the clear has landed", dir)
 	}
 	assertMailRead(t, ps, "rune")
 }

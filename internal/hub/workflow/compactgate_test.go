@@ -34,12 +34,11 @@ func reviewerWithUnclaimedReview(t *testing.T, deps *stubDeps) (*Engine, *store.
 	return newEngine(st, deps), ps
 }
 
-// TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact: the claim comes
-// first — nothing here returns in the middle for the agent to be asked back from — but once
-// compaction fires, THIS ask answers with DirPreparing, not the claimed directive: the real
-// instruction is delivered separately once the compaction has landed, so the agent is never handed
-// something to act on moments before the compaction that would cut it off.
-func TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
+// TestAClaimClearsThenDeliversTheDirective: the claim comes first — nothing here returns in the
+// middle for the agent to be asked back from — but once the clear fires, THIS ask answers with
+// DirPreparing, not the claimed directive: the real instruction is delivered separately once the
+// clear has landed, so the agent is never handed something to act on moments before the wipe.
+func TestAClaimClearsThenDeliversTheDirective(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
@@ -53,18 +52,21 @@ func TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompac
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
 		t.Errorf("state.Task = %q, want td-abc123 — the claim holds regardless of what this ask answers", st.Task)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin) fired", deps.cleared)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — a claim is never prepared by compaction", deps.compacted)
 	}
 	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
-		t.Errorf("injectedText = %v, want the claimed directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the claimed directive delivered after the clear", deps.injectedText)
 	}
 }
 
-// TestFillUnderTheCompactionThresholdIsHandedWork is the control: an ordinary claim under threshold
-// never fires a compact at all, and the claimed directive answers this ask directly.
-func TestFillUnderTheCompactionThresholdIsHandedWork(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 1_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+// TestAnEmptyWorkerSessionIsHandedWorkDirectly is the control: a session seen to hold nothing has
+// nothing to discard, so the claimed directive answers this ask directly.
+func TestAnEmptyWorkerSessionIsHandedWorkDirectly(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 0, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
@@ -77,8 +79,8 @@ func TestFillUnderTheCompactionThresholdIsHandedWork(t *testing.T) {
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
 		t.Errorf("state.Task = %q, want td-abc123", st.Task)
 	}
-	if len(deps.compacted) != 0 {
-		t.Errorf("compacted = %v, want none — fill is under the threshold", deps.compacted)
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — an empty session has nothing to discard", deps.cleared)
 	}
 }
 
@@ -211,11 +213,11 @@ func TestCompactDueIgnoresAnUnknownWindow(t *testing.T) {
 	}
 }
 
-// TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact: claimNextSubtask follows the same
-// rule claimNext does, for a worker already holding a feature and about to be handed its next
-// subtask — this ask answers with DirPreparing once compaction fires, and the real subtask
-// directive is queued behind /compact instead.
-func TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
+// TestBetweenSubtasksClearsThenDeliversTheDirective: claimNextSubtask follows the same rule
+// claimNext does, for a worker already holding a feature and about to be handed its next subtask —
+// this ask answers with DirPreparing once the clear fires, and the real subtask directive is queued
+// behind /clear instead.
+func TestBetweenSubtasksClearsThenDeliversTheDirective(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
 	st, err := store.Open(root + "/s.db")
@@ -262,18 +264,19 @@ func TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T)
 	if held, _ := ps.GetState(agent); held.Task != "td-next" {
 		t.Errorf("state.Task = %q, want td-next — the claim holds regardless of what this ask answers", held.Task)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
-		t.Errorf("compacted = %v, want exactly one Compact(%s) fired", deps.compacted, agent)
+	if len(deps.cleared) != 1 || deps.cleared[0] != agent {
+		t.Errorf("cleared = %v, want exactly one Clear(%s) fired", deps.cleared, agent)
 	}
 	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-next") {
-		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the compaction", deps.injectedText)
+		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the clear", deps.injectedText)
 	}
 }
 
-// TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact: the same
-// rule, for a reviewer about to be handed a new PR rather than a worker about to be handed a new
-// task.
-func TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
+// TestAReviewerIsClearedNotCompacted is the rule for a reviewer being handed a PR: it is CLEARED,
+// whatever its fill, and never compacted. A review arrives whole — branch, task, requirement all in
+// the directive — so a summary of the previous one is the context worth dropping, not condensing.
+// Fill here is past the compaction threshold, which is exactly what used to fire a /compact instead.
+func TestAReviewerIsClearedNotCompacted(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 
@@ -287,21 +290,25 @@ func TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAft
 	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
 		t.Errorf("ReviewingPR = %q, want pr-1 — the claim holds regardless of what this ask answers", held)
 	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
-		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "rune" {
+		t.Errorf("cleared = %v, want exactly one Clear(rune) fired", deps.cleared)
 	}
-	// The DIRECTIVE, matched against the builder that produced it. Searched rather than indexed, and
-	// never for MsgReview's wording: assignReview pushes that from a goroutine (-> review.go's async
-	// Say), so a needle only it carries asserts on a race, which is what this used to do.
-	if !deliveredContaining(deps, DirReview("pr-1", "td-1", "", "wrk", "")) {
-		t.Errorf("injectedText = %v, want the review directive delivered after the compaction", deps.injectedText)
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — a review is never prepared by compaction", deps.compacted)
+	}
+	// MsgReview's own wording, which sd-d31b94 found racing a goroutine when compactIfDue delivered
+	// DirReview instead. Safe now for the reason the race is gone: a fired preparation sends the note
+	// SYNCHRONOUSLY (-> assignReview), since it has to land behind the clear it just made.
+	if !deliveredContaining(deps, "check the gate") {
+		t.Errorf("injectedText = %v, want the review directive delivered after the clear", deps.injectedText)
 	}
 }
 
-// TestReviewerFillUnderTheCompactionThresholdIsHandedAReview is the control: an ordinary claim under
-// threshold never fires a compact at all.
-func TestReviewerFillUnderTheCompactionThresholdIsHandedAReview(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 1_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+// TestAnEmptyReviewerSessionIsHandedTheReviewDirectly is the one case that skips the clear: a session
+// seen to hold nothing has nothing to discard, and /clear there would leave awaitCleared waiting out
+// its cap for a drop that cannot come (-> SetModel's own guard).
+func TestAnEmptyReviewerSessionIsHandedTheReviewDirectly(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 0, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "rune")
@@ -309,13 +316,34 @@ func TestReviewerFillUnderTheCompactionThresholdIsHandedAReview(t *testing.T) {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if !strings.Contains(dir, "pr-1") {
-		t.Errorf("directive = %q, want the open review claimed", dir)
+		t.Errorf("directive = %q, want the open review claimed and answered directly", dir)
 	}
 	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
 		t.Errorf("ReviewingPR = %q, want pr-1", held)
 	}
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — an empty session has nothing to discard", deps.cleared)
+	}
+}
+
+// TestAPushedReviewClearsToo is the gap balin sat in: the hub hands out an unclaimed row on its own
+// tick (-> AssignPendingReviews), and that route never touched the session at all — so a pooled
+// reviewer carried every diff it had ever read into the next review. Preparation lives in
+// assignReview precisely so this path cannot miss it.
+func TestAPushedReviewClearsToo(t *testing.T) {
+	deps := &stubDeps{alive: true, ctxTokens: 750_000, ctxWindow: 1_000_000, ctxOK: true, compactThreshold: 131_000}
+	e, ps := reviewerWithUnclaimedReview(t, deps)
+
+	e.AssignPendingReviews("repo")
+
+	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
+		t.Fatalf("ReviewingPR = %q, want pr-1 — the hub must hand the unclaimed row over", held)
+	}
+	if len(deps.cleared) != 1 || deps.cleared[0] != "rune" {
+		t.Errorf("cleared = %v, want exactly one Clear(rune) — a pushed review prepares like an asked-for one", deps.cleared)
+	}
 	if len(deps.compacted) != 0 {
-		t.Errorf("compacted = %v, want none — fill is under the threshold", deps.compacted)
+		t.Errorf("compacted = %v, want none", deps.compacted)
 	}
 }
 
