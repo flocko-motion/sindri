@@ -343,11 +343,9 @@ func (e *Engine) gateOnce(ctx context.Context, project, wt, sha string) (report 
 	return gateReport(sha, passed, out), passed
 }
 
-// gateTree checks the run's commit out fresh, for every kind that has one. Never the live worktree it
-// came from: a self-check parks nobody — the hub tells that agent to carry on with something else —
-// so building and testing its tree for minutes would measure a moving target and then file the result
-// under a sha it was never taken on. The reserved checkout costs a `worktree add` against a warm
-// build cache, which is what the ticket's cold-cache worry was about.
+// gateTree checks the run's commit out fresh, never the live worktree it came from: a self-check
+// parks nobody, so building that tree for minutes measures a moving target and files the result
+// under a sha it was never taken on. The cost is a `worktree add` against a warm build cache.
 func (e *Engine) gateTree(project string, r api.Run) (wt string, cleanup func(), err error) {
 	root := e.deps.ProjectRoot(project)
 	if r.Commit == "" {
@@ -544,7 +542,10 @@ func (e *Engine) rejectGate(project string, ps *store.ProjectStore, r api.Run, o
 	}
 	_ = ps.Log(r.Agent, "lint-fail", gateTarget(st))
 	e.deps.Notify()
-	return e.hn.Say(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailAndPush)
+	// MAIL: a gate report is what must be READ, re-readable beside the code and spent when the agent
+	// chooses. Pushed, two pages of console output were typed into a live session and charged to its
+	// context at once. Announced within a sweep anyway (-> NudgeMailWaiting), so nothing waits.
+	return e.hn.Say(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailOnly)
 }
 
 // escalateNoGate stops the agent on the one question it cannot answer. Escalated rather than told:

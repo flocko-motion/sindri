@@ -22,9 +22,9 @@ import (
 // it rewards having seen nothing and lets a long-blocked agent wake with a full purse. A grant per
 // CLAIM ties the right to speak to having been somewhere and looked at something.
 const (
-	// maxNoteLen is the shared delivery cap (-> deliver.go): what a reader has to read is the same cost
-	// whoever they are, so the length rule is not the note channel's own.
-	maxNoteLen = maxMessageLen
+	// maxNoteLen is the user's own cap (-> deliver.go). A note goes to the user by definition, so it
+	// is the one channel where the tight limit always applies.
+	maxNoteLen = maxUserMessageLen
 	// notesPerClaim is workflow's, since the claim paths that grant it live there — named here too so
 	// the four numbers read together (-> workflow.NotesPerClaim).
 	notesPerClaim = workflow.NotesPerClaim

@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -42,7 +43,39 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 		fmt.Fprintln(w, "deadcode: no Go sources here — skipping (not a Go project)")
 		return false, nil
 	}
+	// Where the modules ARE, rather than where a linter would like them. Go's own tooling is happy
+	// with a module anywhere; assuming one at the repo root made this refuse a tree whose Go code
+	// sits in a subdirectory — "directory prefix . does not contain main module" — which is a
+	// layout demand from a linter, not a finding about the code.
+	units, uerr := moduleUnits(".", patterns)
+	if uerr != nil {
+		return false, uerr
+	}
+	if len(units) == 0 {
+		fmt.Fprintln(w, "deadcode: Go sources here, but no go.mod — skipping (nothing defines a module to analyse)")
+		return false, nil
+	}
+	for _, u := range units {
+		f, err := deadcodeIn(u.dir, u.patterns, tags, cap, ig, w)
+		if err != nil {
+			return found, err
+		}
+		found = found || f
+	}
+	return found, nil
+}
+
+// moduleUnit is one module and the patterns to analyse inside it, relative to its own root.
+type moduleUnit struct {
+	dir      string
+	patterns []string
+}
+
+// deadcodeIn runs the analysis inside ONE module. dir is that module's root, and patterns are
+// relative to it — so a module nested anywhere is analysed on its own terms.
+func deadcodeIn(dir string, patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer) (found bool, err error) {
 	cfg := &packages.Config{
+		Dir:        dir,
 		BuildFlags: []string{"-tags=" + tags},
 		Mode:       packages.LoadAllSyntax | packages.NeedModule,
 		Tests:      true,
@@ -288,4 +321,57 @@ func relFilename(filename string) string {
 		return rel
 	}
 	return filename
+}
+
+// moduleUnits maps the requested patterns onto the modules that actually contain them. A module at
+// the repo root is the ordinary case and answers in one unit; otherwise every go.mod in the tree is
+// its own unit, with the patterns rewritten relative to it. Go puts modules where a project wants
+// them, and a linter that assumes one at the top dictates layout instead of reporting on code.
+func moduleUnits(root string, patterns []string) ([]moduleUnit, error) {
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		return []moduleUnit{{dir: root, patterns: patterns}}, nil
+	}
+	var out []moduleUnit
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // an unreadable corner is not evidence either way
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] || d.Name() == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if p := patternsUnder(root, dir, patterns); len(p) > 0 {
+			out = append(out, moduleUnit{dir: dir, patterns: p})
+		}
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].dir < out[j].dir })
+	return out, err
+}
+
+// patternsUnder rewrites the requested patterns relative to a module's own root, keeping only those
+// that fall inside it. "./..." covers every module; "./tools/x/..." reaches only the one holding it,
+// and arrives there as "./..." — the same request, addressed to the module that can answer it.
+func patternsUnder(root, dir string, patterns []string) []string {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return nil
+	}
+	prefix := "./" + filepath.ToSlash(rel) + "/"
+	var out []string
+	for _, p := range patterns {
+		switch {
+		case p == "./...":
+			out = append(out, p)
+		case strings.HasPrefix(p, prefix):
+			out = append(out, "./"+strings.TrimPrefix(p, prefix))
+		}
+	}
+	return out
 }

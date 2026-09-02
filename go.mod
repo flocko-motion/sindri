@@ -1,6 +1,6 @@
 module github.com/flo-at/sindri
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/atotto/clipboard v0.1.4
