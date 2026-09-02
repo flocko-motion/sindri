@@ -25,7 +25,7 @@ func DirMail(msgs []store.Mail) string {
 		fmt.Fprintf(&b, "[hub] %d messages were waiting — reading them is this:\n\n", len(msgs))
 	}
 	for _, m := range msgs {
-		fmt.Fprintf(&b, "— %s from %s:\n%s\n\n", api.MailID(m.ID), dash(m.Sender), strings.TrimRight(m.Body, "\n"))
+		fmt.Fprintf(&b, "— %s from %s:\n%s\n\n", api.MailID(m.ID), MailSender(m), strings.TrimRight(m.Body, "\n"))
 	}
 	b.WriteString("Your actual directive follows.\n\n")
 	return b.String()
@@ -94,3 +94,15 @@ const ReplyReplyToHub = "Not sent: that message came from the hub, which is not 
 	"notification, not something with anyone behind it to read your answer. If the answer needs a " +
 	"human, `sindri escalate \"<what needs deciding>\"` puts the question where they will see it; if it " +
 	"belongs on the work, `sindri comment \"<text>\"` records it on the task."
+
+// MailSender names who a message came from, and says so where the answer is NOBODY. The hub's own
+// mail has no correspondent behind it, which an agent could only discover by drafting a reply and
+// having it refused — jari spent two turns on that, the first cutting its answer to a length limit
+// for a recipient that does not exist. Said at the point of reading instead, before the drafting.
+func MailSender(m store.Mail) string {
+	if m.Sender == "hub" || m.Sender == "" {
+		return "hub (a notification — there is nobody behind it to reply to; `sindri escalate \"<what needs deciding>\"` " +
+			"reaches a human, `sindri comment \"<text>\"` records it on the work)"
+	}
+	return dash(m.Sender)
+}
