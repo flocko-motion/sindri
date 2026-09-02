@@ -290,9 +290,10 @@ func TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAft
 	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
 		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
 	}
-	// Searched rather than counted: assignReview pushes its own "you have a review" note from a
-	// goroutine, so the number of deliveries here is not this test's to fix.
-	if !deliveredContaining(deps, "check the gate") {
+	// The DIRECTIVE, matched against the builder that produced it. Searched rather than indexed, and
+	// never for MsgReview's wording: assignReview pushes that from a goroutine (-> review.go's async
+	// Say), so a needle only it carries asserts on a race, which is what this used to do.
+	if !deliveredContaining(deps, DirReview("pr-1", "td-1", "", "wrk", "")) {
 		t.Errorf("injectedText = %v, want the review directive delivered after the compaction", deps.injectedText)
 	}
 }
