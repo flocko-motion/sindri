@@ -129,6 +129,32 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 	}
 }
 
+// TestTheFinishRuleRidesEveryHandOverOfWork: the brief argues it in full, and a clear erases the
+// brief — so the rule that an agent works through to its ending verb has to ride the directive, the
+// way the tooling block does. Not the planner's: a planner's work IS asking and waiting for answers,
+// and "carry on without stopping" would tell it to interview nobody.
+func TestTheFinishRuleRidesEveryHandOverOfWork(t *testing.T) {
+	for _, s := range []string{
+		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
+		DirWorking("td-1", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
+		DirReview("pr-td-1", "td-1", "a task", "dwalin", ""),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+	} {
+		for _, want := range []string{"without stopping", "sindri escalate"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("hand-over of work missing %q: %q", want, s)
+			}
+		}
+	}
+	if p := MsgPlanAssignment("build the thing", "", "", ""); strings.Contains(p, "without stopping") {
+		t.Errorf("a planner must not be told to carry on without stopping — waiting is its job:\n%s", p)
+	}
+}
+
 // TestToolingBlockReachesEveryRoleThatReceivesWork (sd-4b5a53): one block, in one place, naming
 // every tool an agent has and how to reach it — attached to the hand-over of work rather than the
 // durable brief, since a clear or compaction erases the brief's mention outright while a directive

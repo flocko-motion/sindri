@@ -36,12 +36,14 @@ func MsgWorkAvailable(id string) string {
 	return fmt.Sprintf("[hub] %s is ready for you. Run `sindri` to claim it — someone else may beat you to it, in which case you'll be handed whatever is next.", id)
 }
 
-// MsgStalled prods an agent that holds work but has gone quiet, naming the task and inviting it
-// to say what blocks it — so a genuine blocker surfaces instead of being sat on.
+// MsgStalled prods an agent that holds work but has gone quiet, and offers it the SAME two endings
+// the finish rule states (-> FinishNote) rather than a third: describing a blocker to the user is
+// not one of them, and inviting that is what left agents narrating instead of escalating.
 func MsgStalled(task string, idleFor time.Duration) string {
-	return fmt.Sprintf("[hub] You still hold %s and have been idle for %s. Carry on with it — run `sindri` "+
-		"if you need your directive again. If something blocks you, say what it is rather than waiting: "+
-		"nothing is coming unless you ask.", task, idleFor.Round(time.Minute))
+	return fmt.Sprintf("[hub] You still hold %s and have been idle for %s. Two ways out and no third: "+
+		"finish it, or `sindri escalate \"<what needs deciding>\"` where nothing at all can go on "+
+		"without the user. Run `sindri` for your directive and get back on it.",
+		task, idleFor.Round(time.Minute))
 }
 
 // MsgRetryTurn restarts a turn the API cut off, naming the cause — the agent's own last output is
@@ -306,6 +308,6 @@ func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 		// rather than letting the reviewer assume /workspace holds the change.
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch), ToolingBlock())
+	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s%s%s",
+		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch), FinishNote, ToolingBlock())
 }

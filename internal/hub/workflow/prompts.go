@@ -299,16 +299,16 @@ func FileList(files []string) string {
 func DirWorking(task string, aim, ceiling float64) string {
 	return fmt.Sprintf("Work on task %s. A task is finished by a PULL REQUEST, not by finished code: "+
 		"run `sindri submit \"<summary>\"` and the hub records your branch as a PR and sends it for "+
-		"review. Until you do, %s stays yours — being handed it again means exactly that.%s%s",
-		task, task, CommentBudgetNote(aim, ceiling), ToolingBlock())
+		"review. Until you do, %s stays yours — being handed it again means exactly that.%s%s%s",
+		task, task, FinishNote, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
 // the comments reach it whether or not it saw the rejection message.
 func DirRejected(task, feedback string, round int, aim, ceiling float64) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run "+
-		"`sindri submit \"<summary>\"`:\n\n%s%s%s%s", task, feedback,
-		GeneralizeNote(round), CommentBudgetNote(aim, ceiling), ToolingBlock())
+		"`sindri submit \"<summary>\"`:\n\n%s%s%s%s%s", task, feedback,
+		GeneralizeNote(round), FinishNote, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // GeneralizeNote answers why a PR keeps coming back, and escalates with the count. Silent on the
@@ -348,6 +348,14 @@ var toolingLines = []string{
 		"before calling it (e.g. `ToolSearch(\"select:mcp__gopls__go_diagnostics\")`); already " +
 		"installed, do not install it.",
 }
+
+// FinishNote is the rule the brief argues in full (-> SystemPrompt, "WAITING IS ALWAYS NAMED"),
+// restated on every hand-over: a clear erases the brief, and the ask after a stop is where it lands.
+const FinishNote = "\n\nWork this through to its end without stopping. Nothing on the way there " +
+	"needs anyone's permission, and nobody is waiting to hear what you are about to do next. If one " +
+	"part is blocked, do the rest. Where NOTHING at all can go on without the user, " +
+	"`sindri escalate \"<what needs deciding>\"` puts the question on the record and marks you as " +
+	"waiting on them. Those are the two endings; going quiet is not a third."
 
 // ToolingBlock rides the directive, never the durable brief: a clear or compaction erases the
 // brief's mention outright, while a directive is re-served (-> fireClear) the moment work resumes.
@@ -476,8 +484,8 @@ const DirNoReviews = "No open reviews waiting. Wait — the hub will tell you wh
 // DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
 // nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.
 func DirReview(prID, taskID, title, author, arch string) string {
-	return fmt.Sprintf("Review %s — %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s%s",
-		prID, reviewSubject(taskID, title, author), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer)
+	return fmt.Sprintf("Review %s — %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s%s%s",
+		prID, reviewSubject(taskID, title, author), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer, FinishNote)
 }
 
 // reviewSubject names WHOSE work is under review — "dwalin's work on sd-1234" rather than just
@@ -504,7 +512,7 @@ func DirClaimed(id, title, branch, arch string) string {
 	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the "+
 		"project architecture (in your brief; re-read it at /workspace/%s) — then finish it the only way "+
 		"a task is finished: `sindri submit \"<summary>\"`, which turns your branch into a pull request "+
-		"and sends it for review.%s", id, title, branch, arch, runPointer)
+		"and sends it for review.%s%s", id, title, branch, arch, runPointer, FinishNote)
 }
 
 // runPointer nudges toward the run queue at the one moment worth repeating it: a fresh claim.

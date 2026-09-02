@@ -32,9 +32,10 @@ func stallStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 	return newEngine(st, deps), deps, ps
 }
 
-// TestNudgeStalledNamesTheTask: a stalled agent has lost the thread, so the prod has to say which
-// task it still holds and offer the other honest answer — naming a blocker instead of sitting on it.
-func TestNudgeStalledNamesTheTask(t *testing.T) {
+// TestNudgeStalledNamesTheTaskAndTheTwoWaysOut: a stalled agent has lost the thread, so the prod
+// names the task it still holds and the only two endings it has — finish, or escalate. It used to
+// invite "say what blocks you", which agents took as licence to narrate at the user and wait.
+func TestNudgeStalledNamesTheTaskAndTheTwoWaysOut(t *testing.T) {
 	e, deps, _ := stallStore(t)
 
 	if !e.NudgeStalled("proj", "dvalin", saying("idle"), StallDwell+time.Minute) {
@@ -44,7 +45,7 @@ func TestNudgeStalledNamesTheTask(t *testing.T) {
 		t.Fatalf("expected dvalin to be nudged, got %v", deps.injected)
 	}
 	got := deps.injectedText[0]
-	for _, want := range []string{"td-d9a8c3", "blocks you"} {
+	for _, want := range []string{"td-d9a8c3", "no third", "sindri escalate"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the nudge should mention %q, got:\n%s", want, got)
 		}
