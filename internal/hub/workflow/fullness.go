@@ -6,7 +6,11 @@
 // limits:  the fill facts and firing preparation; the claim itself is the caller's.
 package workflow
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"os"
+)
 
 // ContextFullFraction is how much of its window a worker may fill before a fresh assignment
 // clears it rather than compacting it — a session that far gone is not worth summarizing.
@@ -66,9 +70,18 @@ func (e *Engine) prepareAssignment(ctx context.Context, project, agent, tier, di
 		}
 		return true, nil
 	}
-	cleared, err := e.clearForFreshStart(ctx, project, agent)
-	if err != nil || !cleared {
-		return false, err
+	cleared, clearErr := e.clearForFreshStart(ctx, project, agent)
+	if clearErr != nil {
+		// A clear that never lands must not withhold the work. /clear is typed into a session that is
+		// mid-turn (the agent is inside its own `sindri` call), and awaitCleared gives up after
+		// clearSettleCap — 4 of jari's 5 model switches died there. Handing over a crowded session
+		// beats handing over nothing, and the reason goes on the agent's own record.
+		fmt.Fprintf(os.Stderr, "hub: clearing %s before its next work: %v\n", agent, clearErr)
+		_ = e.store.For(project).Log(agent, "prepare-unprepared", "handed work without a clear: "+clearErr.Error())
+		return false, nil
+	}
+	if !cleared {
+		return false, nil
 	}
 	return true, e.hn.Say(project, agent, dir, PushOnly)
 }

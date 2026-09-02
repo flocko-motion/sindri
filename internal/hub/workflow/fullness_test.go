@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // TestPrepareAssignmentDeliversAfterAModelSwitch: the switch blocks until it has happened, and only
@@ -45,6 +48,28 @@ func TestPrepareAssignmentSendsNothingAfterAFailedSwitch(t *testing.T) {
 	}
 	if len(deps.injectedText) != 0 {
 		t.Errorf("injectedText = %v, want nothing delivered behind a switch that failed", deps.injectedText)
+	}
+}
+
+// TestAFailedClearStillHandsOverTheWork: /clear is typed into a session that is mid-turn, and
+// awaitCleared gives up after clearSettleCap — 4 of jari's 5 model switches died there. A clear that
+// never lands must cost the freshness, never the work, so this reports fired=false and leaves the
+// caller to answer with the directive itself.
+func TestAFailedClearStillHandsOverTheWork(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, clearErr: errors.New("clear timed out")}
+	e := newEngine(st, deps)
+
+	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
+	if err != nil {
+		t.Fatalf("prepareAssignment surfaced the clear failure as its own: %v", err)
+	}
+	if fired {
+		t.Error("fired = true, want false — nothing was prepared, so the caller answers with the directive")
 	}
 }
 
