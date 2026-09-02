@@ -34,7 +34,7 @@ func TestHelpModalShowsBindingsTheFooterHides(t *testing.T) {
 	m := tasksTabWith(api.Task{ID: "td-1", Title: "unheld", Status: "open"})
 	m.w, m.h = 100, 30
 
-	footer := m.contextFooter()
+	footer := m.contextFooter(unshedWidth)
 	if strings.Contains(footer, "unassign") {
 		t.Fatalf("precondition: the footer should hide unassign on an unheld task:\n%s", footer)
 	}
@@ -147,7 +147,7 @@ func TestGlobalFooterAgreesWithTheLocalRowWhileFocused(t *testing.T) {
 	m.reclamp()
 	m.focus = focusItems
 	global := m.globalFooter(500)
-	local := m.contextFooter()
+	local := m.contextFooter(unshedWidth)
 	for _, want := range []string{"j/k item", "g goto", "G bottom", "y copy"} {
 		if !strings.Contains(global, want) {
 			t.Errorf("the global row should read %q under focus, got %q", want, global)
@@ -170,7 +170,7 @@ func TestHelpModalMatchesTheFooterWhileFocused(t *testing.T) {
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "a task", Status: "open"}}}
 	m.reclamp()
 	m.focus = focusItems
-	footer := m.contextFooter()
+	footer := m.contextFooter(unshedWidth)
 	m.onKey(keyHelp)
 	got := strings.Join(m.modalLines(), "\n")
 	for _, r := range rightFocusKeys {
@@ -234,7 +234,7 @@ func TestFooterAndHelpAgreeInEveryFocusState(t *testing.T) {
 			m := newModel(nil, nil, "/r/one")
 			m.tab = tab
 			m.focus = tc.focus
-			footer := m.contextFooter()
+			footer := m.contextFooter(unshedWidth)
 			help := strings.Join(m.helpLines(), "\n")
 			for _, r := range tc.table {
 				if !strings.Contains(footer, r.keys+" "+r.label) {
@@ -314,7 +314,7 @@ func TestRefOnlyBindingsStayOutOfTheFooter(t *testing.T) {
 	for _, tab := range []int{0, 1, 2, 5, 6} { // every scope carrying its own enter/expand row
 		m := newModel(nil, nil, "/r/one")
 		m.tab = tab
-		if local := m.contextFooter(); strings.Contains(local, keyEnter) {
+		if local := m.contextFooter(unshedWidth); strings.Contains(local, keyEnter) {
 			t.Errorf("tab %d: the local footer should not carry enter/expand, got %q", tab, local)
 		}
 		if global := m.globalFooter(500); strings.Contains(global, keyClearFilters) {

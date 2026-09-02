@@ -26,7 +26,7 @@ func TestAgentBindingsHideOnAnOrphanRow(t *testing.T) {
 	if id := m.selID(); id != "sindri-ghost" {
 		t.Fatalf("precondition: cursor should be on the orphan, got %q", id)
 	}
-	footer := m.contextFooter()
+	footer := m.contextFooter(unshedWidth)
 	for _, gone := range []string{"tell: push now", "mail: waits", "attach", "editor"} {
 		if strings.Contains(footer, gone) {
 			t.Errorf("the footer should hide %q on an orphan row, got %q", gone, footer)
@@ -46,7 +46,7 @@ func TestAgentBindingsSurviveOnARosterAgent(t *testing.T) {
 	m.tab = 1
 	m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
 	m.reclamp()
-	footer := m.contextFooter()
+	footer := m.contextFooter(unshedWidth)
 	for _, want := range []string{"tell: push now", "mail: waits", "attach", "editor"} {
 		if !strings.Contains(footer, want) {
 			t.Errorf("the footer should still offer %q on a roster agent, got %q", want, footer)

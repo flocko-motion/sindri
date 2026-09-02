@@ -461,7 +461,7 @@ func TestGAndCapitalGScrollTheFocusedDetailPane(t *testing.T) {
 	}
 	// An implemented-but-unadvertised binding is exactly what detail-pane-scroll-and-keymap-parity
 	// exists to prevent (review round 3).
-	if foot := m.contextFooter(); !strings.Contains(foot, "g/G") {
+	if foot := m.contextFooter(unshedWidth); !strings.Contains(foot, "g/G") {
 		t.Errorf("focusDetail's footer hint should advertise g/G, got %q", foot)
 	}
 }

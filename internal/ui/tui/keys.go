@@ -18,12 +18,10 @@ import (
 // Action-key constants: onKey switches on these and the keymap lists them, so a rebinding is one
 // edit. Compound navigation rows (tab, pane, move) are display-only.
 //
-// Which letters commit is a UX judgement, case by case, not a rule to derive — an earlier version
-// of this comment stated one ("opening a form or picker is navigating") and that is what went
-// wrong (sd-6d0ff2). The one hard invariant: reaching the client on the bare keystroke, no form,
-// no confirm, always commits (-> commitinvariant_test.go). Past that, a form/picker opener can
-// land on either side; the call is recorded on the binding it was made for, not stated here.
-// Committing sits behind the space prefix (keyMenu); M is still merge.
+// Which letters commit is a judgement per binding, recorded there, not a rule derived here — the
+// rule an earlier version stated is what went wrong (sd-6d0ff2). The one invariant: reaching the
+// client on the bare keystroke commits (-> commitinvariant_test.go), and committing sits behind
+// the space prefix (keyMenu).
 const (
 	keyHelp      = "?" // list every hotkey — the current tab's, then global — conditions spelled out
 	keyNew       = "N" // new task / new agent
@@ -105,13 +103,19 @@ type binding struct {
 	// refOnly keeps a binding out of the footer (esc, enter — real dispatcher keys the footer rows
 	// deliberately never carried) while still listing it in the "?" reference.
 	refOnly bool
+	// readout marks a label that shows live state ("filter: active"), not just an action. "?" lists
+	// every binding but cannot say what the filter is SET to, so these are the last to shed.
+	readout bool
 }
 
 // lbl wraps a static label.
 func lbl(s string) func(model) string { return func(model) string { return s } }
 
-// keymap is the single source of truth for the actionable hotkeys shown in the
-// footers. Order here is the order shown.
+// keymap is the single source of truth for the actionable hotkeys shown in the footers. Order here
+// is the order shown, and the order the context row sheds in — last-declared first, `readout`
+// entries last (-> shedTail). Measured at 80/100/120 columns, that one exception was the only gap
+// declaration order left, so it is now a decision rather than the accident it was (sd-6e972c). Row
+// one ranks by hand instead (-> globalShedOrder): one handful, every tab, so the list stays true.
 var keymap = []binding{
 	// Global (first footer row): compound nav rows are display-only. "C-h/C-l", not "C-h/l" — the
 	// trailing bare "l" would misread as the real, different binding tasks: expand a fold uses.
@@ -156,7 +160,7 @@ var keymap = []binding{
 	{keys: keyApprove, label: lbl("approve"), scope: scopeTasks, commits: true, when: model.taskGated, whenText: "while the task is under the gate"},
 	{keys: keyReject, label: lbl("reject"), scope: scopeTasks, commits: true, when: model.taskGated, whenText: "while the task is under the gate"},
 	{keys: keyWhyNext, label: lbl("why next"), scope: scopeTasks},
-	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeTasks, refOnly: true},
 	// Least decisive last on purpose: at a narrow width this is what truncation should eat first,
 	// not the tab's own actions above it (-> idsNeedingUser; Runs/Repos/Meeting have no such notion).
@@ -193,7 +197,7 @@ var keymap = []binding{
 		return "clear context"
 	}, scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	{keys: keyDelete, label: lbl("delete"), scope: scopeAgents, commits: true},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeAgents},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeAgents, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeAgents, refOnly: true},
 	{keys: "[/]", label: lbl("needs-you"), scope: scopeAgents},
 
@@ -214,8 +218,8 @@ var keymap = []binding{
 		whenText: "once it's approved — approve it with A first"},
 	{keys: keyDelete, label: lbl("scrap"), scope: scopePRs, commits: true},
 	{keys: keyWhyNext, label: lbl("why no review"), scope: scopePRs},
-	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopePRs},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs, readout: true},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopePRs, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopePRs, refOnly: true},
 	{keys: "[/]", label: lbl("needs-you"), scope: scopePRs},
 
@@ -227,9 +231,9 @@ var keymap = []binding{
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
 	{keys: keyAttach, label: lbl("attach"), scope: scopeMail, when: mailAttachable, whenText: "while either party is a live agent"},
 	{keys: keyMail, label: lbl("reply"), scope: scopeMail},
-	{keys: keyMailWho, label: func(m model) string { return "who: " + mailWhoLabel(m.mailAgent) }, scope: scopeMail},
-	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeMail},
+	{keys: keyMailWho, label: func(m model) string { return "who: " + mailWhoLabel(m.mailAgent) }, scope: scopeMail, readout: true},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail, readout: true},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeMail, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeMail, refOnly: true},
 	{keys: "[/]", label: lbl("needs-you"), scope: scopeMail},
 
@@ -244,14 +248,21 @@ var keymap = []binding{
 	{keys: keyNew, label: lbl("queue a run"), scope: scopeRuns, commits: true}, // opens a prompt (sd-5e3032)
 	{keys: keyPriority, label: lbl("priority"), scope: scopeRuns},
 	{keys: keyDelete, label: lbl("cancel"), scope: scopeRuns, commits: true},
-	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.runFilter) }, scope: scopeRuns},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeRuns},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.runFilter) }, scope: scopeRuns, readout: true},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeRuns, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeRuns, refOnly: true},
 }
 
-// footerFor renders a scope's plain "key label" hints — no prefix; that is global now (-> globalFooter).
-func (m model) footerFor(scope keyScope) string {
-	var parts []string
+// footerEntry is one context-row entry: the text shown, and whether it is a live-state readout.
+type footerEntry struct {
+	text    string
+	readout bool
+}
+
+// footerEntries is a scope's context row as separate entries — the form shedding needs, so that
+// what the row drops is always a whole binding.
+func (m model) footerEntries(scope keyScope) []footerEntry {
+	var out []footerEntry
 	for _, b := range keymap {
 		if b.scope != scope || b.commits || b.refOnly {
 			continue
@@ -259,9 +270,60 @@ func (m model) footerFor(scope keyScope) string {
 		if b.when != nil && !b.when(m) {
 			continue
 		}
-		parts = append(parts, b.keys+" "+b.label(m))
+		out = append(out, footerEntry{text: b.keys + " " + b.label(m), readout: b.readout})
+	}
+	return out
+}
+
+// footerFor renders a scope's plain "key label" hints in FULL — no prefix (that is global now,
+// -> globalFooter) and unshed. contextFooter is what a real width shows.
+func (m model) footerFor(scope keyScope) string {
+	var parts []string
+	for _, e := range m.footerEntries(scope) {
+		parts = append(parts, e.text)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// shedTail fits the context row to width by dropping WHOLE entries, marked "…" — last-declared
+// first, readouts last (-> keymap). Whole, because padTrunc cuts mid-word: at 80 columns the Tasks
+// row ended "/ s…", a key beside half a label. Row one obeys the same rule (-> shedMiddle).
+func shedTail(entries []footerEntry, width int) string {
+	join := func(kept []footerEntry, shed bool) string {
+		parts := make([]string, 0, len(kept)+1)
+		for _, e := range kept {
+			parts = append(parts, e.text)
+		}
+		if shed {
+			parts = append(parts, "…")
+		}
+		return strings.Join(parts, " · ")
+	}
+	if line := join(entries, false); ansi.StringWidth(line) <= width {
+		return line
+	}
+	var order []int
+	for _, readouts := range []bool{false, true} {
+		for i := len(entries) - 1; i >= 0; i-- {
+			if entries[i].readout == readouts {
+				order = append(order, i)
+			}
+		}
+	}
+	gone := map[int]bool{}
+	for _, i := range order {
+		gone[i] = true
+		var kept []footerEntry
+		for j, e := range entries {
+			if !gone[j] {
+				kept = append(kept, e)
+			}
+		}
+		if line := join(kept, true); ansi.StringWidth(line) <= width {
+			return line
+		}
+	}
+	return join(nil, true) // narrower than one entry plus its marker: all the row can honestly say
 }
 
 // globalFooter is the first footer row: "?" leading, the prefix trailing, both pinned since each

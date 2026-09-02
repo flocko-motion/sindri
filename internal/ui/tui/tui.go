@@ -497,7 +497,7 @@ func (m model) View() string {
 		if m.flash != "" {
 			global = m.flash
 		}
-		foot = footer(global, m.contextFooter(), m.w)
+		foot = footer(global, m.contextFooter(m.w), m.w)
 	}
 	return strings.Join([]string{top, body, foot}, "\n")
 }

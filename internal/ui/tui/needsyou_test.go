@@ -351,9 +351,9 @@ func TestBracketsNoLongerSwitchTabs(t *testing.T) {
 
 // TestFooterRowsStayWithinBudget pins each tab's context-row length as of this task's needs-you
 // addition: the two footer rows are a fixed, scarce resource (the parent epic sd-a6e884 names
-// them), and any silent growth here is a silent truncation of "space actions" — the entry
-// footerFor always appends last — at whatever width used to show the row in full (review round 3).
-// Bumping a ceiling is a deliberate budget call a future change should make on purpose.
+// them), and growth here costs entries off the end of the row at whatever width used to show it in
+// full (review round 3). Since sd-6e972c the loss is visible — whole entries, marked "…" — but it
+// is still a loss. Bumping a ceiling is a deliberate budget call a future change should make on purpose.
 func TestFooterRowsStayWithinBudget(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
 	for _, tc := range []struct {

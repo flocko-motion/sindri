@@ -2,10 +2,12 @@ package tui
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 )
@@ -76,7 +78,7 @@ func TestScopeToggleWorksOnRunsAndMail(t *testing.T) {
 func TestRunsScopeLabelDoesNotClaimNeedsYou(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
 	m.tab, m.scopeRepo = 5, true
-	footer := m.contextFooter()
+	footer := m.contextFooter(unshedWidth)
 	if strings.Contains(footer, "needs-you") {
 		t.Errorf("Runs scope label should not claim needs-you, got %q", footer)
 	}
@@ -490,6 +492,10 @@ func menuHas(m model, want string) bool {
 	return strings.Contains(menuText(m), want)
 }
 
+// unshedWidth is wider than any footer row, so a test asking "is this binding advertised?" gets the
+// whole row. What a REAL width keeps is a separate question, pinned by TestTheContextRowShedsWholeEntries.
+const unshedWidth = 1000
+
 // footerOf renders one scope's footer for assertions — the string the user actually reads, and
 // the only place a binding is advertised.
 func footerOf(t *testing.T, scope keyScope) string {
@@ -625,5 +631,68 @@ func TestStatsLinesReportTheReasonNotAZero(t *testing.T) {
 	// An empty fleet must say it is empty rather than print a bare header.
 	if empty := strings.Join(statsLines(api.StatsReport{Engine: "podman"}), "\n"); !strings.Contains(empty, "no running agents") {
 		t.Errorf("an empty report says nothing:\n%s", empty)
+	}
+}
+
+// TestTheContextRowShedsWholeEntries pins what a narrow terminal keeps, which used to be an
+// accident of keymap's array order (sd-6e972c). Two things are pinned: the row never shows a
+// fragment of a binding, and the live filter/scope readout outlasts the ordinary actions — "?"
+// lists every binding but cannot say what the filter is currently SET to.
+func TestTheContextRowShedsWholeEntries(t *testing.T) {
+	// Through contextFooter, not shedTail: what matters is that the row the user SEES is the shed
+	// one. Asking shedTail directly leaves contextFooter free to go back to cutting mid-word.
+	shed := 0
+	for tab := 0; tab < len(tuiSections); tab++ {
+		m := newModel(nil, nil, "/r/one")
+		m.tab = tab
+		name := tuiSections[tab].Title
+		entries := m.footerEntries(tabScope(tab))
+		for _, w := range []int{80, 100, 120} {
+			got := m.contextFooter(w)
+			if strings.Contains(got, "…") {
+				shed++
+			}
+			if ansi.StringWidth(got) > w {
+				t.Errorf("%s at %d cols is %d wide: %q", name, w, ansi.StringWidth(got), got)
+			}
+			for _, part := range strings.Split(got, " · ") {
+				if part == "…" {
+					continue
+				}
+				if !slices.ContainsFunc(entries, func(e footerEntry) bool { return e.text == part }) {
+					t.Errorf("%s at %d cols shows %q, which is no whole binding: %q", name, w, part, got)
+				}
+			}
+			// A readout survives as long as any ordinary action does, and past the point one is dropped.
+			if strings.Contains(got, "…") {
+				for _, e := range entries {
+					if e.readout && !strings.Contains(got, e.text) {
+						t.Errorf("%s at %d cols shed the readout %q while still showing actions: %q", name, w, e.text, got)
+					}
+				}
+			}
+		}
+	}
+	// A floor, so a future trim of the rows cannot leave this passing without shedding anything.
+	if shed == 0 {
+		t.Error("no row shed at any of 80/100/120 — this test is checking nothing")
+	}
+}
+
+// TestTheTasksRowKeepsItsFilterAtEightyColumns is the measurement this decision came from, kept as
+// a test: at 80 columns the Tasks row is the one that overflows badly, and before the fix it ended
+// mid-word in "/ s…" with the filter gone — so a filtered list looked like an empty backlog.
+func TestTheTasksRowKeepsItsFilterAtEightyColumns(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 0
+	got := m.contextFooter(80)
+	if !strings.Contains(got, "f filter: active") {
+		t.Errorf("the filter readout must survive 80 columns, got %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("a shed row must say so, got %q", got)
+	}
+	if strings.Contains(got, "[/] needs-you") {
+		t.Errorf("the last-declared entry should be the first to go, got %q", got)
 	}
 }
