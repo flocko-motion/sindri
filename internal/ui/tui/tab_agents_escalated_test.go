@@ -32,35 +32,44 @@ func TestTheEscalatedQuestionIsReadableInTheDetail(t *testing.T) {
 	}
 }
 
-// TestTheEscalationLineReleasesTheAgent: the user's own clear, reached where the question is read
-// rather than through a hotkey of its own — it only means anything on an escalated agent, and this is
-// the one place such an agent is looked at. ENTER opens a form rather than committing, because what
-// the agent stopped for is a QUESTION and the release is where its answer belongs.
-func TestTheEscalationLineReleasesTheAgent(t *testing.T) {
+// TestTheEscalationLineOnlyReads: the question is DETAIL, and releasing the agent is an ACTION, so
+// the row that shows the question carries no release of its own. It used to, which put one of the
+// tab's actions somewhere none of the others are — reachable only by focusing the pane and finding
+// the row (-> keyResume, which is where it lives now).
+func TestTheEscalationLineOnlyReads(t *testing.T) {
 	m := escalatedModel("keep both?")
-	var esc metaItem
-	for _, it := range m.agentItems() {
+	for _, it := range m.agentActionable() {
 		if strings.HasPrefix(it.text, "escalated:") {
-			esc = it
+			t.Errorf("the escalation line is actionable in the detail: kind=%q value=%q", it.kind, it.value)
 		}
 	}
-	if esc.kind != "resume" || esc.value != "dvalin" {
-		t.Fatalf("the escalation line should be actionable as a resume, got kind=%q value=%q", esc.kind, esc.value)
+}
+
+// TestTheMenuActionReleasesTheAgent: with the other agent actions, behind the space prefix like every
+// other committing one, and a FORM rather than a commit — what the agent stopped for is a question,
+// and the release is where its answer belongs.
+func TestTheMenuActionReleasesTheAgent(t *testing.T) {
+	m := escalatedModel("keep both?")
+	m.onKey(keyResume)
+	if m.form.active {
+		t.Fatal("the bare keystroke committed; it belongs behind the prefix")
 	}
-	for i, it := range m.agentActionable() {
-		if it.kind == "resume" {
-			m.focus, m.rightCursor = focusItems, i
-		}
-	}
-	if m.focus != focusItems {
-		t.Fatal("the escalation line is not reachable by the right-column cursor")
-	}
-	m.onKey("enter")
+	m.onKey(keyMenu)
+	m.onKey(keyResume)
 	if !m.form.active || !strings.Contains(m.form.title, "dvalin") {
-		t.Errorf("ENTER should open the resume form, got %+v", m.form)
+		t.Fatalf("%q after the prefix should open the resume form, got %+v", keyResume, m.form)
 	}
 	if len(m.form.fields) != 1 {
 		t.Errorf("the form carries the answer to send with the release, got %d field(s)", len(m.form.fields))
+	}
+	// And the menu never offers it where there is no question to answer (-> agentEscalated), so the
+	// letter reaches nothing even through the prefix.
+	quiet := escalatedModel("")
+	quiet.state.Agents[0].Status = "working"
+	quiet.onKey(keyMenu)
+	quiet.onKey(keyResume)
+	if quiet.form.active {
+		t.Error("an agent with no escalation was offered a release")
 	}
 }
 

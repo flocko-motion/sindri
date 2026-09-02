@@ -25,13 +25,13 @@ var dispatchedKeys = map[int][]string{
 		keyOptions, keyDelete, keyPriority, keyUnassign, keyWhyNext, keyClose, keyReject,
 		keyApprove, keyEnter, "]", "["},
 	1: {keyNew, keyTell, keyComment, keyAttach, keyEdit, keyOpen, keyStartS, keyOptions, keyStats,
-		keyBrief, keyReject, keyRetire, keyClose, keyDelete, keyScopeTog, keyMerge, keyEnter, "]", "["},
+		keyBrief, keyReject, keyRetire, keyResume, keyClose, keyDelete, keyScopeTog, keyMerge, keyEnter, "]", "["},
 	2: {keyVerify, keyEdit, keyOpen, keyAttach, keyTell, keyLint, keyApprove, keyReject, keyReview,
 		keyMerge, keyDelete, keyFilter, keyScopeTog, keyWhyNext, keyEnter, "]", "["},
 	3: {keyDelete, keyColor, keyEnter},
 	4: {keyNew, keyClose, keyReject, keyApprove, keyEnter},
 	5: {keyNew, keyPriority, keyDelete, keyFilter, keyScopeTog, keyEnter},
-	6: {keyMailWho, keyComment, keyAttach, keyFilter, keyScopeTog, keyEnter, "]", "["},
+	6: {keyMailWho, keyMarkRead, keyComment, keyAttach, keyFilter, keyScopeTog, keyEnter, "]", "["},
 }
 
 // keymapHas reports whether some binding in scope or scopeGlobal dispatches on key k — the same
@@ -134,10 +134,12 @@ var dispatchGates = map[gateKey]func(model) bool{
 	{1, keyReject}:    agentSelected,
 	{1, keyRetire}:    agentSelected,
 	{1, keyClearCtx}:  agentSelected,
+	{1, keyResume}:    agentEscalated,
 	{2, keyApprove}:   prDecidable,
 	{2, keyMerge}:     model.selPRApproved,
 	{2, keyTell}:      prShowsLinkedTask,
 	{6, keyAttach}:    mailAttachable,
+	{6, keyMarkRead}:  mailUnreadForUser,
 }
 
 // TestDispatchGatesMatchTheirKeymapRow catches a row whose `when` disagrees with what onKey

@@ -40,8 +40,11 @@ const (
 	keyMilestone = "M" // capture an agent's container branch as a PR — confirms, then commits
 	keyRebuild   = "B" // reBuild the agent image and relaunch — confirms, then commits
 	keyRetire    = "X" // wind an agent down: no new work, on the keystroke. R is rebase here, S stops it
-	keyStats     = "m" // an agent's memory against its limit (a view)
-	keyTell      = "t" // tell an agent: PUSH, interrupts now / show a PR's task
+	// Answer what an escalated agent stopped on, which is what releasing it IS (-> openResumeForm).
+	// A approves on Tasks, PRs and Chat; Agents rule on nothing, so the letter is free here.
+	keyResume = "A"
+	keyStats  = "m" // an agent's memory against its limit (a view)
+	keyTell   = "t" // tell an agent: PUSH, interrupts now / show a PR's task
 	// Mail an agent: it waits to be read instead of interrupting, so the user picks the path at the
 	// keyboard. Shares "i" with comment — both open a prompt, and neither commits on the keystroke.
 	keyMail     = "i" // agents: mail (inbox) an agent — opens a prompt
@@ -63,7 +66,10 @@ const (
 	// Mail: narrow the list to the selected message's recipient — "who was told this?", the question
 	// the tab is opened with. Its own letter because `a` attaches and only attaches, on every tab.
 	keyMailWho = "w"
-	keyMenu    = " " // the prefix: opens the menu of committing actions for the selected row
+	// Mail: retire the whole backlog addressed to YOU. R rejects on Tasks and PRs and rebases on
+	// Agents; Mail rules on nothing, so the letter is free here.
+	keyMarkRead = "R"
+	keyMenu     = " " // the prefix: opens the menu of committing actions for the selected row
 	// keyMenuShown is how the prefix reads in a footer: a bare space would render as a gap, and a
 	// gap advertises nothing.
 	keyMenuShown = "space"
@@ -190,6 +196,8 @@ var keymap = []binding{
 		}
 		return "retire"
 	}, scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyResume, label: lbl("answer: resumes it"), scope: scopeAgents, commits: true,
+		when: agentEscalated, whenText: "while it is escalated"},
 	{keys: keyClearCtx, label: func(m model) string {
 		if a, ok := m.selAgent(); ok && a.ClearArmed {
 			return "cancel clear"
@@ -235,6 +243,8 @@ var keymap = []binding{
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail, readout: true},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeMail, readout: true},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeMail, refOnly: true},
+	{keys: keyMarkRead, label: lbl("mark yours read"), scope: scopeMail, commits: true,
+		when: mailUnreadForUser, whenText: "while anything of yours is unread"},
 	{keys: "[/]", label: lbl("needs-you"), scope: scopeMail},
 
 	// Chat.

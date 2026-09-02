@@ -276,6 +276,20 @@ func (h *Hub) MarkMailReadForUser(id int64) error {
 	return nil
 }
 
+// MarkAllUserMailRead retires the user's whole unread backlog at once, and returns how many. Same
+// scope guarantee as the single-message act: an AGENT's unread mail is what it has yet to be told,
+// so no front-end gesture may retire it (-> MarkMailReadForUser).
+func (h *Hub) MarkAllUserMailRead() (int, error) {
+	n, err := h.store.MarkAllUserMailRead()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		h.notify()
+	}
+	return n, nil
+}
+
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on
 // the user — resolved against the board they describe. A front-end renders what it finds here, so
 // a board that left this out would silently drop every marker.

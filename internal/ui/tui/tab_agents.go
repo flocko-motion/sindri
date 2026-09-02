@@ -388,14 +388,10 @@ func (m model) agentItems() []metaItem {
 	}
 	// The question an escalated agent stopped on, beside the status word that says it is. Readable
 	// here on purpose: several escalations can be triaged before deciding which to sit down with,
-	// which attaching to each pane in turn does not allow. ⏎ clears it — the user's own release,
-	// for an agent that cannot do it itself.
+	// which attaching to each pane in turn does not allow. READ-ONLY, though: releasing the agent is
+	// an action, so it lives with the other agent actions in the menu (keyResume), not on this row.
 	if a.Escalation != "" {
-		items = append(items, metaItem{
-			text:  "escalated: " + a.Escalation + dimStyle.Render("  (⏎ resume)"),
-			kind:  "resume",
-			value: a.Name,
-		})
+		items = append(items, metaItem{text: "escalated: " + a.Escalation})
 	}
 	items = append(items,
 		taskIt, featIt, prIt,

@@ -72,4 +72,9 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, okMsg{"marked read"}, h.MarkMailReadForUser(id))
 	})
+	// The same act over the whole backlog, for a Mail tab read down to nothing but the marker.
+	mux.HandleFunc("POST /mail/mark-all-read", func(w http.ResponseWriter, r *http.Request) {
+		n, err := h.MarkAllUserMailRead()
+		writeJSON(w, okMsg{fmt.Sprintf("marked %d read", n)}, err)
+	})
 }

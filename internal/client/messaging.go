@@ -45,3 +45,9 @@ func (c *HTTP) MailBody(id int64) (api.Mail, error) {
 func (c *HTTP) MarkMailRead(id int64) error {
 	return c.post("/mail/mark-read", api.TellReq{Name: fmt.Sprint(id), Source: api.SenderUser})
 }
+
+// MarkAllMailRead retires every message waiting for the user. The hub holds the same scope rule as
+// the single-message call: an agent's own unread mail is untouched whoever asks.
+func (c *HTTP) MarkAllMailRead() error {
+	return c.post("/mail/mark-all-read", api.TellReq{Source: api.SenderUser})
+}

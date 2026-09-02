@@ -179,6 +179,50 @@ func (p *ProjectStore) UnreadMailCount(agent string) (int, error) {
 	return n, nil
 }
 
+// MarkAllUserMailRead retires every unread message addressed to the USER, fleet-wide, and returns
+// how many. Ids collected inside the transaction, as MarkMailAnnounced does, so the lifecycle rows
+// (-> api.Mail.History) describe exactly what the UPDATE touched.
+func (s *Store) MarkAllUserMailRead() (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("mark all user mail read: %w", err)
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(
+		`SELECT project, id FROM mail WHERE agent=? AND read_at=''`, api.SenderUser)
+	if err != nil {
+		return 0, fmt.Errorf("mark all user mail read: %w", err)
+	}
+	type ref struct {
+		project string
+		id      int64
+	}
+	var refs []ref
+	for rows.Next() {
+		var r ref
+		if err := rows.Scan(&r.project, &r.id); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("mark all user mail read: %w", err)
+		}
+		refs = append(refs, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("mark all user mail read: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE mail SET read_at=? WHERE agent=? AND read_at=''`,
+		time.Now().UTC().Format(time.RFC3339), api.SenderUser); err != nil {
+		return 0, fmt.Errorf("mark all user mail read: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("mark all user mail read: %w", err)
+	}
+	for _, r := range refs {
+		_ = s.For(r.project).LogMail(r.id, MailRead, "")
+	}
+	return len(refs), nil
+}
+
 // UnreadMailByAgent is unread mail per project and agent, in one query for the whole fleet — the
 // board reads it per row, and a query per agent would be paid per render (-> ActiveReviewers).
 func (s *Store) UnreadMailByAgent() (map[string]map[string]int, error) {
