@@ -101,13 +101,14 @@ func (h *Hub) sendMail(c registry.Caller, to, msg string, out io.Writer) (int, e
 		fmt.Fprintln(out, workflow.ReplyMailNoMessage(to))
 		return 2, nil
 	}
-	if n := len([]rune(msg)); n > maxMessageLen {
-		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, maxMessageLen))
-		return 1, nil
-	}
 	project, name, err := h.resolveRecipient(to)
 	if err != nil {
 		fmt.Fprintf(out, "%v\n", err)
+		return 1, nil
+	}
+	// After resolving, because the limit is the RECIPIENT's: only the user has one (-> tooLongFor).
+	if n, limit, over := tooLongFor(name, msg); over {
+		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, limit))
 		return 1, nil
 	}
 	if project == c.Project && name == c.Agent {
@@ -176,10 +177,6 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		fmt.Fprintln(out, workflow.ReplyReplyUsage)
 		return 2, nil
 	}
-	if n := len([]rune(msg)); n > maxMessageLen {
-		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, maxMessageLen))
-		return 1, nil
-	}
 	original, ok, merr := h.store.MailByID(id)
 	if merr != nil {
 		return 1, merr
@@ -192,6 +189,11 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 	}
 	if original.Sender == "hub" || original.Sender == "" {
 		fmt.Fprintln(out, workflow.ReplyReplyToHub)
+		return 1, nil
+	}
+	// Judged against WHO reads it, so it waits until the sender is known (-> tooLongFor).
+	if n, limit, over := tooLongFor(original.Sender, msg); over {
+		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, limit))
 		return 1, nil
 	}
 	project, name := c.Project, original.Sender

@@ -99,17 +99,19 @@ func TestAnUnknownRecipientIsRefused(t *testing.T) {
 	}
 }
 
-// TestAgentMailIsCappedButNotBudgeted: the length cap is shared with the note channel because the
-// reason is shared — it costs a reader. The per-claim grant and the fleet ceiling are NOT: those
-// protect the user's attention, which this traffic does not consume.
-func TestAgentMailIsCappedButNotBudgeted(t *testing.T) {
+// TestAgentMailIsNeitherCappedNorBudgeted: the length cap belongs to the RECIPIENT, and only the
+// user has one. An agent reading is a model, which affords length a person will not — and one limit
+// for everyone was costing the messages worth sending, since a rejection's feedback and a gate
+// report do not fit in 300 characters. The per-claim grant and the fleet ceiling stay off this
+// channel for their own reason: those protect the user's attention, which this traffic never spends.
+func TestAgentMailIsNeitherCappedNorBudgeted(t *testing.T) {
 	h := twoRepos(t)
-	long := strings.Repeat("x", maxMessageLen+1)
-	if out, code := execAs(t, h, "dvalin", "mail", "galar", long); code == 0 {
-		t.Errorf("an over-length message must be refused: %s", out)
+	long := strings.Repeat("x", maxUserMessageLen*4)
+	if out, code := execAs(t, h, "dvalin", "mail", "galar", long); code != 0 {
+		t.Errorf("mail to an agent carries its length (%d): %s", code, out)
 	}
-	if all, _ := h.store.AllMail(0); len(all) != 0 {
-		t.Errorf("nothing stored, least of all a truncated version: %+v", all)
+	if all, _ := h.store.AllMail(0); len(all) != 1 || len([]rune(all[0].Body)) < maxUserMessageLen {
+		t.Errorf("it should be stored whole, never truncated: %+v", all)
 	}
 	// No grant is consulted: dvalin has claimed nothing, and can still mail an agent as often as it
 	// has something to say.

@@ -16,9 +16,21 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// maxMessageLen is the longest message an agent may send anyone — one limit, since brevity serves the
-// reader either way. REFUSED over-length, never truncated: a silent cut teaches nothing.
-const maxMessageLen = 300
+// maxUserMessageLen is the longest message an agent may send THE USER. Short on purpose: a person
+// reads it on a screen, and the cap is what makes an agent cut the preamble and say the thing.
+// REFUSED over-length, never truncated: a silent cut teaches nothing.
+const maxUserMessageLen = 300
+
+// tooLongFor reports whether msg is more than recipient should be sent. ONLY the user has a limit:
+// an agent reading is a model, and one cap for everyone refused the messages worth sending — a
+// rejection's feedback does not fit in 300 characters.
+func tooLongFor(recipient, msg string) (n, limit int, over bool) {
+	if recipient != api.SenderUser {
+		return 0, 0, false
+	}
+	n = len([]rune(msg))
+	return n, maxUserMessageLen, n > maxUserMessageLen
+}
 
 // senderFor is who a message is from: what the sender stated, else the hub in its own voice — which is
 // what an unattributed hub message IS, rather than a value to guess at.
@@ -102,8 +114,8 @@ func (h *Hub) ReplyToMail(id int64, msg string) error {
 	if original.Sender == "hub" || original.Sender == "" {
 		return fmt.Errorf("message %d came from the hub, which has nobody behind it to read a reply", id)
 	}
-	if n := len([]rune(msg)); n > maxMessageLen {
-		return fmt.Errorf("that reply is %d characters and the limit is %d — the cost is the agent's context", n, maxMessageLen)
+	if n, limit, over := tooLongFor(original.Sender, msg); over {
+		return fmt.Errorf("that reply is %d characters and the limit is %d — the cost is the user's attention", n, limit)
 	}
 	// The sender is stored qualified (repo/agent) where it came from another repo, so resolve it the
 	// same way an agent's reply does rather than assuming the reading repo.
