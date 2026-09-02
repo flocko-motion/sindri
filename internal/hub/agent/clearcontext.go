@@ -87,11 +87,6 @@ func (s *Service) FireArmedClears(ctx context.Context, project string) {
 			continue
 		}
 		if err := s.Clear(ctx, project, a.Name); err != nil {
-			// The arming is SPENT by Clear, so a failure here would otherwise leave the agent
-			// un-cleared with nothing left to fire again. Put back, and said on the agent's own record
-			// rather than only on the hub's stderr, where nobody looking at the agent would find it.
-			_ = s.setArmed(project, a.Name, true)
-			_ = s.store.For(project).Log(a.Name, "clear-failed", err.Error()+" — still armed, retried at the next boundary")
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 			continue
 		}
@@ -102,10 +97,6 @@ func (s *Service) FireArmedClears(ctx context.Context, project string) {
 // Clear sends /clear into name's live session and blocks until it takes effect or times out. Whether
 // this is a safe moment to discard the session is the caller's (-> AtLeafBoundary); a caller that has
 // just claimed work for the agent is inside its own assignment and asks no such question.
-// interruptSettle is how long the ESC is given to end the turn before the clear is typed. Short:
-// this is a keystroke reaching a prompt, not work finishing.
-const interruptSettle = 2 * time.Second
-
 func (s *Service) Clear(ctx context.Context, project, name string) error {
 	ps := s.store.For(project)
 	if !s.deps.AgentUp(project, name) {
@@ -113,20 +104,6 @@ func (s *Service) Clear(ctx context.Context, project, name string) error {
 	}
 	if err := s.setArmed(project, name, false); err != nil {
 		return err
-	}
-	// INTERRUPTED FIRST. A /clear typed into a running turn is QUEUED, and cannot execute until that
-	// turn ends — so a clear issued at a busy agent waited out its whole cap and then reported a
-	// timeout, every time. ESC ends the turn, so the clear that follows runs immediately.
-	//
-	// Safe by construction rather than by luck: the only reason to clear is to discard what the
-	// session holds, so cutting off the work in flight is what was being asked for anyway.
-	if err := s.Interrupt(ctx, project, name); err != nil {
-		return fmt.Errorf("could not interrupt %q before clearing: %w", name, err)
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(interruptSettle): // the turn has to end before the prompt will take input
 	}
 	before, _, _, _ := s.ContextUsage(project, name)
 	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
