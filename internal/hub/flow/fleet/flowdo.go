@@ -101,7 +101,7 @@ func (e *Engine) doClear(ctx context.Context, w flow.World) (flow.Outcome, error
 		_ = e.Store.For(w.Project).Log(w.Name, "clear-unconfirmed", err.Error())
 		return act.Failed, nil
 	}
-	return act.Done, e.Harness.Say(w.Project, w.Name, prompts.MsgKickoff, mail.PushOnly)
+	return act.Done, e.Harness.Say(w.Project, w.Name, e.Kickoff(w.Project, w.Name), mail.PushOnly)
 }
 
 // doRetier switches the model under the agent for the tier of the work coming. The switch clears the

@@ -40,16 +40,24 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	return preamble + e.prAct().RebaseNotice(project, name) + dir, nil
 }
 
-// plannerDirective answers a planner from its phase alone — the backlog never enters it, since a
-// planner's work arrives as a conversation. Shared with Kickoff, which serves this text directly.
-func plannerDirective(st store.AgentState) string {
-	switch st.Phase {
-	case "submitted":
-		return prompts.DirSubmitted
-	case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
-		return prompts.DirPlanning
+// standingDirective answers a role the hub holds no work for, from its phase alone — the backlog
+// never enters either, since a planner's work arrives as a conversation and a coauthor's arrives as
+// the user typing. ok is false for a role whose next job the hub does hold, and whose answer
+// therefore has to be fetched. Shared with Kickoff, which serves this text directly.
+func standingDirective(role string, st store.AgentState) (dir string, ok bool) {
+	switch role {
+	case "coauthor":
+		return prompts.DirCoauthor, true
+	case "planner":
+		switch st.Phase {
+		case "submitted":
+			return prompts.DirSubmitted, true
+		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
+			return prompts.DirPlanning, true
+		}
+		return prompts.DirPlanner, true
 	}
-	return prompts.DirPlanner
+	return "", false
 }
 
 // directive is the no-arg `sindri` answer: where the agent stands, in its own words, and what it may

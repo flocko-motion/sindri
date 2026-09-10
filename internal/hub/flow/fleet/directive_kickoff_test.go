@@ -46,9 +46,28 @@ func TestPlannerKickoffCarriesItsDirective(t *testing.T) {
 	}
 }
 
+// TestCoauthorKickoffCarriesItsDirective: the hub holds nothing for a coauthor at all — its work is
+// whatever the user types — so a fresh session sent to `sindri` asks for an answer nobody wrote.
+func TestCoauthorKickoffCarriesItsDirective(t *testing.T) {
+	e, c, ps := plannerIn(t, "idle")
+	if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: "coauthor"}); err != nil {
+		t.Fatal(err)
+	}
+	k := e.Kickoff(c.Project, c.Agent)
+	if !strings.Contains(k, prompts.DirCoauthor) {
+		t.Errorf("the kickoff should carry the coauthor's own directive: %q", k)
+	}
+	if strings.Contains(k, "Run `sindri`") {
+		t.Errorf("with nothing to ask for, the kickoff must not ask for a call: %q", k)
+	}
+	if !strings.Contains(k, "COAUTHOR") {
+		t.Errorf("the kickoff should name the role it is serving: %q", k)
+	}
+}
+
 // TestWorkerAndReviewerKickoffsStillFetch: the hub holds their next job, so the fetch buys something.
 func TestWorkerAndReviewerKickoffsStillFetch(t *testing.T) {
-	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+	for _, role := range []string{"worker", "reviewer"} {
 		e, c, ps := plannerIn(t, "idle")
 		if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: role}); err != nil {
 			t.Fatal(err)

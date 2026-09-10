@@ -9,18 +9,30 @@ package prompts
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // MsgKickoff sends a fresh session to fetch its job, for the roles the hub holds one for.
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
-// MsgPlannerKickoff wakes a planner with its directive in hand: that answer never varies, so the
-// fetch cost a call and a turn to hear it. unread is what a call DOES buy, so it asks for one.
-func MsgPlannerKickoff(directive string, unread int) string {
-	head := "[hub] You're live. You are this project's PLANNER: your work reaches you as a conversation in this terminal, and this is your standing directive.\n\n"
+// standing names each role whose next move the hub never holds, in the words its kickoff opens
+// with — a planner's work arrives as a conversation, a coauthor's as the user typing.
+var standing = map[string]string{
+	"planner":  "PLANNER: your work reaches you as a conversation in this terminal",
+	"coauthor": "COAUTHOR: your work is whatever the user types in this terminal",
+}
+
+// MsgStandingKickoff wakes one of those roles with its directive in hand: that answer never varies,
+// so the fetch cost a call and a turn to hear it. unread is what a call DOES buy, so it asks for one.
+func MsgStandingKickoff(role, directive string, unread int) string {
+	who, ok := standing[role]
+	if !ok {
+		who = strings.ToUpper(role)
+	}
+	head := fmt.Sprintf("[hub] You're live. You are this project's %s, and this is your standing directive.\n\n", who)
 	if unread > 0 {
-		head = fmt.Sprintf("[hub] You're live. You are this project's PLANNER, and %d unread message(s) are waiting for you. Run `sindri` to read them. Your standing directive:\n\n", unread)
+		head = fmt.Sprintf("[hub] You're live. You are this project's %s. %d unread message(s) are waiting for you. Run `sindri` to read them. Your standing directive:\n\n", who, unread)
 	}
 	return head + directive
 }
