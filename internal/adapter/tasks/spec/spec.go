@@ -40,7 +40,7 @@ func (Source) Enabled(root string) bool { return Enabled(root) }
 // ToolMissing: the repo has an openspec/ dir but the openspec CLI isn't on PATH.
 func (Source) ToolMissing(root string) bool { return Enabled(root) && !CLIInstalled() }
 
-// Validate is this source doubling as a quality gate (-> adapter/gate.Gate): openspec's own
+// Validate is this source doubling as a quality gate (-> adapter/core.Gate): openspec's own
 // validation, run wherever a submit path needs one. Delegates to the package's Validate so every
 // caller agrees on what "passing" means.
 func (Source) Validate(wt string) (bool, string) { return Validate(wt) }

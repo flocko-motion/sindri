@@ -9,13 +9,14 @@ package core
 import (
 	"context"
 	"sync"
+	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/api"
 
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/owned"
 	"github.com/flo-at/sindri/internal/hub/situation"
@@ -34,7 +35,7 @@ type Harness interface {
 	Probe(project, name string) observe.Observation
 	// Say puts a message to the agent the way d asks: mail keeps it until read, a push types it in
 	// now (-> delivery.go). It carries out what it is given and reports what happened.
-	Say(project, name, text string, d Delivery) error
+	Say(project, name, text string, d mail.Delivery) error
 	// Clear, Compact and SetModel reset or steer the session, each blocking until it takes effect or
 	// times out (-> agent-runtime's blocking-command contract).
 	Clear(ctx context.Context, project, name string) error
@@ -121,6 +122,9 @@ type Core struct {
 	Flow Flows
 	// Gate executes a queued gate. Set by the composition root beside Flow.
 	Gate Gates
+	// Mail is the fleet's mailbox, for a subject that has something to say. Set beside Flow, and the
+	// one door out: nothing here writes a message itself (-> hub/messaging/mail).
+	Mail *mail.Box
 	// Lifetime is the hub's own, for FLEET-SIDE work with no caller context to inherit — a push
 	// through a port whose signature carries none. Anything reached from an agent's own request
 	// takes that request's context instead.
@@ -134,11 +138,15 @@ type Core struct {
 	// an ordinary failure. Held here because it outlives any one acting half.
 	Kills Kills
 
+	// Prodded is the idle spell each agent was last prodded for, so a stall is named ONCE however
+	// many callers notice it. Held here because it outlives any one acting half.
+	Prodded Spells
+
 	// Pre serialises the reference-move PR checks, so one sweep does not queue the same check twice.
 	Pre Preflight
 
 	// gates are the submit path's quality validators, installed by the composition root (-> WithGates).
-	gates []gate.Gate
+	gates []Gate
 
 	// refWarn remembers which repo roots have already been warned about an unconfigured reference
 	// (-> BaseBranch), so a call on every submit does not spam the log with the same finding.
@@ -222,4 +230,33 @@ func (c *Core) ClearArmedFor(project, name string) bool {
 func (c *Core) Retired(project, name string) bool {
 	s, err := c.Sit.Of(project, name)
 	return err == nil && s.Retired
+}
+
+// Spells remembers, per agent, the idle spell it was last prodded for. Keyed on the SPELL rather
+// than a timestamp so one stall is named once — and a NEW stall, which starts a new spell, is
+// named again.
+type Spells struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+// First reports whether this is a spell nobody has prodded for yet, and claims it if so.
+func (s *Spells) First(key string, spell time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen[key].Equal(spell) {
+		return false
+	}
+	if s.seen == nil {
+		s.seen = map[string]time.Time{}
+	}
+	s.seen[key] = spell
+	return true
+}
+
+// Moving forgets an agent, so the next stall is a new one.
+func (s *Spells) Moving(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.seen, key)
 }

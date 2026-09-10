@@ -9,11 +9,11 @@
 package agent
 
 import (
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"sync"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/agentchan"
+	"github.com/flo-at/sindri/internal/hub/agent/agentchan"
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -35,7 +35,7 @@ type Deps interface {
 	Kickoff(project, name string) string
 	// Deliver is the hub's ordinary delivery path, the one that reports its own failures — how a
 	// command that reset a session sends what follows.
-	Deliver(project, name, text string, d core.Delivery) error
+	Deliver(project, name, text string, d mail.Delivery) error
 	// ForgetFill drops the hub's standing sample of an agent's context fill. The board reports THAT
 	// sample, not this package's memo, so invalidating one without the other leaves the stale figure.
 	ForgetFill(project, name string)

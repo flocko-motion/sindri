@@ -17,7 +17,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -99,7 +98,7 @@ func (a *Act) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, erro
 	if branch != "" {
 		incoming, _ = git.LogRange(wt, branch, base, core.LogCap)
 	}
-	conflicts, done, err := repo.RebaseStep(wt, branch, base)
+	conflicts, done, err := git.RebaseStep(wt, branch, base)
 	if err != nil {
 		return 1, err
 	}
@@ -154,7 +153,7 @@ func (a *Act) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			return 1, nil
 		}
 	}
-	conflicts, done, err := repo.RebaseStep(wt, st.Branch, base)
+	conflicts, done, err := git.RebaseStep(wt, st.Branch, base)
 	if err != nil {
 		return 1, err // internal git failure — AgentExec sanitizes it for the agent
 	}

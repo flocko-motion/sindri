@@ -304,7 +304,7 @@ func TestShowPRDoesNotWrite(t *testing.T) {
 }
 
 // TestTheReviewDirectiveNamesTheAuthor is the gap: a reviewer was handed a PR and never told whose
-// work it was. The name was Reachable — `sindri show <pr>` prints it — but only by going looking,
+// work it was. The name was reachable — `sindri show <pr>` prints it — but only by going looking,
 // and nothing suggested looking, so verdicts were written about nobody.
 func TestTheReviewDirectiveNamesTheAuthor(t *testing.T) {
 	dir := prompts.DirReview("pr-sd-1", "sd-1", "the reviewed work", "dwalin", "ARCHITECTURE.md")

@@ -8,7 +8,9 @@ package pr
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/task"
 	"log"
@@ -16,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -75,26 +76,26 @@ func (a *Act) Merge(project, prID string) (store.PR, error) {
 		desc = pr.Task
 	}
 	mergeMsg := task.ConventionalCommit(tk.Type, pr.Task, desc)
-	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base, mergeMsg); res.Status {
-	case repo.MergeConflict:
+	switch res := git.MergeBranch(root, wt, pr.Branch, pr.Base, mergeMsg); res.Status {
+	case git.MergeConflict:
 		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
 		_ = ps.PutPR(pr)
 		// Recorded on the PR, not written onto its author: a conflict is a fact about this merge
 		// intent, and what it means for whoever filed it is their map's (-> cond.MergeConflicted).
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
 		a.Flow.WakeProject(project, topic.PRVerdict)
-		_ = a.Harness.Say(project, pr.Agent, prompts.MsgResolveNeeded(pr.Base, res.Files), core.MailAndPush)
+		_ = a.Harness.Say(project, pr.Agent, prompts.MsgResolveNeeded(pr.Base, res.Files), mail.MailAndPush)
 		a.Deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
-	case repo.MergeRebaseErr:
+	case git.MergeRebaseErr:
 		// Name the worktree: it is the AGENT's, and "unstaged changes" otherwise sends you
 		// hunting through your own checkout for edits the agent left in its.
 		return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, ag.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
 			pr.Branch, pr.Base, pr.Agent, workspace, pr.Agent, res.Err))
-	case repo.MergeBlocked:
+	case git.MergeBlocked:
 		// "commit or stash" alone dead-ends an untracked collision: you cannot stash an untracked file.
 		return revert(fmt.Errorf("merge blocked by your working checkout: %s. Commit or stash them (or move/remove them, if untracked), then merge again — the PR is fine and stays approved", prompts.FileList(res.Files)))
-	case repo.MergeErr:
+	case git.MergeErr:
 		return revert(res.Err)
 	}
 	pr.Status = "merged"
@@ -163,7 +164,7 @@ func (a *Act) finishPartialMerge(project string, pr store.PR, onFeature bool) (s
 		a.resumeContainer(project, pr.Agent)
 		// Push only: the agent resumes the same feature it never left, which its own directive
 		// already says — nothing here needs to survive being read late.
-		_ = a.Harness.Say(project, pr.Agent, prompts.MsgMilestoneMerged(pr.ID), core.PushOnly)
+		_ = a.Harness.Say(project, pr.Agent, prompts.MsgMilestoneMerged(pr.ID), mail.PushOnly)
 	} else {
 		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
 		// a container while its interim PR was out.
@@ -171,7 +172,7 @@ func (a *Act) finishPartialMerge(project string, pr store.PR, onFeature bool) (s
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
 		// Push only, same reason: it resumes the same task, which its directive already says.
-		_ = a.Harness.Say(project, pr.Agent, prompts.MsgContributionMerged(pr.ID, pr.Task), core.PushOnly)
+		_ = a.Harness.Say(project, pr.Agent, prompts.MsgContributionMerged(pr.ID, pr.Task), mail.PushOnly)
 	}
 	a.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	a.Deps.Notify()

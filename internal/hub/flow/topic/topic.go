@@ -7,7 +7,7 @@ package topic
 
 import "github.com/flo-at/sindri/internal/hub/flow/machine"
 
-// A topic may only SHORTEN latency. Every transition it accelerates must also be Reachable by its
+// A topic may only SHORTEN latency. Every transition it accelerates must also be reachable by its
 // state's own poll, so a dropped topic costs a beat and never a stuck agent.
 const (
 	TaskAvailable machine.Topic = "task-available" // the backlog gained something claimable

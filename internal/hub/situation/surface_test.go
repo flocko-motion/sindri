@@ -203,3 +203,18 @@ func TestParkedByTheHubReadsTheGateOnce(t *testing.T) {
 		t.Error("nothing gated under it, so it is idle on its own account")
 	}
 }
+
+// TestRetirementParksOnlyOnceItHoldsNothing is the other half of the same rule, and the distinction
+// a retired dain sat on: retirement promises "no NEW work", never "no more news". A gate result or a
+// rejection about work already in hand is exactly what it still needs to finish, so parking it while
+// it holds something would silence the messages retirement itself made it responsible for.
+func TestRetirementParksOnlyOnceItHoldsNothing(t *testing.T) {
+	holding := Situation{Role: "worker", Retired: true, Task: "sd-1", Phase: "working"}
+	if holding.ParkedByTheHub() {
+		t.Error("a retired agent holding work was parked; it cannot finish what it holds without the news")
+	}
+	done := Situation{Role: "worker", Retired: true, Phase: "idle"}
+	if !done.ParkedByTheHub() {
+		t.Error("with nothing in hand it is finished, which is all retirement ever meant")
+	}
+}

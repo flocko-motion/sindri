@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -93,7 +94,7 @@ func TestTheHeldReviewOutranksAnOlderVerdict(t *testing.T) {
 	if cs, _ := ps.Comments("td-1"); len(cs) != 0 {
 		t.Errorf("the older verdict's task took the comment: td-1 has %v", cs)
 	}
-	// The older one stays Reachable BY NAME, which is the point of widening rather than moving.
+	// The older one stays reachable BY NAME, which is the point of widening rather than moving.
 	if out, code := execAs(t, h, "brokkr", "comment", "td-1", "and one about the earlier PR"); code != 0 {
 		t.Fatalf("naming a task it has ruled on failed (%d): %s", code, out)
 	}
@@ -120,7 +121,7 @@ func TestAReviewerStillCannotWanderTheBacklog(t *testing.T) {
 	if cs, _ := ps.Comments("td-elsewhere"); len(cs) != 0 {
 		t.Errorf("the comment landed anyway: %v", cs)
 	}
-	// The refusal names what IS Reachable — a wall with no way forward is the house's own complaint.
+	// The refusal names what IS reachable — a wall with no way forward is the house's own complaint.
 	if !strings.Contains(out, "td-1") {
 		t.Errorf("the refusal should name the task it can comment on, got %q", out)
 	}
@@ -159,4 +160,41 @@ func commentBlockedFor(t *testing.T, h *Hub, agent string) string {
 	}
 	t.Fatalf("%s was not offered `comment` at all", agent)
 	return ""
+}
+
+// TestTheRejectionSaysWhoRejectedIt walks a real sender end to end: the feedback is the reviewer's or
+// the user's, and an agent weights a message by who it is from.
+func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.prFlow().RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
+		t.Fatalf("RejectPR: %v", err)
+	}
+	mail, _ := h.store.AllMail(0)
+	if len(mail) == 0 {
+		t.Fatal("the rejection should have been mailed")
+	}
+	if mail[0].Sender != api.SenderUser {
+		t.Errorf("a human rejection is from the user, got %q", mail[0].Sender)
+	}
+	// A pointer, not a third copy of the feedback: pr.Feedback is canonical, and DirRejected already
+	// re-serves it verbatim on every ask while the PR stays rejected.
+	if strings.Contains(mail[0].Body, "the gate is missing") {
+		t.Errorf("mail should point at `sindri`, not duplicate the feedback: %q", mail[0].Body)
+	}
+	if !strings.Contains(mail[0].Body, "sindri") {
+		t.Errorf("mail should point the reader at `sindri` for the feedback: %q", mail[0].Body)
+	}
+	if pr, _, _ := ps.GetPR("pr-td-1"); pr.Feedback != "the gate is missing" {
+		t.Errorf("the canonical feedback should live on the PR, got %q", pr.Feedback)
+	}
 }

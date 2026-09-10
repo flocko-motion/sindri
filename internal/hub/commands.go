@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"os"
@@ -36,7 +37,7 @@ func (h *Hub) registry() *registry.Registry {
 	return registry.New(
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
-		registry.Command{Name: "prs", Help: "list pull requests and their status — your own if you're a worker, the whole project otherwise; the 10 most recent active ones, `--limit N` to widen", Run: h.cmdListPRs},
+		registry.Command{Name: "prs", Help: "list pull requests and their status — your own if you're a worker, the whole project otherwise; the 10 most recent active ones, `--limit N` to widen", Run: h.prFlow().CmdListPRs},
 		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", Run: h.wf.CmdShow},
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
@@ -152,12 +153,12 @@ func (h *Hub) registry() *registry.Registry {
 		// better than a cap discovered by hitting it. Not the coauthor — it is in the room already.
 		registry.Command{Name: "fyi", Help: prompts.FyiHelp(prompts.NotesPerClaim),
 			HelpFor: func(c registry.Caller) string { return prompts.FyiHelp(c.NotesLeft) },
-			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.cmdFyi},
+			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.mail.CmdFyi},
 		// Every role receives mail, so every role reads it — and never held back by an escalation, since
 		// reading is how an escalated agent learns the answer it waits for.
-		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
+		registry.Command{Name: "mail", Help: mail.Help, Run: h.mail.CmdMail},
 		// Answering needs no name: the recipient comes off the message, so neither end needs a directory.
-		registry.Command{Name: "reply", Help: replyHelp, Run: h.cmdReply},
+		registry.Command{Name: "reply", Help: mail.ReplyHelp, Run: h.mail.CmdReply},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
 			Blocked: func(c registry.Caller) string {
@@ -412,7 +413,7 @@ func commentUsage(c registry.Caller) string {
 		return "comment <text...>"
 	case "reviewer":
 		// An id is worth offering here: with more than one verdict behind it, a bare comment means the
-		// newest, and the others are Reachable only by name.
+		// newest, and the others are reachable only by name.
 		return "comment <text...> (the PR you last ruled on), or comment <id> <text...>"
 	}
 	return "comment <id> <text...>"
@@ -444,7 +445,7 @@ func commentHelp(c registry.Caller) string {
 
 // commentTarget is the task a caller's own state already names, "" for a role where nothing does. A
 // worker inside a feature has two, and the subtask wins — that is what it has open when it finds
-// something. The container stays Reachable by its id, and the reply says which one was written to.
+// something. The container stays reachable by its id, and the reply says which one was written to.
 func (h *Hub) commentTarget(c registry.Caller) (string, error) {
 	switch c.Role {
 	case "worker":

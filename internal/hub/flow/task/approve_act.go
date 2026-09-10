@@ -8,7 +8,7 @@ package task
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -88,7 +88,7 @@ func (a *Act) notifyPlanners(project, msg string) {
 	for _, who := range roster {
 		if who.Role == "planner" {
 			name := who.Name
-			go func() { _ = a.Harness.Say(project, name, msg, core.MailAndPush) }()
+			go func() { _ = a.Harness.Say(project, name, msg, mail.MailAndPush) }()
 		}
 	}
 }

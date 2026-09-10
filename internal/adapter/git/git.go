@@ -1,8 +1,10 @@
 // package: adapter/git / git
 // type:    adapter (external tool: git)
-// job:     wrap the git operations the hub needs — repo root, agent worktrees, branches,
-// commits, rebase and merge. The only place git is invoked.
-// limits:  no podman, no task/PR logic; pure git.
+// job:     the PRIMITIVES — one git invocation each: repo root, worktrees, branches, commits,
+// rebase, merge. The only place git is invoked, this file and no other.
+// limits:  no podman, no task/PR logic. A primitive knows nothing of sindri; the SEQUENCES that
+// compose these into "land this branch" or "materialise this review" are the files beside it
+// (-> merge.go, rebase.go, materializerun.go, git_flows.go).
 package git
 
 import (

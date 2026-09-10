@@ -293,7 +293,7 @@ func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
 	if checkedOut {
-		// /workspace is a linked worktree with no Reachable .git, so `git diff` fails in the
+		// /workspace is a linked worktree with no reachable .git, so `git diff` fails in the
 		// pod — the checkout is for READING the code in context; the diff comes from the hub.
 		loc = fmt.Sprintf("PR branch %s is checked out FRESH in /workspace, based on %s. ", branch, base)
 	} else {

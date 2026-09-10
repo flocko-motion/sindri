@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"path/filepath"
@@ -122,7 +123,7 @@ func (a *Act) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go a.Harness.Say(project, holder, prompts.MsgReviewAmended(prID, requirement), core.MailAndPush.From(api.SenderUser))
+		go a.Harness.Say(project, holder, prompts.MsgReviewAmended(prID, requirement), mail.MailAndPush.From(api.SenderUser))
 		a.Deps.Notify()
 		return nil
 	}
@@ -192,7 +193,7 @@ func (a *Act) AssignReview(ctx context.Context, project string, id int64, prID, 
 	}
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
 	msg := prompts.MsgReview(prID, requirement, pr.Branch, pr.Base, a.Deps.ArchitectureDoc(project), checkedOut)
-	go a.Harness.Say(home, reviewer, msg, core.MailAndPush) // async: don't block a worker's submit
+	go a.Harness.Say(home, reviewer, msg, mail.MailAndPush) // async: don't block a worker's submit
 	a.Deps.Notify()
 	return nil
 }

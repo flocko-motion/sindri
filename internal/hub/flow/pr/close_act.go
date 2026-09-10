@@ -10,6 +10,7 @@ package pr
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"strings"
@@ -144,7 +145,7 @@ func (a *Act) SettleWithTask(project, id string) {
 			continue
 		}
 		_ = ps.LogPR(pr.ID, "rejected", "by hub: task "+id+" is closed")
-		_ = a.Harness.Say(project, pr.Agent, prompts.MsgPRSettledWithTask(pr.ID, id), core.MailAndPush)
+		_ = a.Harness.Say(project, pr.Agent, prompts.MsgPRSettledWithTask(pr.ID, id), mail.MailAndPush)
 	}
 }
 
@@ -199,7 +200,7 @@ func (a *Act) FinishTask(project, id string, scrap bool) error {
 			if a.Harness.Observe(project, ag.Name).Up {
 				_ = a.Harness.Interrupt(project, ag.Name)
 			}
-			_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskCancelled(id), core.MailAndPush)
+			_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskCancelled(id), mail.MailAndPush)
 		}
 	}
 	// The approval gate goes with the task: a gate left standing outlives what it asked about, and

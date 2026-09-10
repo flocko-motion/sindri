@@ -9,6 +9,7 @@ package task
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 
@@ -183,7 +184,7 @@ func (a *Act) HealSplit(project, name string) bool {
 	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.
 	a.settleReleasedPR(ps, project, name, st.Container, held)
 	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
-	_ = a.Harness.Say(project, name, prompts.MsgHierarchyTaken(st.Container, held), core.MailAndPush)
+	_ = a.Harness.Say(project, name, prompts.MsgHierarchyTaken(st.Container, held), mail.MailAndPush)
 	return true
 }
 

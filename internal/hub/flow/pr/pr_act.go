@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow/run"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	hubtask "github.com/flo-at/sindri/internal/hub/task"
 	"io"
@@ -22,7 +23,6 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -405,7 +405,7 @@ func (a *Act) MaterializeReview(project, prID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%w %q", core.ErrNoSuchPR, prID)
 	}
-	return repo.MaterializeReview(root, pr.Branch)
+	return git.MaterializeReview(root, pr.Branch)
 }
 
 // RebaseAgent recovers a stale tree after the base moved outside a sindri merge; git aborts
@@ -431,7 +431,7 @@ func (a *Act) RebaseAgent(project, name string) error {
 		return fmt.Errorf("couldn't rebase %s onto %s — a conflict or uncommitted changes (git aborted, so nothing changed). Have %s resolve it interactively with `sindri rebase` (it surfaces the conflicts to fix). git said: %w", name, base, name, err)
 	}
 	_ = ps.Log(name, "rebase", "onto "+base)
-	_ = a.Harness.Say(project, name, prompts.MsgRebased(base), core.PushOnly)
+	_ = a.Harness.Say(project, name, prompts.MsgRebased(base), mail.PushOnly)
 	a.Deps.Notify()
 	return nil
 }
@@ -453,7 +453,7 @@ func (a *Act) rebasePlanners(project, base string) {
 			continue
 		}
 		_ = ps.Log(ag.Name, "rebase", "onto "+base)
-		_ = a.Harness.Say(project, ag.Name, prompts.MsgRebased(base), core.PushOnly)
+		_ = a.Harness.Say(project, ag.Name, prompts.MsgRebased(base), mail.PushOnly)
 	}
 }
 

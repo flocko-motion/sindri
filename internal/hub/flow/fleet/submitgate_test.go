@@ -120,7 +120,7 @@ func TestTheRotatingQuestionFollowsTheCommit(t *testing.T) {
 	if got := prflow.SubmitQuestions("abc123", false); got[1] != first[1] {
 		t.Errorf("the same commit must draw the same question: %q then %q", first[1], got[1])
 	}
-	// Across the pool, every question is Reachable — a slot nothing ever draws is dead weight.
+	// Across the pool, every question is reachable — a slot nothing ever draws is dead weight.
 	seen := map[string]bool{}
 	for _, sha := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"} {
 		seen[prflow.SubmitQuestions(sha, false)[1]] = true

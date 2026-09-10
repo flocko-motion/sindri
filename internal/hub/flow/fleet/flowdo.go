@@ -8,13 +8,13 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"log"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/act"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
@@ -70,7 +70,7 @@ func (e *Engine) doPickWork(ctx context.Context, w flow.World) (flow.Outcome, er
 	if fired {
 		return act.Done, nil // delivered behind the preparation
 	}
-	return act.Done, e.Harness.Say(w.Project, w.Name, dir, core.PushOnly)
+	return act.Done, e.Harness.Say(w.Project, w.Name, dir, mail.PushOnly)
 }
 
 // doPickSubtask moves a feature holder onto its feature's next open child.
@@ -86,7 +86,7 @@ func (e *Engine) doPickSubtask(ctx context.Context, w flow.World) (flow.Outcome,
 	if fired, perr := e.roleAct().PrepareAssignment(ctx, w.Project, w.Name, api.TierOrDefault(child.Tier), dir); perr != nil || fired {
 		return act.Done, perr
 	}
-	return act.Done, e.Harness.Say(w.Project, w.Name, dir, core.PushOnly)
+	return act.Done, e.Harness.Say(w.Project, w.Name, dir, mail.PushOnly)
 }
 
 // doClear discards the session and waits for the reading to fall — the clear having HAPPENED, where
@@ -102,7 +102,7 @@ func (e *Engine) doClear(ctx context.Context, w flow.World) (flow.Outcome, error
 		_ = e.Store.For(w.Project).Log(w.Name, "clear-unconfirmed", err.Error())
 		return act.Failed, nil
 	}
-	return act.Done, e.Harness.Say(w.Project, w.Name, prompts.MsgKickoff, core.PushOnly)
+	return act.Done, e.Harness.Say(w.Project, w.Name, prompts.MsgKickoff, mail.PushOnly)
 }
 
 // doCompact condenses the session rather than dropping it.
@@ -190,12 +190,12 @@ func (e *Engine) doRebase(_ context.Context, w flow.World) (flow.Outcome, error)
 	conflicts, done, rerr := git.ResetOntoKeepingWork(wt, base)
 	if rerr != nil {
 		_ = ps.Log(w.Name, "reset-failed", "onto "+base+": "+rerr.Error())
-		_ = e.Harness.Say(w.Project, w.Name, prompts.MsgResetFailed(w.AwaitingPR, base), core.MailAndPush)
+		_ = e.Harness.Say(w.Project, w.Name, prompts.MsgResetFailed(w.AwaitingPR, base), mail.MailAndPush)
 		return act.Failed, nil
 	}
 	if !done {
 		_ = ps.Log(w.Name, "resolve", "reapplying uncommitted work onto "+base+" conflicts: "+strings.Join(conflicts, ", "))
-		_ = e.Harness.Say(w.Project, w.Name, prompts.MsgReapplyConflict(w.AwaitingPR, base, conflicts), core.MailAndPush)
+		_ = e.Harness.Say(w.Project, w.Name, prompts.MsgReapplyConflict(w.AwaitingPR, base, conflicts), mail.MailAndPush)
 		return act.Failed, nil
 	}
 	return act.Done, nil
@@ -231,7 +231,7 @@ func (e *Engine) doDropReview(_ context.Context, w flow.World) (flow.Outcome, er
 	if err := hps.CloseReviews(held, "overtaken: the PR settled before a verdict"); err != nil {
 		return act.Done, err
 	}
-	_ = e.Harness.Say(w.Project, w.Name, prompts.MsgReviewCancelled(held), core.MailAndPush)
+	_ = e.Harness.Say(w.Project, w.Name, prompts.MsgReviewCancelled(held), mail.MailAndPush)
 	return act.Done, nil
 }
 

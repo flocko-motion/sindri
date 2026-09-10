@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"math"
 	"os"
 	"os/exec"
@@ -40,7 +40,7 @@ type stubDeps struct {
 	busy             map[string]bool            // agents mid-turn, so AgentIdle answers false for them
 	posted           []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
 	postFails        bool                       // AddTaskComment refuses, for the paths that must survive it
-	delivered        []core.Delivery            // how each message was classified, in step with injected/injectedText
+	delivered        []mail.Delivery            // how each message was classified, in step with injected/injectedText
 	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
 	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
@@ -89,7 +89,9 @@ func sayingWhileDown(word string) observe.Observation {
 func newEngine(st *store.Store, d *stubDeps, sources ...tasks.Source) *Engine {
 	// Background as the lifetime: a test IS an entrypoint, and no fixture here turns on the engine
 	// outliving it. A case that needs the lifetime cancelled builds its own.
-	return New(context.Background(), st, d, d, sources...)
+	// A real mailbox over the same store: the fleet SAYS things, and a nil one would panic where a
+	// test only meant to exercise the decision behind the saying.
+	return New(context.Background(), st, d, d, mail.New(st, d), sources...)
 }
 
 // storelessEngine is for a case that exercises the harness side alone. It still gets a real store —
@@ -152,10 +154,19 @@ func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
 func (d *stubDeps) Container(_, name string) string { return name }
 func (d *stubDeps) Notify()                         {}
 
+// The mailbox's own seam, so one stub still answers for the whole hub. Push is what Say already
+// records; MayWake and RepoName are the two questions announcing asks.
+func (d *stubDeps) Push(project, name, text string) error {
+	return d.Say(project, name, text, mail.PushOnly)
+}
+func (d *stubDeps) MayWake(string, string) bool    { return true }
+func (d *stubDeps) Reachable(p, name string) bool  { return d.Observe(p, name).Up }
+func (d *stubDeps) RepoName(project string) string { return project }
+
 // Deliver records what was sent and HOW, so a test can assert the classification a sender chose —
-// which is half of what this feature is (-> core.Delivery). The recipient/text lists stay as they
+// which is half of what this feature is (-> mail.Delivery). The recipient/text lists stay as they
 // were, since every existing assertion about "what was injected" is about the same messages.
-func (d *stubDeps) Deliver(_, name, text string, del core.Delivery) error {
+func (d *stubDeps) Deliver(_, name, text string, del mail.Delivery) error {
 	if d.deliverErr {
 		return fmt.Errorf("nothing could be delivered to %s", name)
 	}
@@ -195,7 +206,7 @@ func (d *stubDeps) Observe(_, name string) observe.Observation {
 
 func (d *stubDeps) Probe(project, name string) observe.Observation { return d.Observe(project, name) }
 
-func (d *stubDeps) Say(project, name, text string, del core.Delivery) error {
+func (d *stubDeps) Say(project, name, text string, del mail.Delivery) error {
 	return d.Deliver(project, name, text, del)
 }
 

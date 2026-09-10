@@ -9,6 +9,7 @@ package pr
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"path/filepath"
 
@@ -90,7 +91,7 @@ func (a *Act) referenceMoved(project, root, base, prevTip, tip string, advanced 
 		switch {
 		case !advanced:
 			_ = ps.Log(ag.Name, "reference-rewritten", base)
-			_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceRewritten(), core.MailAndPush)
+			_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceRewritten(), mail.MailAndPush)
 		case underReview:
 			// Leaving it unmoved is correct, but must leave a trace — otherwise the drift it lets
 			// stand is unmeasurable afterwards.
@@ -141,9 +142,9 @@ func (a *Act) AdvanceAgent(project, root, base, prevTip, tip string, ag store.Ag
 	}
 	if rebaseErr != nil {
 		_ = ps.Log(ag.Name, "reference-rebase-skip", base+": "+rebaseErr.Error())
-		_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceNeedsRebase(incoming), core.MailAndPush)
+		_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceNeedsRebase(incoming), mail.MailAndPush)
 		return
 	}
 	_ = ps.Log(ag.Name, "reference-advanced", "rebased onto "+base)
-	_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceAdvanced(incoming), core.PushOnly)
+	_ = a.Harness.Say(project, ag.Name, prompts.MsgReferenceAdvanced(incoming), mail.PushOnly)
 }

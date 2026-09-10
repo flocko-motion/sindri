@@ -542,3 +542,21 @@ func TestRunServiceReachesEveryRoleThatCanUseIt(t *testing.T) {
 		t.Error("a planner's workspace is read-only — it must not gain the run service")
 	}
 }
+
+// mailAgent seeds a worker holding a task, the shape a message is delivered to.
+func mailAgent(t *testing.T) (*Hub, *store.ProjectStore) {
+	t.Helper()
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"},
+		store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
+	return h, ps
+}

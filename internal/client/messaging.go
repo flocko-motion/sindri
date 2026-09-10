@@ -2,7 +2,7 @@
 // type:    adapter (hub HTTP client)
 // job:     the two ways a message reaches an agent, as a front-end sees them: PUSH it into the
 // live session now, or read what is waiting in its mailbox. That pair is the same one
-// every sender inside the hub answers (-> core.Delivery).
+// every sender inside the hub answers (-> mail.Delivery).
 // limits:  transport only; which path a message deserves is its sender's decision, and the
 // mailbox itself is the hub's.
 package client

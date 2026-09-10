@@ -10,7 +10,7 @@ import (
 
 // TestTheRunMapAssembles runs the engine's own check over this map: unique names, declared targets,
 // an implementation per action, every outcome handled, and — the one this map exists to satisfy — a
-// condition exit on every acting state, so a run whose hub died is Reachable again.
+// condition exit on every acting state, so a run whose hub died is reachable again.
 func TestTheRunMapAssembles(t *testing.T) {
 	m, err := machine.New(t.Context(), machine.Config[World]{
 		States: Flow, Start: Start,

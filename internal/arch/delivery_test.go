@@ -2,7 +2,7 @@
 // type:    test (architecture invariant)
 // job:     fail the build if any code puts text into an agent's session without declaring
 // whether that message must be READ — every send states both properties
-// (-> core.Delivery), and the few sites that inject directly are listed here
+// (-> mail.Delivery), and the few sites that inject directly are listed here
 // with the reason each is push-only.
 // limits:  the call sites only; which class a message is belongs to its sender, and the
 // workflow's own guard (-> workflow/classification_test.go) covers that package
@@ -29,7 +29,7 @@ import (
 // difference between having weighed them all and remembering to.
 var declaredInjectors = map[string]string{
 	// The primitive itself: the one place a push is performed, for a sender that declared it.
-	"internal/hub/deliver.go": "hub.Deliver — carries out a classified delivery",
+	"internal/hub/mail/deliver.go": "mail.Box.Deliver — carries out a classified delivery",
 	// The mechanism, plus Tell, which is push-only DELIBERATELY: it is synchronous and its caller is a
 	// person, so a failure comes straight back to the terminal that typed it rather than being lost,
 	// and conversational steering must not accumulate in a mailbox that is never pruned.
@@ -108,7 +108,7 @@ func TestNothingInjectsWithoutDeclaringItsClass(t *testing.T) {
 	}
 	for _, u := range undeclared {
 		t.Errorf("%s injects into a session without declaring whether the message must be READ — send "+
-			"it through the delivery primitive (core.Delivery), or add the file to "+
+			"it through the delivery primitive (mail.Delivery), or add the file to "+
 			"declaredInjectors with the reason it is push-only", u)
 	}
 }

@@ -4,18 +4,18 @@
 // reviewer mid-review, delete the task's branch, and flip the PR to
 // "scrapped" so it drops off the board. The worker is stopped by the paired
 // task close, not here.
-// limits:  git mechanics via hub/repo; persistence via the store. No git/tmux here.
+// limits:  git mechanics via adapter/git; persistence via the store. No git/tmux here.
 package pr
 
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -48,7 +48,7 @@ func (a *Act) DiscardPR(project, prID string) error {
 		if a.Harness.Observe(project, author).Up {
 			_ = a.Harness.Interrupt(project, author)
 		}
-		_ = a.Harness.Say(project, author, prompts.MsgPRScrapped(prID), core.MailAndPush.From(api.SenderUser))
+		_ = a.Harness.Say(project, author, prompts.MsgPRScrapped(prID), mail.MailAndPush.From(api.SenderUser))
 		// A container holder rests back onto its FEATURE, not fully idle: an interim/milestone PR
 		// being discarded does not mean the feature itself is done (sd-5ef393 — the same shape as
 		// FinishTask's own fix).
@@ -84,7 +84,7 @@ func (a *Act) ScrapPR(project, prID string) error {
 		}
 		if a.Harness.Probe(project, r.Author).Up {
 			_ = a.Harness.Interrupt(project, r.Author)
-			_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), core.MailAndPush)
+			_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), mail.MailAndPush)
 		}
 		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"}, store.ReasonFreed, "review cancelled: "+prID+" scrapped with its task")
@@ -121,7 +121,7 @@ func (a *Act) ScrapPR(project, prID string) error {
 func (a *Act) discardBranch(project string, pr store.PR, wt string) (string, error) {
 	root := a.Deps.ProjectRoot(project)
 	if pr.Branch != core.PlannerBranch(pr.Agent) {
-		return "branch " + pr.Branch + " removed", repo.ScrapBranch(root, wt, pr.Branch)
+		return "branch " + pr.Branch + " removed", git.ScrapBranch(root, wt, pr.Branch)
 	}
 	base, err := a.BaseBranch(root)
 	if err != nil {

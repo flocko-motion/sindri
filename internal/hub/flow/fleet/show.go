@@ -29,7 +29,7 @@ func (e *Engine) CmdShow(c registry.Caller, args []string, out io.Writer) (int, 
 	case strings.HasPrefix(args[0], "run-"):
 		return e.runAct().CmdShowRun(c, args, out)
 	case strings.HasPrefix(args[0], api.MailIDPrefix):
-		return e.roleAct().CmdShowMail(c, args, out)
+		return e.Mail.CmdShowMail(c, args, out)
 	case strings.HasPrefix(args[0], "pr-"):
 		return e.prAct().CmdShowPR(c, args, out)
 	}

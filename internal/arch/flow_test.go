@@ -64,10 +64,7 @@ func TestTheDeciderCanReachNothingThatWrites(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		// A subject lives in ONE directory: its map beside the code that acts on what the map
-		// decides. The map must stay pure and the act half cannot be, so the line is drawn per FILE —
-		// anything named *_act.go is the acting half and is exempt, everything else is a declaration.
-		if strings.HasSuffix(path, "_act.go") || isEngineRoom(path) {
+		if isActing(path) {
 			return nil
 		}
 		f, perr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
@@ -106,9 +103,7 @@ func TestNoMapReachesAReceiver(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		// Same line as the import guard above: *_act.go is the acting half, and acting is exactly
-		// what needs a receiver holding the handles. The engine itself is a machine, not a map.
-		if strings.HasSuffix(path, "_act.go") || isEngineRoom(path) {
+		if isActing(path) {
 			return nil
 		}
 		f, perr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
@@ -186,10 +181,23 @@ func stateNames(t *testing.T, subject string) []string {
 // statePattern finds a declared state name: a constant whose value is a "subject/state" string.
 var statePattern = regexp.MustCompile(`=\s*"([a-z]+/[a-z-]+)"`)
 
-// isEngineRoom names the two directories under hub/flow that are not maps: the engine the maps are
-// declared in, and the assembly that runs one machine per subject over the hub's handles. Both hold
-// receivers and reach writable things by design, which is exactly what the guards above forbid a map.
-func isEngineRoom(path string) bool {
+// isActing reports the files under hub/flow that are the ACTING half, and so may hold a receiver
+// and reach something writable. Three shapes, because the line is drawn wherever a map is not:
+//
+//   - *_act.go, for a subject that keeps its map and its acting half in ONE directory (flow/pr,
+//     flow/task, flow/run). There the suffix is the whole distinction.
+//   - flow/roles/*.go at the top level: the maps live one package DOWN, one per role, so every file
+//     here already acts and a suffix would say nothing.
+//   - flow/machine and flow/fleet: the engine, and the assembly that runs one machine per subject.
+func isActing(path string) bool {
 	p := filepath.ToSlash(path)
-	return strings.Contains(p, "/flow/machine/") || strings.Contains(p, "/flow/fleet/")
+	if strings.HasSuffix(p, "_act.go") {
+		return true
+	}
+	if strings.Contains(p, "/flow/machine/") || strings.Contains(p, "/flow/fleet/") {
+		return true
+	}
+	// Top level only: a role's own map sits in flow/roles/<role>/ and stays a declaration.
+	dir, _ := filepath.Split(p)
+	return strings.HasSuffix(dir, "/flow/roles/")
 }

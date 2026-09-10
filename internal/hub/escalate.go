@@ -9,7 +9,7 @@ package hub
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"os"
@@ -127,8 +127,8 @@ func (h *Hub) ResumeByUser(project, name, answer string) error {
 	if question == "" {
 		return nil // nothing was cleared, so there is nothing to announce
 	}
-	return h.Deliver(project, name, prompts.MsgResumedByUser(question, answer),
-		core.MailAndPush.From(api.SenderUser))
+	return h.mail.Deliver(project, name, prompts.MsgResumedByUser(question, answer),
+		mail.MailAndPush.From(api.SenderUser))
 }
 
 // Resume clears an agent's escalation and records why, whoever asked. The agent clears its own once

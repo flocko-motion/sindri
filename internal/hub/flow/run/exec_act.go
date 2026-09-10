@@ -10,7 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"log"
@@ -23,7 +24,6 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -67,11 +67,11 @@ func (a *Act) ExecuteRun(ctx context.Context, project, id string) error {
 	root := a.Deps.ProjectRoot(project)
 	// The workspace the run was AIMED at, from its own row: re-deriving it from the agent answered
 	// differently once it had moved on, and answers nothing at all for a run the user queued.
-	mwt, err := repo.MaterializeRun(root, filepath.Join(root, r.Workspace), id)
+	mwt, err := git.MaterializeRun(root, filepath.Join(root, r.Workspace), id)
 	if err != nil {
 		return a.FinishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare a workspace: %s\n", err), 0, 0, -1)
 	}
-	defer func() { _ = repo.RemoveRunMaterialization(mwt) }()
+	defer func() { _ = git.RemoveRunMaterialization(mwt) }()
 
 	cfg, err := a.Deps.ProjectConfig(project)
 	if err != nil {
@@ -183,7 +183,7 @@ func (a *Act) FinishRun(ps *store.ProjectStore, project string, r api.Run, statu
 	if api.RunFromUser(r) {
 		return nil
 	}
-	_ = a.Harness.Say(project, r.Agent, prompts.MsgRunFinished(r.ID, status, elapsed, budget), core.MailAndPush)
+	_ = a.Harness.Say(project, r.Agent, prompts.MsgRunFinished(r.ID, status, elapsed, budget), mail.MailAndPush)
 	return nil
 }
 

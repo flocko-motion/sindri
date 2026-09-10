@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"strings"
@@ -110,7 +111,7 @@ func (a *Act) completeReview(prProject, home, prID, agent, verdict, findings str
 	_ = a.Store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonFreed, "verdict given on "+prID)
 	// Woken, though: a verdict must not be where a reviewer's loop ends. Waking and clearing were one
 	// act here and are two things — a push queues behind the running turn and arrives as it ends.
-	_ = a.Harness.Say(home, agent, prompts.MsgKickoff, core.PushOnly)
+	_ = a.Harness.Say(home, agent, prompts.MsgKickoff, mail.PushOnly)
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
@@ -258,7 +259,7 @@ func (a *Act) reject(project, prID, feedback, voice string) error {
 	// The author's session is NOT cleared here: a new round starts fresh, and that is the author's
 	// own map to do on its way to the feedback (-> worker's refreshing). A verdict writes a verdict.
 	// From whoever ruled: an agent weights feedback by who it is from.
-	_ = a.Harness.Say(project, pr.Agent, msg, core.MailAndPush.From(who))
+	_ = a.Harness.Say(project, pr.Agent, msg, mail.MailAndPush.From(who))
 	a.Deps.Notify()
 	return nil
 }

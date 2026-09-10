@@ -113,46 +113,28 @@ func TestTheOrchestratorCannotReachTheBox(t *testing.T) {
 	}
 }
 
-// TestDeliveryDoesNotAskTheRuleset walks out from hub.Deliver and fails on any reach into the
-// workflow engine. Asking it whether a message is worth sending is what made the ruleset and the
-// delivery path call each other through the composition root: the sender decides, and delivery
-// carries out what it is given (-> hub/deliver.go).
+// TestDeliveryDoesNotAskTheRuleset holds the same line the walk used to, structurally: the mailbox
+// is its own package now, so "delivery cannot ask the ruleset" is a fact about its import graph
+// rather than a property somebody has to keep re-proving over a call tree.
+//
+// Asking the flow whether a message is worth sending is what made the ruleset and the delivery path
+// call each other through the composition root. The sender decides; delivery carries out what it is
+// given (-> hub/messaging/mail/deliver.go).
 func TestDeliveryDoesNotAskTheRuleset(t *testing.T) {
-	pkg := parseHubPackage(t, filepath.Join(moduleRoot(t), "internal", "hub"))
-	const entry = "Hub.Deliver"
-	if pkg.decls[entry] == nil {
-		t.Fatal("hub.Deliver not found — the guard is reading the wrong package")
+	const pkg = "github.com/flo-at/sindri/internal/hub/messaging/mail"
+	out, err := exec.Command("go", "list", "-deps", pkg).Output()
+	if err != nil {
+		t.Fatalf("go list -deps %s: %v", pkg, err)
 	}
-	walked, reached := map[string]bool{}, 0
-	queue := []string{entry}
-	for len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-		if walked[key] {
-			continue
-		}
-		walked[key] = true
-		for _, decl := range pkg.decls[key] {
-			for _, c := range callsIn(decl.fn) {
-				reached++
-				if c.root == "h.wf" {
-					t.Errorf("%s reaches h.wf.%s — delivery must not ask the ruleset whether a message is "+
-						"worth sending. That judgement belongs where the message is composed", key, c.name)
-					continue
-				}
-				if c.root == "" && pkg.decls["."+c.name] != nil {
-					queue = append(queue, "."+c.name)
-					continue
-				}
-				if recv, internal := hubInternal[c.root]; internal && pkg.decls[recv+"."+c.name] != nil {
-					queue = append(queue, recv+"."+c.name)
-				}
-			}
-		}
+	deps := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(deps) < 10 {
+		t.Fatalf("go list -deps %s returned %d packages — the guard is not reading the graph", pkg, len(deps))
 	}
-	// Anti-vacuity: Deliver writes mail, notifies the board and injects, across more than one helper.
-	if reached < 8 {
-		t.Fatalf("the walk reached %d calls from hub.Deliver — it is not reading the delivery path", reached)
+	for _, dep := range deps {
+		if strings.Contains(dep, "/internal/hub/flow") {
+			t.Errorf("hub/mail depends on %s — delivery must not ask the ruleset whether a message is "+
+				"worth sending. That judgement belongs where the message is composed", dep)
+		}
 	}
 }
 

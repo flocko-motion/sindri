@@ -11,7 +11,6 @@ package hub
 import (
 	"context"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
@@ -28,10 +27,11 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/agentchan"
-	"github.com/flo-at/sindri/internal/hub/chat"
+	"github.com/flo-at/sindri/internal/hub/agent/agentchan"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/flow/fleet"
+	"github.com/flo-at/sindri/internal/hub/messaging/chat"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/situation"
@@ -52,17 +52,16 @@ type Hub struct {
 	lifetime context.Context
 	endLife  context.CancelFunc
 
-	chat     *chat.Service       // the user's chatroom relay (internal/hub/chat)
+	mail     *mail.Box           // the fleet's mailbox and the one door into it (internal/hub/messaging/mail)
+	chat     *chat.Service       // the user's chatroom relay (internal/hub/messaging/chat)
 	comments *comments.Service   // task-comment sync (internal/hub/comments)
 	agents   *agent.Service      // agent management: identity/auth/memory/inject/runtime/lifecycle
 	wf       *fleet.Engine       // the machines every subject re-decides through (-> hub/flow/fleet)
 	projects *project.Service    // repo-registry management (internal/hub/project)
-	agentCh  *agentchan.Server   // the inbound agent command channel (internal/hub/agentchan)
+	agentCh  *agentchan.Server   // the inbound agent command channel (internal/hub/agent/agentchan)
 	sit      *situation.Gatherer // where each agent stands, and what may happen to it (internal/hub/situation)
 	watch    *watchdog           // agent liveness, observed on a loop (internal/hub/watchdog.go)
-	refs     *refwatch           // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
-	creds    *credwatch          // agent credential upkeep from the host (internal/hub/credwatch.go)
-	stalls   *stallwatch         // held work nobody is working on (internal/hub/stallwatch.go)
+	ticks    *ticks              // every sweep the hub runs on a clock (internal/hub/ticks.go)
 	status   *statuswatch        // diffs the derived status word into state_log (internal/hub/statuswatch.go)
 	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
 	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
@@ -103,25 +102,6 @@ func New(ctx context.Context) (*Hub, error) {
 	return open(ctx, hosttools.Versions, defaultPodManifest)
 }
 
-// defaultPodManifest is toolskew's real pod-side lookup: the image's baked-in manifest
-// (go/node/openspec, a local cache read, no build and no container call) plus brokkr's own
-// version. brokkr isn't baked into the image at all — it's bind-mounted from pod-bin at container
-// run time — so its value comes from agent.PodBrokkrVersion instead, reading that same file's own
-// build info.
-func defaultPodManifest() (map[string]string, error) {
-	m, err := container.ImageManifest(container.ImageName)
-	if err != nil {
-		return nil, err
-	}
-	if v, ok := agent.PodBrokkrVersion(); ok {
-		if m == nil {
-			m = map[string]string{}
-		}
-		m["brokkr"] = v
-	}
-	return m, nil
-}
-
 // open is New's real body, parameterized over toolskew's two lookups: production always supplies
 // the real ones (via New); newHub(t) supplies an inert stand-in, so the other hub tests never touch
 // the real image cache or spawn a real go/node/openspec just by constructing a Hub.
@@ -142,6 +122,9 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	}
 	life, endLife := context.WithCancel(ctx)
 	h := &Hub{store: st, events: newBus(), startedAt: time.Now(), lifetime: life, endLife: endLife}
+	// First of the modules: every other one sends through it, and it reaches back only for a push
+	// and the board — neither of which has to exist yet (-> mailDeps).
+	h.mail = mail.New(h.store, mailDeps{h})
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
@@ -151,7 +134,7 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// CALL time, so neither has to exist yet.
 	h.sit = situation.NewGatherer(h.store, harness{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, harness{h}, spec.Source{}, github.Source{}).
+	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, harness{h}, h.mail, spec.Source{}, github.Source{}).
 		Gated(spec.Source{}).
 		Reconciling()
 	h.projects = project.New(h.store, projectDeps{h})
@@ -161,11 +144,15 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
 	h.watch = newWatchdog(life, h)
-	// After wf: it drives SyncReference, whose first pass only records where each reference stands.
-	h.refs = newRefwatch(life, h)
-	h.creds = newCredwatch(h)
-	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
-	h.stalls = newStallwatch(h)
+	// Every sweep the hub runs on a clock, in one table (-> ticks.go). After watch and wf, which all
+	// three reach: the watchdog's dwell, and the flow they nudge and check through.
+	h.ticks = startTicks(life, []tick{
+		// atOnce: the first pass only records where each reference stands, so nothing reads as moved
+		// on the strength of a hub restart.
+		{name: "reference-drift", every: refInterval, atOnce: true, sweep: newRefwatch(h).sweep},
+		{name: "credentials", every: credInterval, atOnce: true, sweep: newCredwatch(h).sweep},
+		{name: "stalled-and-mail", every: stallInterval, sweep: newStallwatch(h).sweep},
+	})
 	// After wf: it drives NextQueuedRun/ExecuteRun through it.
 	// A one-shot startup comparison, not a loop: the pod image only changes on a rebuild, not tick
 	// by tick. Needs only h.store (via Deliver), so nothing above it is a real dependency.
@@ -226,9 +213,7 @@ func (h *Hub) Close() error {
 	// what outlives the loops is cut short.
 	h.wf.Close() // the four flows, and whatever action each had in flight
 	h.watch.close()
-	h.refs.close()
-	h.creds.close()
-	h.stalls.close()
+	h.ticks.close()
 	// status has no loop of its own to stop — watchdog.close() above already ended what drove it.
 	h.agentCh.CloseAll()
 	h.endLife()
@@ -276,12 +261,12 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 		// The judgement is made HERE, where the message is composed, rather than asked of the delivery
 		// path: an agent still stuck on an escalation or an armed clear is waiting on THAT, and this
 		// notice is not the exit from either — so it is recorded and not used to interrupt.
-		d := core.MailAndPush
+		d := mail.MailAndPush
 		if why := h.wakeRefused(project, name); why != "" {
-			d = core.MailOnly
+			d = mail.MailOnly
 			_ = h.store.For(project).Log(name, "push-suppressed", why+" — not woken for: "+prompts.MsgUnretired)
 		}
-		return h.Deliver(project, name, prompts.MsgUnretired, d)
+		return h.mail.Deliver(project, name, prompts.MsgUnretired, d)
 	}
 	return nil
 }
@@ -310,11 +295,11 @@ func (h *Hub) rehydrate(project, name string) {
 func (h *Hub) greet(project, name string) {
 	// Ungated on purpose, and mail-less: a fresh session held back on retirement would sit silent for
 	// ever instead of seeing DirRetired even once — its only way to learn its own situation.
-	_ = h.Deliver(project, name, h.wf.Kickoff(project, name), core.PushOnly)
+	_ = h.mail.Deliver(project, name, h.wf.Kickoff(project, name), mail.PushOnly)
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
 	// is in a state where that means anything (-> chat.ReminderFor). Ungated for the kickoff's reason:
 	// mail-less, so a member held back would lose the cue for good.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {
-		_ = h.Deliver(project, name, cue, core.PushOnly)
+		_ = h.mail.Deliver(project, name, cue, mail.PushOnly)
 	}
 }

@@ -9,7 +9,7 @@ package task
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"strings"
@@ -55,7 +55,7 @@ func (a *Act) AssignPlan(project, agent, goal, taskID string) error {
 		_ = a.Harness.Interrupt(project, agent)
 	}
 	brief := prompts.MsgPlanAssignment(subject, taskID, a.Deps.ArchitectureDoc(project), a.planReading(project))
-	if err := a.Harness.Say(project, agent, brief, core.MailAndPush); err != nil {
+	if err := a.Harness.Say(project, agent, brief, mail.MailAndPush); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
@@ -489,7 +489,7 @@ func (a *Act) tellOne(project, agent, id, unit, fields string) string {
 	if !a.Harness.Probe(project, agent).Up {
 		return fmt.Sprintf(" %s holds %s but isn't running — it will read the change on the task.", agent, unit)
 	}
-	if err := a.Harness.Say(project, agent, prompts.MsgTaskEdited(id, unit, fields), core.MailOnly); err != nil {
+	if err := a.Harness.Say(project, agent, prompts.MsgTaskEdited(id, unit, fields), mail.MailOnly); err != nil {
 		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
 	}
 	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)

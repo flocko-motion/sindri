@@ -10,7 +10,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -177,7 +176,7 @@ func TestAnUnconfiguredGateEscalatesInsteadOfBlamingTheDiff(t *testing.T) {
 	r := openGate(t, e, "bombur", runflow.GateSubmit, "my summary")
 	deps := e.Deps.(*stubDeps)
 
-	if err := e.prAct().CompleteGate("repo", r, "failed", repo.MsgNoGate); err != nil {
+	if err := e.prAct().CompleteGate("repo", r, "failed", git.MsgNoGate); err != nil {
 		t.Fatalf("completeGate: %v", err)
 	}
 
@@ -254,7 +253,7 @@ func TestStallGateDoesNotReadAsALintFailure(t *testing.T) {
 
 // TestExecuteGateRunUsesRepoGateNotAContainer: a gate run must never touch the container port —
 // it checks the live worktree exactly as an inline gate always did. With no go.mod and no
-// declared verify in the fixture, repo.Gate trivially passes; the point here is that it runs at
+// declared verify in the fixture, git.Gate trivially passes; the point here is that it runs at
 // all without a container runtime wired (which would error, per the exploratory-run tests).
 func TestExecuteGateRunUsesRepoGateNotAContainer(t *testing.T) {
 	const agent, task = "bombur", "sd-1"

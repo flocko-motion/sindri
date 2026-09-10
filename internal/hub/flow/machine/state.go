@@ -12,7 +12,7 @@ import (
 )
 
 // Topic is a named event that makes a condition worth checking early. It may only SHORTEN latency —
-// every transition stays Reachable by the state's own poll — so a dropped one costs a beat.
+// every transition stays reachable by the state's own poll — so a dropped one costs a beat.
 type Topic string
 
 // Event is something that moves a subject out of a state — an Outcome of the state's own action, or

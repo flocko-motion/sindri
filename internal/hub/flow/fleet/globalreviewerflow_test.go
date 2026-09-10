@@ -306,7 +306,7 @@ func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
 	if code == 0 {
 		t.Error("an unknown id is still a refusal, so the code must be non-zero")
 	}
-	// Holding no review, its only Reachable backlog is the shared one — saying so beats "not found",
+	// Holding no review, its only reachable backlog is the shared one — saying so beats "not found",
 	// which reads as the task having been deleted.
 	if !strings.Contains(out.String(), "pooled reviewer") {
 		t.Errorf("the answer should explain why the id is out of reach, got %q", out.String())

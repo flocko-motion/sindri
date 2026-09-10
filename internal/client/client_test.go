@@ -9,7 +9,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/agentchan"
+	"github.com/flo-at/sindri/internal/hub/agent/agentchan"
 )
 
 // testTimeout bounds the waits for the hub to come up and for an event to arrive.

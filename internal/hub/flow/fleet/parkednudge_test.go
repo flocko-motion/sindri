@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -136,5 +137,32 @@ func TestACutOffTurnIsStillRetried(t *testing.T) {
 	}
 	if !e.roleAct().NudgeStalled("proj", "dvalin", saying("api-error"), 6*time.Minute) {
 		t.Error("a cut-off turn should still be retried, whatever the agent's standing")
+	}
+}
+
+// stillSince is a reading of an agent whose screen stopped at a known instant — the SPELL a nudge is
+// deduped against, which `saying` leaves unset because its callers measure the dwell themselves.
+func stillSince(word string, at time.Time) observe.Observation {
+	o := saying(word)
+	o.StillSince = at
+	return o
+}
+
+// TestAStallIsNamedOnceHoweverManyNoticeIt: two callers watch for a stall — the worker's own map,
+// which re-looks every minute for as long as it stands still, and the fleet sweep that catches every
+// other role. The spell is what makes that one message: held by a caller instead, a stalled worker
+// was prodded once a minute for as long as it stood still, and the second watcher doubled it.
+func TestAStallIsNamedOnceHoweverManyNoticeIt(t *testing.T) {
+	e, _ := quietWorkerHoldingWork(t, &stubDeps{})
+	spell := time.Now().Add(-6 * time.Minute)
+	if !e.roleAct().NudgeStalled("proj", "dvalin", stillSince("idle", spell), 6*time.Minute) {
+		t.Fatal("the first look at a stall must name it")
+	}
+	if e.roleAct().NudgeStalled("proj", "dvalin", stillSince("idle", spell), 7*time.Minute) {
+		t.Error("the same spell was named twice — a stall is one message, not one per look")
+	}
+	// A NEW stall is a new spell: the agent moved and stopped again, which is news.
+	if !e.roleAct().NudgeStalled("proj", "dvalin", stillSince("idle", time.Now()), 6*time.Minute) {
+		t.Error("a fresh stall went unnamed — the spell must dedupe one stall, not silence the next")
 	}
 }

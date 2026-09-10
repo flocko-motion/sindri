@@ -2,8 +2,9 @@
 // type:    assembly (the four flows, collected)
 // job:     hand the machine one registry over the four role flows, and answer which flow a role
 // runs — the only place that knows all four exist.
-// limits:  collecting. Each flow is declared in its own package and none of them imports another:
-// a role is set by a human, never reached by a transition.
+// limits:  the registry and the acting half. Every file HERE acts — the maps are one level down,
+// one package per role (worker/, planner/, reviewer/, coauthor/), which is why nothing at this
+// level carries the _act suffix the single-directory subjects need (-> internal/arch/flow_test.go).
 package roles
 
 import (

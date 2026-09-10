@@ -4,15 +4,15 @@
 // acting half re-decides through (-> core.Flows). It DECIDES nothing: the maps beside it do, and
 // each subject's *_act.go does the writing.
 // limits:  assembly and the looks that drive it. Every rule belongs to a map, every write to an
-// acting half, and git/persistence to hub/repo and hub/store.
+// acting half, and git/persistence to adapter/git and hub/store.
 package fleet
 
 import (
 	"context"
-	"github.com/flo-at/sindri/internal/adapter/gate"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/hub/core"
@@ -69,18 +69,19 @@ func (e *Engine) runAct() *runflow.Act   { return runflow.New(e.Core) }
 
 // Gated installs the submit path's quality gates on the engine's handles, chainable alongside New.
 // An engine with none runs no gate.
-func (e *Engine) Gated(gates ...gate.Gate) *Engine {
+func (e *Engine) Gated(gates ...core.Gate) *Engine {
 	e.Core.WithGates(gates...)
 	return e
 }
 
 // New builds the engine over the hub's lifetime, store, Deps and the task sources the composition
 // root wires in. The lifetime is a parameter so no path invents a root of its own.
-func New(lifetime context.Context, st *store.Store, deps Deps, hn Harness, sources ...tasks.Source) *Engine {
+func New(lifetime context.Context, st *store.Store, deps Deps, hn Harness, box *mail.Box, sources ...tasks.Source) *Engine {
 	e := &Engine{
 		Core: &core.Core{
 			Store: st, Deps: deps, Harness: hn,
-			Sit: situation.NewGatherer(st, hn), Lifetime: lifetime, Sources: sources, Pre: core.Preflight{Seen: map[string]string{}},
+			Sit: situation.NewGatherer(st, hn), Lifetime: lifetime, Sources: sources, Mail: box,
+			Pre: core.Preflight{Seen: map[string]string{}},
 		},
 	}
 	m, err := e.newFlow(lifetime, 0)

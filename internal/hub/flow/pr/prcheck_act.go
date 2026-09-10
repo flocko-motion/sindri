@@ -16,7 +16,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -56,7 +55,7 @@ func (a *Act) CheckOpenPRs(project string) {
 }
 
 // prBase is the base THIS PR will be merged onto, and its tip. Per PR, never project-wide: the merge
-// replays onto pr.Base (-> repo.MergeBranch) and names it in every conflict, so a check that used
+// replays onto pr.Base (-> git.MergeBranch) and names it in every conflict, so a check that used
 // the current project reference would answer about an operation nobody will perform — and could
 // report clean a PR that conflicts with its real base. Re-pointing `reference:` is exactly the event
 // this check runs on, so the two diverge precisely when it matters.
@@ -138,8 +137,8 @@ func (a *Act) executePrecheckRun(ctx context.Context, ps *store.ProjectStore, pr
 	}
 	a.Deps.Notify()
 	start := time.Now()
-	path, conflicts, err := repo.MaterializeCombined(root, pr.Branch, base)
-	defer repo.RemoveCombined(root)
+	path, conflicts, err := git.MaterializeCombined(root, pr.Branch, base)
+	defer git.RemoveCombined(root)
 	if err != nil {
 		// The check itself failed — say so as a check failure, never as a finding about the PR.
 		_ = ps.LogPR(pr.ID, "precheck-skipped", trimTo(err.Error(), 200))

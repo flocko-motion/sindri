@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +31,7 @@ func (clearTestDeps) Rehydrate(_, _ string)                       {}
 func (clearTestDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
-func (d clearTestDeps) Deliver(_, _, text string, _ core.Delivery) error {
+func (d clearTestDeps) Deliver(_, _, text string, _ mail.Delivery) error {
 	if d.delivered != nil {
 		*d.delivered = append(*d.delivered, text)
 	}

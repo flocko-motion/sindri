@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"os"
 
 	"github.com/flo-at/sindri/internal/hub/core"
@@ -45,7 +46,7 @@ func (a *Act) ReviewDirective(ctx context.Context, project, name string) (string
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: core.RestPhase("reviewer")},
 			store.ReasonFreed, "review overtaken: "+held+" was "+pr.Status+" before a verdict")
-		_ = a.Harness.Say(project, name, prompts.MsgReviewCancelled(held), core.MailAndPush)
+		_ = a.Harness.Say(project, name, prompts.MsgReviewCancelled(held), mail.MailAndPush)
 	}
 	if a.Retired(project, name) {
 		return prompts.DirRetired, true, nil // holds nothing now — retirement means no new claim, reviewer too
@@ -68,7 +69,7 @@ func (a *Act) ReviewDirective(ctx context.Context, project, name string) (string
 		if err := a.Harness.Clear(ctx, project, name); err != nil {
 			return "", false, err
 		}
-		if err := a.Harness.Say(project, name, prompts.MsgKickoff, core.PushOnly); err != nil {
+		if err := a.Harness.Say(project, name, prompts.MsgKickoff, mail.PushOnly); err != nil {
 			return "", false, err
 		}
 		return prompts.DirBusy("reviewer/clearing"), true, nil
@@ -98,7 +99,7 @@ func (a *Act) ReleaseReviewers(project, prID, why string) {
 			continue
 		}
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: core.RestPhase("reviewer")}, store.ReasonFreed, why)
-		_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), core.MailAndPush)
+		_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), mail.MailAndPush)
 	}
 	a.Deps.Notify()
 }

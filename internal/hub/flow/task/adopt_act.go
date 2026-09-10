@@ -8,7 +8,7 @@
 package task
 
 import (
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -40,7 +40,7 @@ func (a *Act) AdoptChild(project, parent, child string) {
 		}
 		// Mail-only, and no liveness gate: it MUST read this, and one that was down when the child
 		// landed would otherwise find out by being refused at its next checkpoint.
-		_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskGainedChild(parent, child, promoted), core.MailOnly)
+		_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskGainedChild(parent, child, promoted), mail.MailOnly)
 	}
 }
 

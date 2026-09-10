@@ -243,7 +243,7 @@ func TestGitRollbackRefusesWhatIsNotTheAgentsOwn(t *testing.T) {
 	}
 }
 
-// TestGitRollbackWillNotRewindPastWhereTheBranchStarted: the reference's own history is Reachable
+// TestGitRollbackWillNotRewindPastWhereTheBranchStarted: the reference's own history is reachable
 // from the agent's HEAD, so "is it an ancestor" alone would let a rollback rewind into work the agent
 // never did — leaving its branch DELETING files, and the reset out of reach of every verb it has.
 func TestGitRollbackWillNotRewindPastWhereTheBranchStarted(t *testing.T) {

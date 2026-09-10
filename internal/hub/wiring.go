@@ -1,7 +1,7 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-// needs back to the hub (chat core.Delivery, comments Deps, workflow Deps). Each
+// needs back to the hub (chat mail.Delivery, comments Deps, workflow Deps). Each
 // module's logic lives in its own package; this is only the glue.
 // limits:  adapters only — no module logic here. The DTOs these modules exchange
 // live in internal/api, which the hub and every front-end import directly.
@@ -9,7 +9,7 @@ package hub
 
 import (
 	"context"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"io"
 	"net/http"
 	"time"
@@ -62,8 +62,8 @@ func (x harness) Probe(project, name string) observe.Observation {
 	return o
 }
 
-func (x harness) Say(project, name, text string, d core.Delivery) error {
-	return x.h.Deliver(project, name, text, d)
+func (x harness) Say(project, name, text string, d mail.Delivery) error {
+	return x.h.mail.Deliver(project, name, text, d)
 }
 
 func (x harness) Clear(ctx context.Context, project, name string) error {
@@ -115,8 +115,8 @@ func (d agentDeps) Observation(project, name string) observe.Observation {
 	return d.h.observed(project, name)
 }
 
-func (d agentDeps) Deliver(project, name, text string, del core.Delivery) error {
-	return d.h.Deliver(project, name, text, del)
+func (d agentDeps) Deliver(project, name, text string, del mail.Delivery) error {
+	return d.h.mail.Deliver(project, name, text, del)
 }
 
 // ForgetFill drops the observer's fill for one agent, so the board stops reporting a figure the
@@ -139,6 +139,30 @@ func (d agentDeps) AgentClients(project, name string) int {
 
 func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
 	return d.h.projectConfig(project)
+}
+
+// mailDeps adapts the hub to mail.Deps: the mailbox owns the message, the hub owns the session it
+// is typed into. Both under the hub's lifetime — a push must land whether or not whoever triggered
+// it is still there.
+type mailDeps struct{ h *Hub }
+
+func (d mailDeps) Push(project, name, text string) error {
+	return d.h.agents.InjectWhenReady(d.h.lifetime, project, name, text)
+}
+func (d mailDeps) Notify()                        { d.h.notify() }
+func (d mailDeps) RepoName(project string) string { return d.h.repoName(project) }
+
+// Reachable is the watchdog's standing reading, not a probe: announcing sweeps the whole fleet, and
+// a fresh exec per agent per sweep is exactly what the watchdog exists to spare.
+func (d mailDeps) Reachable(project, name string) bool {
+	return d.h.observed(project, name).Up
+}
+
+// MayWake asks the surface, which is where "the hub told it to wait" is decided — so the mailbox
+// carries no second copy of a rule about retirement or a gated feature.
+func (d mailDeps) MayWake(project, name string) bool {
+	s, err := d.h.sit.Of(project, name)
+	return err == nil && !s.ParkedByTheHub()
 }
 
 // chatDelivery adapts the hub to chat.Delivery.

@@ -10,7 +10,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"os"
 	"time"
 )
@@ -58,7 +58,7 @@ func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed
 		s.deps.Notify()
 		return err
 	}
-	_ = s.deps.Deliver(project, name, s.deps.Kickoff(project, name), core.PushOnly)
+	_ = s.deps.Deliver(project, name, s.deps.Kickoff(project, name), mail.PushOnly)
 	return nil
 }
 
@@ -89,7 +89,7 @@ func (s *Service) FireArmedClears(ctx context.Context, project string) {
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 			continue
 		}
-		_ = s.deps.Deliver(project, a.Name, s.deps.Kickoff(project, a.Name), core.PushOnly)
+		_ = s.deps.Deliver(project, a.Name, s.deps.Kickoff(project, a.Name), mail.PushOnly)
 	}
 }
 

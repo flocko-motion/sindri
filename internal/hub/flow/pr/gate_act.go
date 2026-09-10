@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow/run"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/task"
 	"io"
@@ -23,7 +24,6 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -40,7 +40,7 @@ func (a *Act) GateCommit(project, agent, desc string) (sha string, err error) {
 		return "", fmt.Errorf("no such agent %q", agent)
 	}
 	wt := filepath.Join(a.Deps.ProjectRoot(project), ag.Workspace)
-	if !repo.HubOwnedTree(wt, ag.Workspace) {
+	if !git.HubOwnedTree(wt, ag.Workspace) {
 		// A clean tree is still named by its HEAD — which is how a reviewer checking an untouched
 		// checkout reuses the gate the submit already paid for. A dirty one is checked as it stands
 		// and named by nothing, since a verdict filed under HEAD would describe a tree that isn't it.
@@ -260,7 +260,7 @@ func (a *Act) QueuePosition(id string) int {
 	return run.QueuePositions(all)[id]
 }
 
-// executeGateRun runs one gate from the queue, against the commit it names. repo.GateTimeout bounds
+// executeGateRun runs one gate from the queue, against the commit it names. git.GateTimeout bounds
 // it (already equal to run.RunHardCap); nothing here adds a second bound.
 func (a *Act) ExecuteGateRun(ctx context.Context, project string, r api.Run) error {
 	ps := a.Store.For(project)
@@ -291,7 +291,7 @@ func (a *Act) runGate(ctx context.Context, ps *store.ProjectStore, project, wt, 
 	verify := a.VerifyCmd(project)
 	// The gate's own words are stored, not the report: the header naming the commit is composed for
 	// each reader, so a reused result cannot end up carrying two of them.
-	out, passed := repo.Gate(ctx, wt, verify)
+	out, passed := git.Gate(ctx, wt, verify)
 	_ = ps.SetGateResult(sha, passed, verify, out)
 	return gateReport(sha, passed, out), passed
 }
@@ -299,7 +299,7 @@ func (a *Act) runGate(ctx context.Context, ps *store.ProjectStore, project, wt, 
 // gateOnce is the gate without the record — for a tree that exists only for this check (the
 // preflight's combined replay), whose commit is thrown away with it, so nothing could ever reuse it.
 func (a *Act) gateOnce(ctx context.Context, project, wt, sha string) (report string, passed bool) {
-	out, passed := repo.Gate(ctx, wt, a.VerifyCmd(project))
+	out, passed := git.Gate(ctx, wt, a.VerifyCmd(project))
 	return gateReport(sha, passed, out), passed
 }
 
@@ -313,11 +313,11 @@ func (a *Act) gateTree(project string, r api.Run) (wt string, cleanup func(), er
 		ag, _, _ := a.Store.For(project).GetAgent(r.Agent)
 		return filepath.Join(root, ag.Workspace), func() {}, nil
 	}
-	path, err := repo.MaterializeGate(root, r.Commit)
+	path, err := git.MaterializeGate(root, r.Commit)
 	if err != nil {
 		return "", func() {}, err
 	}
-	return path, func() { repo.RemoveGate(root) }, nil
+	return path, func() { git.RemoveGate(root) }, nil
 }
 
 // completeGate is the continuation a gate result unlocks. Only "passed" creates a PR — the
@@ -349,7 +349,7 @@ func (a *Act) completeLintPR(project string, ps *store.ProjectStore, r api.Run, 
 		return err
 	}
 	for _, agent := range waiters {
-		_ = a.Harness.Say(project, agent, prompts.MsgPRGateFinished(r.Message, r.ID), core.MailAndPush)
+		_ = a.Harness.Say(project, agent, prompts.MsgPRGateFinished(r.Message, r.ID), mail.MailAndPush)
 	}
 	return nil
 }
@@ -362,7 +362,7 @@ func (a *Act) landGate(project string, ps *store.ProjectStore, r api.Run) error 
 		_, err := a.openMilestoneOrInterim(project, r)
 		return err
 	case run.GateLint:
-		return a.Harness.Say(project, r.Agent, prompts.MsgLintPassed(r.ID), core.MailAndPush)
+		return a.Harness.Say(project, r.Agent, prompts.MsgLintPassed(r.ID), mail.MailAndPush)
 	default: // "submit"
 		return a.landSubmit(project, ps, r)
 	}
@@ -384,7 +384,7 @@ func (a *Act) openMilestoneOrInterim(project string, r api.Run) (store.PR, error
 		}
 		// Push only: it names what just went up, which nothing else states, but it is nothing to
 		// act on now — just wait — so it need not survive being read late.
-		_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyMilestoneContributed(pr.ID, st.Container), core.PushOnly)
+		_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyMilestoneContributed(pr.ID, st.Container), mail.PushOnly)
 		return pr, nil
 	}
 	root := a.Deps.ProjectRoot(project)
@@ -402,7 +402,7 @@ func (a *Act) openMilestoneOrInterim(project string, r api.Run) (store.PR, error
 	// A conflict here would need the resolve loop, exactly as it does inline — but the gate already
 	// ran against the tree this rebase now replays, so the rare conflict left here still lands the
 	// agent in "resolving" the same way, just one step later than an inline gate would have.
-	conflicts, done, err := repo.RebaseStep(wt, st.Branch, base)
+	conflicts, done, err := git.RebaseStep(wt, st.Branch, base)
 	if err != nil {
 		return store.PR{}, err
 	}
@@ -410,7 +410,7 @@ func (a *Act) openMilestoneOrInterim(project string, r api.Run) (store.PR, error
 		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
 			store.ReasonAdvanced, "contribute rebase conflicts: "+strings.Join(conflicts, ", "))
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
-		_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyContributeConflicts(base, conflicts), core.MailAndPush)
+		_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyContributeConflicts(base, conflicts), mail.MailAndPush)
 		return pr, nil
 	}
 	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
@@ -426,7 +426,7 @@ func (a *Act) openMilestoneOrInterim(project string, r api.Run) (store.PR, error
 	}
 	a.Deps.Notify()
 	// Push only, same reason as the milestone case above.
-	_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyContributed(pr.ID), core.PushOnly)
+	_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyContributed(pr.ID), mail.PushOnly)
 	return pr, nil
 }
 
@@ -446,7 +446,7 @@ func (a *Act) landSubmit(project string, ps *store.ProjectStore, r api.Run) erro
 	// the only point that shuts that window, since the gate is what takes the time.
 	if t, ok, terr := ps.GetTask(target); terr == nil && ok && !api.Open(t) {
 		_ = ps.Log(r.Agent, "submit-refused", target+" closed while the gate ran")
-		return a.Harness.Say(project, r.Agent, prompts.MsgSubmitTaskClosed(target), core.MailAndPush)
+		return a.Harness.Say(project, r.Agent, prompts.MsgSubmitTaskClosed(target), mail.MailAndPush)
 	}
 	base, err := a.BaseBranch(a.Deps.ProjectRoot(project))
 	if err != nil {
@@ -481,7 +481,7 @@ func (a *Act) landSubmit(project string, ps *store.ProjectStore, r api.Run) erro
 	}
 	if err := a.RequestReview(project, pr.ID, ""); err != nil {
 		_ = ps.Log(r.Agent, "review-request-failed", pr.ID+": "+err.Error())
-		return a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyReviewRequestFailed(pr.ID, err), core.MailAndPush)
+		return a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyReviewRequestFailed(pr.ID, err), mail.MailAndPush)
 	}
 	// No "now up for review" message: it changes nothing the agent does — it waits either way —
 	// and the verdict that eventually arrives (a merge push, or a mailed rejection) says it all.
@@ -493,7 +493,7 @@ func (a *Act) landSubmit(project string, ps *store.ProjectStore, r api.Run) erro
 func (a *Act) rejectGate(project string, ps *store.ProjectStore, r api.Run, output string) error {
 	// Not a finding about the diff: only the user can set `verify:`, so "fix the violations" would
 	// send the agent hunting its own work for a fault that is not there.
-	if strings.TrimSpace(output) == strings.TrimSpace(repo.MsgNoGate) {
+	if strings.TrimSpace(output) == strings.TrimSpace(git.MsgNoGate) {
 		return a.escalateNoGate(project, ps, r)
 	}
 	st, err := a.backToWorking(ps, r)
@@ -505,7 +505,7 @@ func (a *Act) rejectGate(project string, ps *store.ProjectStore, r api.Run, outp
 	// MAIL: a gate report is what must be READ, re-readable beside the code and spent when the agent
 	// chooses. Pushed, two pages of console output were typed into a live session and charged to its
 	// context at once. Announced within a sweep anyway (-> NudgeMailWaiting), so nothing waits.
-	return a.Harness.Say(project, r.Agent, prompts.MsgGateFailed(strings.TrimSpace(output)), core.MailOnly)
+	return a.Harness.Say(project, r.Agent, prompts.MsgGateFailed(strings.TrimSpace(output)), mail.MailOnly)
 }
 
 // escalateNoGate stops the agent on the one question it cannot answer. Escalated rather than told:
@@ -517,7 +517,7 @@ func (a *Act) escalateNoGate(project string, ps *store.ProjectStore, r api.Run) 
 	_ = ps.Log(r.Agent, "gate-unconfigured", gateTarget(mustState(ps, r.Agent)))
 	a.Deps.Notify()
 	// Ungated by construction: this push explains the very escalation that would otherwise hold it.
-	return a.Harness.Say(project, r.Agent, prompts.MsgNoGateEscalated(repo.MsgNoGate), core.MailAndPush)
+	return a.Harness.Say(project, r.Agent, prompts.MsgNoGateEscalated(git.MsgNoGate), mail.MailAndPush)
 }
 
 // mustState reads a state row where its absence is not actionable: the caller is only reporting.
@@ -537,9 +537,9 @@ func (a *Act) stallGate(project string, ps *store.ProjectStore, r api.Run, statu
 	if r.Kind == run.GateLint {
 		// "Submit again" is the wrong instruction for a check nobody submitted: the agent is still
 		// working, and what it lost is the answer, not the attempt.
-		return a.Harness.Say(project, r.Agent, prompts.MsgLintIncomplete(status), core.MailAndPush)
+		return a.Harness.Say(project, r.Agent, prompts.MsgLintIncomplete(status), mail.MailAndPush)
 	}
-	return a.Harness.Say(project, r.Agent, prompts.MsgGateIncomplete(status), core.MailAndPush)
+	return a.Harness.Say(project, r.Agent, prompts.MsgGateIncomplete(status), mail.MailAndPush)
 }
 
 // backToWorking releases an agent a landing gate parked. A self-check is exempt: it parked nobody, so

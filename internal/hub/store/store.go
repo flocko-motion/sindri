@@ -225,6 +225,10 @@ func (s *Store) Close() error { return s.db.Close() }
 // For returns a project-scoped handle over this store.
 func (s *Store) For(project string) *ProjectStore { return &ProjectStore{s: s, project: project} }
 
+// Project is the repo this handle is scoped to — for a caller that was handed the handle and has to
+// say which project it is acting in.
+func (p *ProjectStore) Project() string { return p.project }
+
 // --- registry (global) ---
 
 // RegisterProject records (or refreshes the path of) a repo the hub now serves, and

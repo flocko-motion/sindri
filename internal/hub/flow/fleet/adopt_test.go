@@ -52,7 +52,7 @@ func didSomeWork(t *testing.T, root, agent string) {
 	}
 }
 
-// gatedFeatureAlive is gatedFeature with its worker Reachable, for the cases that assert what it
+// gatedFeatureAlive is gatedFeature with its worker reachable, for the cases that assert what it
 // was told. Its td-2 stays where gatedFeature left it — pending, and beside the point here.
 func gatedFeatureAlive(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller, *stubDeps) {
 	t.Helper()

@@ -249,47 +249,6 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, u
 	return window, total, unread, userUnread, unreadByRepo, nil
 }
 
-// MailBody returns one message with its full body — what a detail view or `mail show` asks for. A
-// PURE read: marking is a separate, deliberate act (-> MarkMailReadForUser), not a side effect of a look.
-func (h *Hub) MailBody(id int64) (AgentMail, bool, error) {
-	m, ok, err := h.store.MailByID(id)
-	if err != nil || !ok {
-		return m, ok, err
-	}
-	// The lifecycle rides along here and nowhere else: a listing wants the state, and only somebody
-	// asking about ONE message is asking what became of it (-> api.Mail.History).
-	m.History, _ = h.store.For(m.Project).MailEvents(id)
-	return m, true, nil
-}
-
-// MarkMailReadForUser marks one message read, but ONLY when addressed to the user — the one
-// deliberate act (a dwell, an ENTER, `mail show`) that may retire a message from the Mail tab.
-func (h *Hub) MarkMailReadForUser(id int64) error {
-	m, ok, err := h.store.MailByID(id)
-	if err != nil || !ok || m.Read() || !api.MailToUser(m) {
-		return err
-	}
-	if err := h.store.For(m.Project).MarkMailRead(id); err != nil {
-		return err
-	}
-	h.notify()
-	return nil
-}
-
-// MarkAllUserMailRead retires the user's whole unread backlog at once, and returns how many. Same
-// scope guarantee as the single-message act: an AGENT's unread mail is what it has yet to be told,
-// so no front-end gesture may retire it (-> MarkMailReadForUser).
-func (h *Hub) MarkAllUserMailRead() (int, error) {
-	n, err := h.store.MarkAllUserMailRead()
-	if err != nil {
-		return 0, err
-	}
-	if n > 0 {
-		h.notify()
-	}
-	return n, nil
-}
-
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on
 // the user — resolved against the board they describe. A front-end renders what it finds here, so
 // a board that left this out would silently drop every marker.

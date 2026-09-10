@@ -1,8 +1,8 @@
 package fleet
 
 import (
-	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow/roles"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -80,13 +80,13 @@ func TestEverySenderDeclaresBothProperties(t *testing.T) {
 func TestTheClassesAreDistinctAndNamed(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		d    core.Delivery
+		d    mail.Delivery
 		mail bool
 		push bool
 	}{
-		{"core.MailAndPush", core.MailAndPush, true, true},
-		{"core.MailOnly", core.MailOnly, true, false},
-		{"core.PushOnly", core.PushOnly, false, true},
+		{"mail.MailAndPush", mail.MailAndPush, true, true},
+		{"mail.MailOnly", mail.MailOnly, true, false},
+		{"mail.PushOnly", mail.PushOnly, false, true},
 	} {
 		if c.d.Mail != c.mail || c.d.Push != c.push {
 			t.Errorf("%s = %+v, want mail=%v push=%v", c.name, c.d, c.mail, c.push)
@@ -95,7 +95,7 @@ func TestTheClassesAreDistinctAndNamed(t *testing.T) {
 			t.Errorf("%s must be a message", c.name)
 		}
 	}
-	if (core.Delivery{}).Sends() {
+	if (mail.Delivery{}).Sends() {
 		t.Error("neither property set is not a message — a sender that forgot to classify")
 	}
 }

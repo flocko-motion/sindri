@@ -3,7 +3,7 @@
 // job:     the branch agents work against, and the once-per-root warning when nobody configured
 // one. Held here because a task, a pull request and a run all need the same answer, and three
 // copies of it would be three chances to disagree.
-// limits:  reading. Branching, merging and rebasing are the callers' (-> adapter/git, hub/repo).
+// limits:  reading. Branching, merging and rebasing are the callers' (-> adapter/git, adapter/git).
 package core
 
 import (

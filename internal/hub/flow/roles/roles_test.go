@@ -36,7 +36,7 @@ func TestEveryStateNameIsUnique(t *testing.T) {
 	}
 }
 
-// TestNoFlowLeavesItsOwnRole: a worker state Reachable from a planner's map would be a rule written
+// TestNoFlowLeavesItsOwnRole: a worker state reachable from a planner's map would be a rule written
 // for somebody else answering for it. Roles are set by a human, never reached by a transition.
 func TestNoFlowLeavesItsOwnRole(t *testing.T) {
 	for _, role := range Roles {

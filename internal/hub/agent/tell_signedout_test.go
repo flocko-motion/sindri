@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"io"
 	"strings"
 	"testing"
@@ -181,7 +181,7 @@ func (tellDeps) Rehydrate(_, _ string)                       {}
 func (tellDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (tellDeps) ForgetFill(_, _ string)                      {}
 
-func (tellDeps) Deliver(_, _, _ string, _ core.Delivery) error { return nil }
+func (tellDeps) Deliver(_, _, _ string, _ mail.Delivery) error { return nil }
 
 // Observation mirrors the always-up fake runtime this fixture backs, so the situation-derived rules
 // see the same liveness AgentUp reports.
