@@ -186,13 +186,13 @@ func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
 	if mail[0].Sender != api.SenderUser {
 		t.Errorf("a human rejection is from the user, got %q", mail[0].Sender)
 	}
-	// A pointer, not a third copy of the feedback: pr.Feedback is canonical, and DirRejected already
-	// re-serves it verbatim on every ask while the PR stays rejected.
+	// The verdict, not a third copy of the feedback: pr.Feedback is canonical, and the round that
+	// answers it opens with it — worker/reworking tells the agent as it lands there.
 	if strings.Contains(mail[0].Body, "the gate is missing") {
-		t.Errorf("mail should point at `sindri`, not duplicate the feedback: %q", mail[0].Body)
+		t.Errorf("the notice should carry the verdict, not duplicate the feedback: %q", mail[0].Body)
 	}
-	if !strings.Contains(mail[0].Body, "sindri") {
-		t.Errorf("mail should point the reader at `sindri` for the feedback: %q", mail[0].Body)
+	if !strings.Contains(mail[0].Body, "pr-td-1 was rejected") {
+		t.Errorf("the notice should name what was rejected: %q", mail[0].Body)
 	}
 	if pr, _, _ := ps.GetPR("pr-td-1"); pr.Feedback != "the gate is missing" {
 		t.Errorf("the canonical feedback should live on the PR, got %q", pr.Feedback)

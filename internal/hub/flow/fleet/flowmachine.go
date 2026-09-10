@@ -7,7 +7,9 @@ package fleet
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	flowtask "github.com/flo-at/sindri/internal/hub/flow/task"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
@@ -142,12 +145,22 @@ func legacy(role, phase string) string {
 	return ""
 }
 
-// moveState writes an agent's new state, with the words the transition carried.
+// moveState writes an agent's new state, with the words the transition carried, and tells the
+// agent where it now stands when the state it landed in says so (-> tell).
 func (e *Engine) moveState(s, from, to, why string) error {
 	project, agent, err := subject(s)
 	if err != nil {
 		return err
 	}
+	if err := e.writeState(project, agent, from, to, why); err != nil {
+		return err
+	}
+	e.tell(project, agent, to)
+	return nil
+}
+
+// writeState records the landing state on the agent's row.
+func (e *Engine) writeState(project, agent, from, to, why string) error {
 	ps := e.Store.For(project)
 	// Entering a resting state RELEASES the work. SetPhase alone preserves the row, which left an
 	// agent idle with a task still on it — free on the board and refused by the assigner at once.
@@ -161,10 +174,34 @@ func (e *Engine) moveState(s, from, to, why string) error {
 		return nil
 	}
 	st, _ := ps.GetState(agent)
-	err = ps.SetState(store.AgentState{Agent: agent, Task: st.Task, Branch: st.Branch,
+	err := ps.SetState(store.AgentState{Agent: agent, Task: st.Task, Branch: st.Branch,
 		Container: st.Container, Phase: to}, store.ReasonAdvanced, from+" -> "+to+": "+why)
 	e.Deps.Notify()
 	return err
+}
+
+// tell speaks a landing state's own words into the agent's session, for a state that declares it
+// (-> machine.State.Tells): the hub holds the answer already, so sending the agent to fetch it
+// costs a call and a turn to hear what could simply have been said. A state that declares nothing
+// is silent — an agent with nothing to do is told nothing, and the machine hands work out itself.
+func (e *Engine) tell(project, agent, to string) {
+	s, ok := agentflow.ByName(to)
+	if !ok || !s.Tells {
+		return
+	}
+	w, err := e.gather(project, agent)
+	if err == nil {
+		var words string
+		if words, err = e.speak(w, s); err == nil {
+			err = e.Harness.Say(project, agent, words, mail.PushOnly)
+		}
+	}
+	if err != nil {
+		// Loud: this agent has landed somewhere it was meant to be told about and heard nothing, so
+		// it is sitting on a fresh session with no brief and no reason to ask for one.
+		fmt.Fprintf(os.Stderr, "hub: %s/%s entered %s with nothing said: %v\n", project, agent, to, err)
+		_ = e.Store.For(project).Log(agent, "untold", to+": "+err.Error())
+	}
 }
 
 // subjects is every agent the hub knows, as "project/agent".

@@ -100,9 +100,8 @@ func (a *Act) completeReview(prProject, home, prID, agent, verdict, findings str
 		}
 	}
 	_ = a.Store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonFreed, "verdict given on "+prID)
-	// Woken, though: a verdict must not be where a reviewer's loop ends. Waking and clearing were one
-	// act here and are two things — a push queues behind the running turn and arrives as it ends.
-	_ = a.Harness.Say(home, agent, prompts.MsgKickoff, mail.PushOnly)
+	// A verdict is not where a reviewer's loop ends, and nothing here has to say so: idle is a state
+	// the machine watches, and the next pull request arrives as its own hand-over.
 }
 
 // ApprovePR is the human approve path (TUI/CLI), and the agent's own is CmdApprove: both are the

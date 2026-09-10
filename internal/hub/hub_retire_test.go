@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/world/observe"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
@@ -159,7 +158,7 @@ func TestKickoffReachesARetiredAgent(t *testing.T) {
 
 	// No real pod is running here, so the push still fails to land — the log is what proves the gate
 	// itself let it through rather than refusing on sight.
-	_ = h.mail.Deliver(testProject, "dvalin", prompts.MsgKickoff, mail.PushOnly)
+	_ = h.mail.Deliver(testProject, "dvalin", h.wf.Kickoff(testProject, "dvalin"), mail.PushOnly)
 	if loggedPushSuppressed(t, h, "dvalin") {
 		t.Error("a retired agent's kickoff must not be gated — it is the only way it learns that")
 	}

@@ -9,7 +9,6 @@ import (
 	"context"
 
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // AgentDirective is the no-arg `sindri` answer, returned AT ONCE, mail served inline ahead of it
@@ -40,26 +39,6 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	return preamble + e.prAct().RebaseNotice(project, name) + dir, nil
 }
 
-// standingDirective answers a role the hub holds no work for, from its phase alone — the backlog
-// never enters either, since a planner's work arrives as a conversation and a coauthor's arrives as
-// the user typing. ok is false for a role whose next job the hub does hold, and whose answer
-// therefore has to be fetched. Shared with Kickoff, which serves this text directly.
-func standingDirective(role string, st store.AgentState) (dir string, ok bool) {
-	switch role {
-	case "coauthor":
-		return prompts.DirCoauthor, true
-	case "planner":
-		switch st.Phase {
-		case "submitted":
-			return prompts.DirSubmitted, true
-		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
-			return prompts.DirPlanning, true
-		}
-		return prompts.DirPlanner, true
-	}
-	return "", false
-}
-
 // directive is the no-arg `sindri` answer: where the agent stands, in its own words, and what it may
 // run there. It DECIDES nothing and it acts on nothing — the machine does both on its own beat, so
 // asking is a read.
@@ -68,6 +47,13 @@ func (e *Engine) directive(_ context.Context, project, name string) (string, err
 	// listening — so this looks first and then reports. Looking no longer changes the world as a
 	// side effect of dispatch: the machine moves it, records the pass, and this reads the result.
 	e.Flow.Look(project, name)
+	return e.stands(project, name)
+}
+
+// stands renders where the agent is RIGHT NOW — its state's words and the verbs that state offers —
+// without running a pass. Split from directive for the callers that speak to an agent the machine
+// has just moved: a second look from inside the move would be reading the world mid-turn.
+func (e *Engine) stands(project, name string) (string, error) {
 	s, err := e.flow.State(project + "/" + name)
 	if err != nil {
 		return "", err

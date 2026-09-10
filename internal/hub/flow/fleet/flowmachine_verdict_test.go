@@ -4,6 +4,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
@@ -37,21 +38,27 @@ func verdictFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 	return e, ps, deps
 }
 
-// TestApproveWakesTheReviewer is the sd-98fa96 fix, now via sd-a19ef9's clear: a verdict must not be
-// where a reviewer's loop ends. Firing the clear is what wakes fili — the kickoff behind it gives the
-// reviewer a reason to run `sindri` again, rather than leaving it on "awaiting human merge".
-func TestApproveWakesTheReviewer(t *testing.T) {
-	e, _, deps := verdictFixture(t)
+// TestApproveLeavesTheReviewerIdleAndQuiet: a verdict must not be where a reviewer's loop ends, and
+// nothing here has to SAY so. It lands the reviewer on idle, which the machine watches, and the next
+// pull request arrives as its own hand-over — where "run `sindri` for your next job" only asked the
+// reviewer to ask for what the hub was already holding.
+func TestApproveLeavesTheReviewerIdleAndQuiet(t *testing.T) {
+	e, ps, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.prAct().CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if len(deps.Injected) == 0 || deps.Injected[len(deps.Injected)-1] != "fili" {
-		t.Fatalf("fili was not woken after its verdict: %v", deps.Injected)
+	if st, err := ps.GetState("fili"); err != nil || st.Phase != "idle" {
+		t.Fatalf("fili is on %q (err %v), want idle — that is what the machine picks up from", st.Phase, err)
+	}
+	for _, name := range deps.Injected {
+		if name == "fili" {
+			t.Errorf("injected = %v — a freed reviewer is told nothing until there is something to tell", deps.Injected)
+		}
 	}
 	for _, name := range deps.Cleared {
 		if name == "fili" {
-			t.Errorf("cleared = %v — waking a reviewer is a push; its own next job is what prepares it", deps.Cleared)
+			t.Errorf("cleared = %v — a verdict is not a reason to reset a session", deps.Cleared)
 		}
 	}
 }
@@ -72,14 +79,15 @@ func TestARejectionClearsTheWorkerForItsNextRound(t *testing.T) {
 	if len(deps.Cleared) != 1 || deps.Cleared[0] != "bombur" {
 		t.Fatalf("cleared = %v, want exactly one Clear(bombur) — the worker starts its round fresh", deps.Cleared)
 	}
-	// The feedback still has to reach the worker, and behind the clear rather than into what it wiped.
-	// Not the LAST delivery — the reviewer's own wake follows this one (-> TestRejectWakesTheReviewer).
+	// The FEEDBACK itself has to reach the worker, behind the clear rather than into what it wiped —
+	// landing in worker/reworking is what says it, so nothing has to ask the worker to ask.
 	var told bool
-	for _, name := range deps.Injected {
-		told = told || name == "bombur"
+	for i, name := range deps.Injected {
+		told = told || (name == "bombur" && strings.Contains(deps.InjectedText[i], "another pass"))
 	}
 	if !told {
-		t.Errorf("injected = %v, want the rejection delivered to bombur after the clear", deps.Injected)
+		t.Errorf("injected = %v / %q, want the findings themselves delivered to bombur after the clear",
+			deps.Injected, deps.InjectedText)
 	}
 }
 
@@ -96,19 +104,20 @@ func TestAnUnreadWorkerSessionIsNotClearedOnRejection(t *testing.T) {
 	}
 }
 
-// TestRejectWakesTheReviewer is the same fix on the other verdict — both end a review.
-func TestRejectWakesTheReviewer(t *testing.T) {
-	e, _, deps := verdictFixture(t)
+// TestRejectLeavesTheReviewerIdleAndQuiet is the same rule on the other verdict — both end a review.
+// The AUTHOR hears about a rejection; the reviewer that gave it has nothing left to be told.
+func TestRejectLeavesTheReviewerIdleAndQuiet(t *testing.T) {
+	e, ps, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.prAct().CmdReject(c, []string{"pr-a", "not", "yet"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdReject: code=%d err=%v", code, err)
 	}
-	if len(deps.Injected) == 0 || deps.Injected[len(deps.Injected)-1] != "fili" {
-		t.Fatalf("fili was not woken after its verdict: %v", deps.Injected)
+	if st, err := ps.GetState("fili"); err != nil || st.Phase != "idle" {
+		t.Fatalf("fili is on %q (err %v), want idle", st.Phase, err)
 	}
-	for _, name := range deps.Cleared {
+	for _, name := range deps.Injected {
 		if name == "fili" {
-			t.Errorf("cleared = %v — waking a reviewer is a push; its own next job is what prepares it", deps.Cleared)
+			t.Errorf("injected = %v — the reviewer is freed, not instructed", deps.Injected)
 		}
 	}
 }

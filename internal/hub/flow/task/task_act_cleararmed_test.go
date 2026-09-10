@@ -3,7 +3,6 @@ package task
 import (
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/prompts"
 	"path/filepath"
 	"testing"
 
@@ -68,8 +67,9 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 	if len(deps.Cleared) != 1 || deps.Cleared[0] != "dvalin" {
 		t.Errorf("cleared = %v, want exactly one Clear(dvalin)", deps.Cleared)
 	}
-	if len(deps.InjectedText) != 1 || deps.InjectedText[0] != prompts.MsgKickoff {
-		t.Errorf("injectedText = %v, want the generic kickoff — nothing was claimed for this arming to hand over", deps.InjectedText)
+	if len(deps.InjectedText) != 0 {
+		t.Errorf("injectedText = %v, want the emptied session left empty — nothing was claimed for this "+
+			"arming to hand over, and the machine speaks where the agent lands", deps.InjectedText)
 	}
 }
 

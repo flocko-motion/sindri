@@ -41,18 +41,22 @@ func TestALaunchedPlannerIsGreetedWithItsDirective(t *testing.T) {
 	if !strings.Contains(sent, prompts.DirPlanner) {
 		t.Errorf("a launched planner should wake holding its own directive: %s", sent)
 	}
-	if strings.Contains(sent, prompts.MsgKickoff) {
+	if strings.Contains(sent, "Run `sindri`") {
 		t.Errorf("that fetch is the round trip this feature removes: %s", sent)
 	}
 }
 
-// TestALaunchedWorkerIsStillSentToFetch is the other half: the hub holds a worker's next job, so its
-// answer varies and the call buys the current one.
-func TestALaunchedWorkerIsStillSentToFetch(t *testing.T) {
+// TestALaunchedWorkerIsGreetedWithItsDirective is the other half: the hub holds a worker's next job
+// too, so the fetch asked it to ask for what the hub was holding as it spoke.
+func TestALaunchedWorkerIsGreetedWithItsDirective(t *testing.T) {
 	h, rt := greetable(t, "worker")
 	h.greet(testProject, "dvalin")
-	if sent := rt.joined(); !strings.Contains(sent, prompts.MsgKickoff) {
-		t.Errorf("a launched worker should still be told to run `sindri`: %s", sent)
+	sent := rt.joined()
+	if !strings.Contains(sent, prompts.DirNoTasks) {
+		t.Errorf("a launched worker should wake knowing where it stands: %s", sent)
+	}
+	if strings.Contains(sent, "Run `sindri`") {
+		t.Errorf("the round trip is gone for every role, not just the standing ones: %s", sent)
 	}
 }
 

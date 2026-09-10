@@ -42,10 +42,11 @@ var refreshing = flow.State{
 var reworking = flow.State{
 	Name:  Reworking,
 	Title: "Answering a rejection",
-	About: "A verdict came back asking for another round. The feedback is PUSHED on every ask rather " +
-		"than waited for, since an agent relaunched between rounds remembers none of it, and the " +
-		"round number travels with it because that is the fact that should change the approach.",
-	Says: says.Rejected,
+	About: "A verdict came back asking for another round. The feedback is the brief, so it arrives " +
+		"the moment the agent lands here — the session it would have asked from was just discarded " +
+		"by refreshing, and the round number travels with it as the fact that changes the approach.",
+	Says:  says.Rejected,
+	Tells: true,
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.TaskGone, Idle, "the work was closed under it"},

@@ -34,9 +34,6 @@ func TestPlannerKickoffCarriesItsDirective(t *testing.T) {
 	for phase, want := range map[string]string{"": prompts.DirPlanner, "idle": prompts.DirPlanner, "planning": prompts.DirPlanning} {
 		e, c, _ := plannerIn(t, phase)
 		k := e.Kickoff(c.Project, c.Agent)
-		if k == prompts.MsgKickoff {
-			t.Errorf("phase %q: a planner was sent to fetch an answer that never varies: %q", phase, k)
-		}
 		if !strings.Contains(k, want) {
 			t.Errorf("phase %q: the kickoff should carry the planner's own directive: %q", phase, k)
 		}
@@ -65,15 +62,20 @@ func TestCoauthorKickoffCarriesItsDirective(t *testing.T) {
 	}
 }
 
-// TestWorkerAndReviewerKickoffsStillFetch: the hub holds their next job, so the fetch buys something.
-func TestWorkerAndReviewerKickoffsStillFetch(t *testing.T) {
-	for _, role := range []string{"worker", "reviewer"} {
+// TestWorkerAndReviewerKickoffsCarryTheirDirective: the hub holds their next job too, so a fetch
+// buys nothing there either — it asks the agent to ask for what the hub is holding as it speaks.
+func TestWorkerAndReviewerKickoffsCarryTheirDirective(t *testing.T) {
+	for role, want := range map[string]string{"worker": prompts.DirNoTasks, "reviewer": prompts.DirNoReviews} {
 		e, c, ps := plannerIn(t, "idle")
 		if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: role}); err != nil {
 			t.Fatal(err)
 		}
-		if k := e.Kickoff(c.Project, c.Agent); k != prompts.MsgKickoff {
-			t.Errorf("a %s should still be sent to `sindri` for its job, got %q", role, k)
+		k := e.Kickoff(c.Project, c.Agent)
+		if !strings.Contains(k, want) {
+			t.Errorf("a %s's kickoff should say where it stands: %q", role, k)
+		}
+		if !strings.Contains(k, strings.ToUpper(role)) {
+			t.Errorf("the kickoff should name the role it is serving: %q", k)
 		}
 	}
 }
@@ -103,7 +105,7 @@ func TestPlannerKickoffNamesUnreadMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := e.Kickoff(c.Project, c.Agent)
-	for _, want := range []string{"1 unread message(s)", "Run `sindri`", prompts.DirPlanner} {
+	for _, want := range []string{"1 unread message(s)", "`sindri mail`", prompts.DirPlanner} {
 		if !strings.Contains(k, want) {
 			t.Errorf("the kickoff should name %q: %q", want, k)
 		}

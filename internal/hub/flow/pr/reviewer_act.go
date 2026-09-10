@@ -62,14 +62,11 @@ func (a *Act) ReviewDirective(ctx context.Context, project, name string) (string
 		return prompts.DirNoReviews, true, nil
 	}
 	// An armed clear fires eagerly before any claim, same as fireClearIfArmed — and answers with the
-	// clearing state for the same reason: the session that asked has just been discarded, so the
-	// review is claimed on the ask that follows the kickoff rather than served into a reply nobody
-	// reads.
+	// clearing state for the same reason: the session that asked has just been discarded, so a reply
+	// would go where nobody reads it. The machine takes it from here, and the hand-over it runs
+	// (reviewer/taking) puts the review in the fresh session itself.
 	if a.ClearArmedFor(project, name) {
 		if err := a.Harness.Clear(ctx, project, name); err != nil {
-			return "", false, err
-		}
-		if err := a.Harness.Say(project, name, prompts.MsgKickoff, mail.PushOnly); err != nil {
 			return "", false, err
 		}
 		return prompts.DirBusy("reviewer/clearing"), true, nil

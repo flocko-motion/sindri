@@ -79,12 +79,10 @@ func TestRejectedFeatureKeepsTheFeature(t *testing.T) {
 	if len(deps.InjectedText) != 1 {
 		t.Fatalf("want one message to the author, got %d", len(deps.InjectedText))
 	}
-	// A pointer, not the feedback itself — that stays on the PR and is what the next directive re-serves.
+	// The verdict, not the feedback itself — that stays on the PR and opens the round that answers it.
 	msg := deps.InjectedText[0]
-	for _, want := range []string{"td-EPIC", "sindri"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the rejection should carry %q: %q", want, msg)
-		}
+	if !strings.Contains(msg, "td-EPIC") {
+		t.Errorf("the rejection should name the feature: %q", msg)
 	}
 	if strings.Contains(msg, "not yet") {
 		t.Errorf("the mail should not duplicate the feedback itself: %q", msg)

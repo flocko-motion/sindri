@@ -101,14 +101,13 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 	}
 }
 
-// TestAVerdictWakesWithoutClearing: a verdict frees the reviewer and tells it to carry on, and it
-// leaves the session alone. Clearing is PREPARATION — it belongs to the hand-over of the next review
-// (-> claimReview's own clear), where the session is reset for what it is about to do.
+// TestAVerdictLeavesTheSessionAlone: clearing is PREPARATION — it belongs to the hand-over of the
+// next review (-> claimReview's own clear), where the session is reset for what it is about to do.
 //
 // Fired here it landed in the reviewer's own running turn, the one that called `approve`. Claude Code
-// queues what is typed mid-turn, and a queued /clear discards the queue it sits in — the kickoff
-// riding behind it included. vestri gave a verdict and was left cleared, idle, and told nothing.
-func TestAVerdictWakesWithoutClearing(t *testing.T) {
+// queues what is typed mid-turn, and a queued /clear discards the queue it sits in. vestri gave a
+// verdict and was left cleared, idle, and told nothing.
+func TestAVerdictLeavesTheSessionAlone(t *testing.T) {
 	e, _, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.prAct().CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
@@ -116,9 +115,5 @@ func TestAVerdictWakesWithoutClearing(t *testing.T) {
 	}
 	if len(deps.Cleared) != 0 {
 		t.Errorf("cleared = %v, want none — a verdict is not a reason to reset a session", deps.Cleared)
-	}
-	// A push, so it queues behind the running turn and arrives as that turn ends.
-	if len(deps.Delivered) == 0 || deps.Delivered[len(deps.Delivered)-1].Mail {
-		t.Errorf("the wake must be push-only: %+v", deps.Delivered)
 	}
 }

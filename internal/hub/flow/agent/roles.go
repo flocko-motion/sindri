@@ -63,6 +63,22 @@ var All = func() []flow.State {
 	return out
 }()
 
+// byName indexes All, for a caller holding a state's name and needing its declaration.
+var byName = func() map[string]flow.State {
+	m := make(map[string]flow.State, len(All))
+	for _, s := range All {
+		m[s.Name] = s
+	}
+	return m
+}()
+
+// ByName is the state a name stands for. Names are unique across the four flows (the machine is
+// registered over all of them at once), so one map answers for every role.
+func ByName(name string) (flow.State, bool) {
+	s, ok := byName[name]
+	return s, ok
+}
+
 // StartFor is the start state for an agent of this role, for the machine's own Start. Every role
 // starts somewhere, so a caller that reaches an unknown one is told rather than defaulted.
 func StartFor(role string) string {

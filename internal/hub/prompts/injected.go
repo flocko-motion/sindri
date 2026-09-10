@@ -1,8 +1,8 @@
 // package: hub/prompts / injected
 // type:    logic (the [hub]/[user]/[reviewer] lines typed into an agent's session)
 // job:     what the hub SAYS to an agent unprompted — a verdict, a merge, a task
-// cancelled under it, a reference branch that moved. Unlike a directive,
-// which answers `sindri`, these arrive whether or not the agent asked.
+// cancelled under it, a reference branch that moved. One that FREES an agent
+// ends there: the machine hands the next thing out itself (-> fleet.tell).
 // limits:  the strings only; when each is sent is the workflow's, and delivery is
 // the hub's (-> InjectWhenReady).
 package prompts
@@ -13,33 +13,30 @@ import (
 	"time"
 )
 
-// MsgKickoff sends a fresh session to fetch its job, for the roles the hub holds one for.
-const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
-
-// standing names each role whose next move the hub never holds, in the words its kickoff opens
-// with — a planner's work arrives as a conversation, a coauthor's as the user typing.
-var standing = map[string]string{
+// whoIs names a role in the words its kickoff opens with, where the role itself says where work
+// comes from — a planner's arrives as a conversation, a coauthor's as the user typing.
+var whoIs = map[string]string{
 	"planner":  "PLANNER: your work reaches you as a conversation in this terminal",
 	"coauthor": "COAUTHOR: your work is whatever the user types in this terminal",
 }
 
-// MsgStandingKickoff wakes one of those roles with its directive in hand: that answer never varies,
-// so the fetch cost a call and a turn to hear it. unread is what a call DOES buy, so it asks for one.
-func MsgStandingKickoff(role, directive string, unread int) string {
-	who, ok := standing[role]
+// MsgKickoff wakes a fresh session with its directive already in hand — the hub holds that answer
+// whatever the role. unread is the one thing a call DOES buy, so it names the verb that reads it.
+func MsgKickoff(role, directive string, unread int) string {
+	who, ok := whoIs[role]
 	if !ok {
 		who = strings.ToUpper(role)
 	}
-	head := fmt.Sprintf("[hub] You're live. You are this project's %s, and this is your standing directive.\n\n", who)
+	head := fmt.Sprintf("[hub] You're live. You are this project's %s:\n\n", who)
 	if unread > 0 {
-		head = fmt.Sprintf("[hub] You're live. You are this project's %s. %d unread message(s) are waiting for you. Run `sindri` to read them. Your standing directive:\n\n", who, unread)
+		head = fmt.Sprintf("[hub] You're live. You are this project's %s, with %d unread message(s) — `sindri mail` reads them:\n\n", who, unread)
 	}
 	return head + directive
 }
 
 // MsgUnretired tells a retired agent it is back in service. DirRetired sends it away from asking
 // again on its own, so this push is the only thing that would ever reach it (-> Hub.SetRetired).
-const MsgUnretired = "[hub] You're back in service — the user has un-retired you. Run `sindri` for your next action."
+const MsgUnretired = "[hub] You're back in service — the user has un-retired you."
 
 // MsgStalled prods an agent that holds work but has gone quiet, and offers it the SAME two endings
 // the finish rule states (-> FinishNote) rather than a third: describing a blocker to the user is
@@ -62,7 +59,7 @@ const MsgRetryTurn = "[hub] Your last response was cut off mid-stream by an API 
 // unlike a rejection there is nothing to resubmit. Without it the author waits in "submitted".
 func MsgPRScrapped(prID string) string {
 	return fmt.Sprintf("[user] %s was scrapped — the work isn't wanted and its branch is gone. "+
-		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
+		"Nothing to fix or resubmit.", prID)
 }
 
 // MsgTaskEdited tells a worker a task inside its unit was revised under it — its own, or one
@@ -98,16 +95,15 @@ func MsgTaskGainedChild(parent, child string, promoted bool) string {
 		"when none are left. Read the new work first: `sindri task %s`.", parent, child, child)
 }
 
-// MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
-// stop, and don't clean up (the hub already reset the worktree), just get new work.
+// MsgTaskCancelled: the task was closed under the worker, and the hub already reset the worktree.
 func MsgTaskCancelled(id string) string {
-	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
+	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when it hands you your next task.", id)
 }
 
 // MsgSubmitTaskClosed tells an author its submission found no task to land into. A fact about the
 // world, never a violation to fix, so it does not ask for a resubmission — that would loop.
 func MsgSubmitTaskClosed(task string) string {
-	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", task)
+	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`.", task)
 }
 
 // MsgHierarchyTaken tells a worker its feature went to whoever is already inside it. Names the other
@@ -115,7 +111,7 @@ func MsgSubmitTaskClosed(task string) string {
 func MsgHierarchyTaken(container, other string) string {
 	return fmt.Sprintf("[hub] Feature %s is released: %s is working inside it, and one tree is one agent's — "+
 		"two would put two branches on the same subtasks. Your own work on it is untouched and %s carries on "+
-		"from here. Run `sindri` for your next task.", container, other, other)
+		"from here.", container, other, other)
 }
 
 // MsgNoGateQuestion is what the USER reads on the escalation list, so it states the decision rather
@@ -137,12 +133,12 @@ func MsgNoGateEscalated(detail string) string {
 // was not judged — the author is the one who knows whether the branch still holds something wanted,
 // and a rejection with no reading of the code reads as one otherwise.
 func MsgPRSettledWithTask(prID, task string) string {
-	return fmt.Sprintf("[hub] %s was rejected: its task %s is closed, so there is nothing left for it to land into. This is not a verdict on your work — nobody read it, and your branch still holds it. Do not resubmit; if what is on it is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", prID, task)
+	return fmt.Sprintf("[hub] %s was rejected: its task %s is closed, so there is nothing left for it to land into. This is not a verdict on your work — nobody read it, and your branch still holds it. Do not resubmit; if what is on it is still wanted, say so with `sindri escalate`.", prID, task)
 }
 
-// MsgReviewCancelled tells a reviewer its PR was scrapped — stop, its branch is gone, get new work.
+// MsgReviewCancelled tells a reviewer its PR was scrapped — stop, its branch is gone.
 func MsgReviewCancelled(prID string) string {
-	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
+	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone.", prID)
 }
 
 // MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
@@ -262,7 +258,7 @@ func MsgResolveNeeded(base string, files []string) string {
 // MsgMilestoneMerged tells a feature worker its milestone merged and its branch was
 // reset onto the new base.
 func MsgMilestoneMerged(prID string) string {
-	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is reset onto the new base. Run `sindri` to continue.", prID)
+	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is reset onto the new base.", prID)
 }
 
 // MsgReapplyConflict tells a worker its PR merged (milestone or plain interim contribution), but
@@ -280,22 +276,21 @@ func MsgResetFailed(prID, base string) string {
 }
 
 // MsgMilestoneRejected names the feature rather than the subtask in hand, since the PR covers the
-// whole branch. A pointer, like its siblings below — DirContainerRejected re-serves the feedback.
+// whole branch. The verdict alone — worker/reworking opens the next round with the feedback.
 func MsgMilestoneRejected(container, voice string) string {
-	return fmt.Sprintf("[%s] The PR for feature %s was rejected. Run `sindri` for the feedback and "+
-		"where to address it.", voice, container)
+	return fmt.Sprintf("[%s] The PR for feature %s was rejected.", voice, container)
 }
 
-// MsgRejectedByUser tells a worker the user rejected its PR — a pointer, not the feedback itself,
-// which stays on the PR (-> pr.Feedback) and is what DirRejected re-serves on every ask.
+// MsgRejectedByUser tells a worker the user rejected its PR. Who ruled is what this carries; the
+// feedback follows on its own, ahead of the round that answers it.
 func MsgRejectedByUser(prID string) string {
-	return fmt.Sprintf("[user] %s was rejected. Run `sindri` for the feedback and to carry on.", prID)
+	return fmt.Sprintf("[user] %s was rejected.", prID)
 }
 
 // MsgRejectedByAgent speaks in that agent's own voice: the role for a reviewer, the name for a
-// coauthor. Same pointer shape as MsgRejectedByUser.
+// coauthor.
 func MsgRejectedByAgent(voice, prID string) string {
-	return fmt.Sprintf("[%s] %s was rejected. Run `sindri` for the feedback and to carry on.", voice, prID)
+	return fmt.Sprintf("[%s] %s was rejected.", voice, prID)
 }
 
 // MsgReview is the single review instruction: the hub has already checked the PR branch out into

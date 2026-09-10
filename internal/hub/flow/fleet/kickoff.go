@@ -1,33 +1,49 @@
 // package: hub/flow/fleet / kickoff
 // type:    logic (what a fresh session is told, unprompted)
-// job:     resolve the one line the hub speaks first when an agent's session comes up — a launch,
-// or a context clear. A role the hub holds a job for is sent to `sindri`; a planner and a
-// coauthor are handed the directive here, since the hub already knows what it will say.
-// limits:  the choice only. The strings are injected.go's and prompts.go's, and the delivery is
-// the hub's (-> Hub.rehydrate, agent.Service.Clear).
+// job:     the words the hub speaks first when an agent's session comes up — its directive, in the
+// state it is actually in, so a launch needs no round trip to find out what the hub already knows.
+// limits:  the wording. Delivery is the hub's (-> Hub.greet, harness.Service.Clear), and the words
+// per state are flowsay.go's.
 package fleet
 
-import "github.com/flo-at/sindri/internal/hub/prompts"
+import (
+	"fmt"
+	"os"
 
-// Kickoff is what an agent's fresh session is told. A planner and a coauthor are served the
-// directive rather than sent to fetch it: that round trip fired eight times in one session to say
-// "carry on with the user", and a coauthor asking the hub for work has nothing to ask it for.
+	"github.com/flo-at/sindri/internal/hub/prompts"
+)
+
+// Kickoff is what an agent's fresh session is told: who it is, and where it stands right now. It
+// SERVES the directive rather than sending the agent to fetch one — that round trip fired eight
+// times in one session to say "carry on with the user", and told an agent to ask for an answer the
+// hub was holding as it spoke.
 func (e *Engine) Kickoff(project, name string) string {
 	ps := e.Store.For(project)
 	ag, found, err := ps.GetAgent(name)
 	if err != nil || !found {
-		return prompts.MsgKickoff
+		return e.untold(project, name, fmt.Errorf("no agent %q is on this project's roster: %v", name, err))
 	}
 	st, _ := ps.GetState(name)
-	dir, standing := standingDirective(ag.Role, st)
-	if !standing {
-		return prompts.MsgKickoff
-	}
 	// Escalated outranks the role here as it does in directive, and speaks as the hub already — so it
 	// stands alone rather than inside the role's framing.
 	if st.Escalation != "" {
 		return prompts.DirEscalated(st.Escalation)
 	}
+	dir, err := e.stands(project, name)
+	if err != nil {
+		return e.untold(project, name, err)
+	}
 	unread, _ := ps.UnreadMailCount(name)
-	return prompts.MsgStandingKickoff(ag.Role, e.prAct().RebaseNotice(project, name)+dir, unread)
+	return prompts.MsgKickoff(ag.Role, e.prAct().RebaseNotice(project, name)+dir, unread)
+}
+
+// untold is what a session gets when the hub cannot work out where its agent stands. It names the
+// fault and leaves a trail: a fresh session told nothing at all would sit there, and one told to
+// carry on would be acting on a state nobody could read.
+func (e *Engine) untold(project, name string, err error) string {
+	fmt.Fprintf(os.Stderr, "hub: kickoff for %s/%s: %v\n", project, name, err)
+	_ = e.Store.For(project).Log(name, "kickoff-failed", err.Error())
+	return fmt.Sprintf("[hub] Your session is up, but the hub cannot say where you stand: %v. "+
+		"Do not start work on a guess — `sindri escalate \"<what you need>\"` puts this in front "+
+		"of the user.", err)
 }

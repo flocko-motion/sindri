@@ -7,13 +7,12 @@ package agent
 
 import (
 	"context"
-	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 
 	"github.com/flo-at/sindri/internal/hub/prompts"
 )
 
-// FireClearIfArmed fires an armed clear now and wakes the agent once it lands. It reports whether it
-// fired: the reply to THIS call would go into the session the clear just discarded.
+// FireClearIfArmed fires an armed clear now. It reports whether it fired: the reply to THIS call
+// would go into the session the clear just discarded.
 func (a *Act) FireClearIfArmed(ctx context.Context, project, name string) (fired bool, err error) {
 	if !a.ClearArmedFor(project, name) {
 		return false, nil
@@ -21,7 +20,9 @@ func (a *Act) FireClearIfArmed(ctx context.Context, project, name string) (fired
 	if err := a.Harness.Clear(ctx, project, name); err != nil {
 		return false, err
 	}
-	return true, a.Harness.Say(project, name, prompts.MsgKickoff, mail.PushOnly)
+	// The empty session is left empty: the machine moves the agent on from here, and the state it
+	// lands in either hands work over with its own brief or speaks for itself.
+	return true, nil
 }
 
 // ServeMail fetches an agent's unread mail, marks it read, and renders it as a directive preamble —

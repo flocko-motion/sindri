@@ -104,6 +104,10 @@ type State[W any] struct {
 	// Says names what the subject is told when it asks where it stands. The words live with the
 	// domain; this is the identity of them.
 	Says string
+	// Tells sends Says to the subject UNPROMPTED the moment it lands here. For a state where the
+	// SUBJECT is the actor and no action spoke on the way in: the alternative is asking it to ask,
+	// a round trip whose answer the hub already holds.
+	Tells bool
 	// Events is everything that moves the subject out: the action's outcomes and the world's
 	// conditions, in one list, each with where it leads.
 	Events []Transition[W]

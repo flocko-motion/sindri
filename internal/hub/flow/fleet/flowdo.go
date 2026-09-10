@@ -101,7 +101,9 @@ func (e *Engine) doClear(ctx context.Context, w flow.World) (flow.Outcome, error
 		_ = e.Store.For(w.Project).Log(w.Name, "clear-unconfirmed", err.Error())
 		return act.Failed, nil
 	}
-	return act.Done, e.Harness.Say(w.Project, w.Name, e.Kickoff(w.Project, w.Name), mail.PushOnly)
+	// Nothing is said into the empty session: this outcome moves the agent on at once, and where it
+	// lands either acts (a hand-over speaks its own brief) or tells the agent itself (-> tell).
+	return act.Done, nil
 }
 
 // doRetier switches the model under the agent for the tier of the work coming. The switch clears the
