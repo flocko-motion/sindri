@@ -168,6 +168,7 @@ func padCell(s string, w int) string {
 // served from neither, which an empty list would report as "no work".
 func FormatNext(x api.NextExplain) string {
 	var b strings.Builder
+	formatStanding(&b, x)
 	if x.RoleNote != "" {
 		fmt.Fprintf(&b, "%s: %s\n", x.Role, x.RoleNote)
 		return b.String()
@@ -197,6 +198,18 @@ func FormatNext(x api.NextExplain) string {
 		}
 	}
 	return b.String()
+}
+
+// formatStanding opens the answer with where the agent stands and the rule that would fire there.
+func formatStanding(b *strings.Builder, x api.NextExplain) {
+	if x.State == "" {
+		return
+	}
+	fmt.Fprintf(b, "%s stands in %s\n", x.Agent, x.State)
+	if x.Rule != "" {
+		fmt.Fprintf(b, "  rule: %s\n", x.Rule)
+	}
+	b.WriteString("\n")
 }
 
 // formatNextReview is the reviewer's half: the review that would be picked up, then where every

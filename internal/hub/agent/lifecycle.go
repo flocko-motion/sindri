@@ -12,6 +12,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/flow/roles"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"log"
 	"os"
@@ -29,7 +32,6 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -194,7 +196,7 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 		}
 	}
 	// A coauthor shares the user's real checkout, not a worktree — the SAME material.
-	workspace := filepath.Join(workflow.AgentTrees, name)
+	workspace := filepath.Join(prompts.AgentTrees, name)
 	if role == "coauthor" {
 		workspace = "."
 	}
@@ -237,16 +239,16 @@ func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	rmCancel()
 	s.agentCh.CloseAgent(project, name)
 	switch {
-	// GlobalProject's workspace is a plain directory (prepareWorkspace's own doing), not a
+	// api.GlobalProject's workspace is a plain directory (prepareWorkspace's own doing), not a
 	// worktree — git.WorktreeRemove against it fails and leaves the tree behind forever.
-	case project == workflow.GlobalProject:
+	case project == api.GlobalProject:
 		_ = os.RemoveAll(filepath.Join(root, a.Workspace))
 	// A coauthor's workspace IS the repo root — never `git worktree remove` that. Its scratch tree
 	// goes: left behind, the next agent of that name would inherit it.
 	case a.Workspace != ".":
 		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
 	default:
-		_ = git.WorktreeRemove(root, filepath.Join(root, workflow.ScratchWorktree(name)))
+		_ = git.WorktreeRemove(root, filepath.Join(root, roles.ScratchWorktree(name)))
 	}
 	if err := ps.DeleteAgent(name); err != nil {
 		return err
@@ -345,8 +347,8 @@ func workspaceMounts(role, wt, hidden, scratch string) []container.Mount {
 			{Host: filepath.Join(wt, plannerWritable), Container: "/workspace/" + plannerWritable, Mode: "rw"}}
 	case "coauthor":
 		return []container.Mount{ws,
-			{Host: hidden, Container: "/workspace/" + workflow.AgentTrees, Mode: "ro"},
-			{Host: scratch, Container: workflow.ScratchMount, Mode: "rw"}}
+			{Host: hidden, Container: "/workspace/" + prompts.AgentTrees, Mode: "ro"},
+			{Host: scratch, Container: prompts.ScratchMount, Mode: "rw"}}
 	}
 	return []container.Mount{ws}
 }
@@ -370,10 +372,10 @@ func modelEnv(model string) map[string]string {
 }
 
 // prepareWorkspace lays down what /workspace will bind-mount: nothing to check out for a
-// GlobalProject reviewer (-> workflow.assignReview fills it later), else a git worktree shaped
+// api.GlobalProject reviewer (-> fleet.AssignReview fills it later), else a git worktree shaped
 // by role.
 func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, wt string, a store.Agent) error {
-	if project == workflow.GlobalProject {
+	if project == api.GlobalProject {
 		return os.MkdirAll(wt, 0o755)
 	}
 	hasCommits, err := git.HasCommits(root)
@@ -386,7 +388,7 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 	if a.Role == "coauthor" {
 		// A coauthor's /workspace IS the user's checkout (wt == repo root), so there is no isolated
 		// worktree to add — only its scratch tree (-> CmdScratch), kept as it was on a relaunch.
-		if err := git.WorktreeAdd(root, filepath.Join(root, workflow.ScratchWorktree(name)), "HEAD"); err != nil {
+		if err := git.WorktreeAdd(root, filepath.Join(root, roles.ScratchWorktree(name)), "HEAD"); err != nil {
 			return err
 		}
 		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
@@ -409,7 +411,7 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 			return fmt.Errorf("%s's worktree (%s) is stopped mid-rebase, so its branch cannot be set — "+
 				"finish it there with `git rebase --continue`, or abandon it with `git rebase --abort`", name, wt)
 		}
-		if err := git.EnsureBranch(wt, workflow.PlannerBranch(name), base); err != nil {
+		if err := git.EnsureBranch(wt, core.PlannerBranch(name), base); err != nil {
 			return err
 		}
 		// Rest in "planning", not "idle" — unless a PR is already in flight.
@@ -523,7 +525,7 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 			return err
 		}
 	}
-	mounts := append(workspaceMounts(a.Role, wt, paths.HiddenDir(), filepath.Join(root, workflow.ScratchWorktree(name))),
+	mounts := append(workspaceMounts(a.Role, wt, paths.HiddenDir(), filepath.Join(root, roles.ScratchWorktree(name))),
 		// The agent's own socket — its sole channel to the hub, its identity. Mount the
 		// socket DIRECTORY (not the file) so the agent survives a hub restart, which
 		// recreates the socket file with a new inode.
@@ -540,7 +542,7 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 		// provision its home (credentials, config, prompt) — we own only WHERE it lives.
 		archPath := s.deps.ArchitectureDoc(project)
 		archContent, _ := os.ReadFile(filepath.Join(root, archPath))
-		sysPrompt := workflow.SystemPrompt(name, a.Role, string(archContent), archPath)
+		sysPrompt := prompts.SystemPrompt(name, a.Role, string(archContent), archPath)
 		homeDir := paths.AgentHomeDir(project, name)
 		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w, Workspace: wt})
 		if err != nil {

@@ -1,7 +1,7 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-// needs back to the hub (chat Delivery, comments Deps, workflow Deps). Each
+// needs back to the hub (chat core.Delivery, comments Deps, workflow Deps). Each
 // module's logic lives in its own package; this is only the glue.
 // limits:  adapters only — no module logic here. The DTOs these modules exchange
 // live in internal/api, which the hub and every front-end import directly.
@@ -9,6 +9,7 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"io"
 	"net/http"
 	"time"
@@ -17,7 +18,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
+
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
 
 // observed is the hub's standing look at one agent, assembled from what it already holds in memory:
@@ -44,7 +46,7 @@ func (h *Hub) observed(project, name string) observe.Observation {
 	return o
 }
 
-// harness adapts the hub to workflow.Harness: the agent's box, and nothing that names a task.
+// harness adapts the hub to fleet.Harness: the agent's box, and nothing that names a task.
 type harness struct{ h *Hub }
 
 func (x harness) Observe(project, name string) observe.Observation {
@@ -52,7 +54,7 @@ func (x harness) Observe(project, name string) observe.Observation {
 }
 
 // Probe takes a FRESH look where Observe reports the standing one — for a caller that needs the
-// answer as of now. Under the hub's lifetime, since workflow.Harness carries no context of its own.
+// answer as of now. Under the hub's lifetime, since fleet.Harness carries no context of its own.
 func (x harness) Probe(project, name string) observe.Observation {
 	o := x.h.observed(project, name)
 	o.Up = x.h.agents.AgentAlive(x.h.lifetime, project, name)
@@ -60,7 +62,7 @@ func (x harness) Probe(project, name string) observe.Observation {
 	return o
 }
 
-func (x harness) Say(project, name, text string, d workflow.Delivery) error {
+func (x harness) Say(project, name, text string, d core.Delivery) error {
 	return x.h.Deliver(project, name, text, d)
 }
 
@@ -102,8 +104,10 @@ func (d agentDeps) Notify()                                   { d.h.notify() }
 func (d agentDeps) ContainerName(project, name string) string { return d.h.container(project, name) }
 func (d agentDeps) ProjectRoot(project string) string         { return d.h.projectRoot(project) }
 func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.architectureDoc(project) }
-func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.RefreshTask(project, id) }
-func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
+func (d agentDeps) RefreshTask(project, id string) error {
+	return d.h.taskFlow().RefreshTask(project, id)
+}
+func (d agentDeps) Rehydrate(project, name string) { d.h.rehydrate(project, name) }
 
 func (d agentDeps) Kickoff(project, name string) string { return d.h.wf.Kickoff(project, name) }
 
@@ -111,7 +115,7 @@ func (d agentDeps) Observation(project, name string) observe.Observation {
 	return d.h.observed(project, name)
 }
 
-func (d agentDeps) Deliver(project, name, text string, del workflow.Delivery) error {
+func (d agentDeps) Deliver(project, name, text string, del core.Delivery) error {
 	return d.h.Deliver(project, name, text, del)
 }
 
@@ -198,7 +202,7 @@ func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler
 	return server.LogRequests(label, next)
 }
 
-// workflowDeps adapts the hub to workflow.Deps, so workflow need not import the hub.
+// workflowDeps adapts the hub to fleet.Deps, so workflow need not import the hub.
 type workflowDeps struct{ h *Hub }
 
 func (d workflowDeps) ProjectRoot(project string) string { return d.h.projectRoot(project) }
@@ -209,7 +213,13 @@ func (d workflowDeps) ProjectConfig(project string) (config.Config, error) {
 
 func (d workflowDeps) ArchitectureDoc(project string) string { return d.h.architectureDoc(project) }
 
-func (d workflowDeps) Notify() { d.h.notify() }
+// Notify tells the board AND the decider. Every event used to reach the board alone, and that gap is
+// where every timer in the hub came from. It names no subject on purpose — the notify carries no
+// meaning, so it reaches all of them and the machine drops what it cannot use.
+func (d workflowDeps) Notify() {
+	d.h.notify()
+	d.h.wf.WakeAll(topic.SessionRead)
+}
 
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)

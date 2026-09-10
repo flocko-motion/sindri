@@ -39,7 +39,11 @@ CREATE TABLE IF NOT EXISTS agent_state (
   agent     TEXT NOT NULL,
   task      TEXT NOT NULL DEFAULT '',
   branch    TEXT NOT NULL DEFAULT '',
-  phase     TEXT NOT NULL DEFAULT 'idle',  -- idle | working | submitted
+  phase     TEXT NOT NULL DEFAULT 'idle',  -- one of the declared phases (-> hub/flow)
+  -- When the phase was last written, UTC RFC3339 ('' = never). A long-running action IS a phase
+  -- (assigning, clearing, compacting, retiering), and one with no exit condition anybody observes is
+  -- a stuck agent — this is what the watcher measures against (-> hub/flow's busy states).
+  phase_since TEXT NOT NULL DEFAULT '',
   container TEXT NOT NULL DEFAULT '',      -- container task held in the collaborative workflow ('' = structured)
   -- The question an agent stopped on, waiting for the user to decide it ('' = not escalated). Written
   -- only by SetEscalation/ClearEscalation, never by SetState (-> SetState).
@@ -53,16 +57,23 @@ CREATE TABLE IF NOT EXISTS agent_state (
   last_nudge TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, agent)
 );
--- Debug telemetry, not the activity log (events, above): every SetState/SetPhase write, and every
--- distinct derived-status-word change the hub notices, so a puzzling status is a query rather than a
--- captured pane and a classifier run by hand. Purged whole at hub restart (-> store.Open) and capped
--- per agent at write time (-> stateLogCap) — never durable, so it can afford to be noisy.
+-- One agent's own record: every SetState/SetPhase write, every distinct derived-status-word change,
+-- and every step of every reconcile pass over it (-> internal/reconcile). DURABLE. It used to be
+-- purged whole at each restart, on the reasoning that never surviving one is what let it afford to
+-- be noisy — but the per-agent cap below already bounds it, the purge bought nothing the cap does
+-- not, and it cost exactly the evidence that spans a restart, which is where the interesting
+-- failures live. A hub that restarts on install was a hub that forgot.
+--
+-- reason holds a StateReason or a reconcile step; pass is the correlation id one reconcile pass
+-- carries from the event that triggered it to the outcome, so an agent's story is ONE query rather
+-- than three logs read side by side on their timestamps. '' for a write made outside a pass.
 CREATE TABLE IF NOT EXISTS state_log (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   project TEXT NOT NULL,
   agent   TEXT NOT NULL,
   ts      TEXT NOT NULL,
   reason  TEXT NOT NULL,
+  pass    TEXT NOT NULL DEFAULT '',
   detail  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_state_log_agent ON state_log (project, agent, id);
@@ -220,16 +231,22 @@ const (
 	ReasonStatus    StateReason = "status"    // the DERIVED status word changed (-> statuswatch.go), not a stored write
 )
 
-// stateLogCap bounds state_log per agent: purge-at-restart (-> store.Open) alone still lets a hub up
-// for weeks hold weeks of a flickering derived word, so writing trims the tail too.
+// stateLogCap bounds state_log per agent. It is now the ONLY bound — the restart purge is gone
+// (-> the table's own comment) — so it is what keeps a hub up for weeks from holding weeks of a
+// flickering derived word.
 const stateLogCap = 500
 
-// LogState appends a state-log row and trims that agent's history back to stateLogCap, oldest first
-// — debug telemetry, not the activity log (-> state_log's own schema comment).
+// LogState appends a state-log row and trims that agent's history back to stateLogCap, oldest first.
 func (p *ProjectStore) LogState(agent string, reason StateReason, detail string) error {
+	return p.LogPass(agent, string(reason), "", detail)
+}
+
+// LogPass appends one step of a pass under the id that pass carries, so a decision, the action it
+// started and the outcome read back as one story.
+func (p *ProjectStore) LogPass(agent, reason, pass, detail string) error {
 	if _, err := p.s.db.Exec(
-		`INSERT INTO state_log (project, agent, ts, reason, detail) VALUES (?,?,?,?,?)`,
-		p.project, agent, time.Now().UTC().Format(time.RFC3339), string(reason), detail); err != nil {
+		`INSERT INTO state_log (project, agent, ts, reason, pass, detail) VALUES (?,?,?,?,?,?)`,
+		p.project, agent, time.Now().UTC().Format(time.RFC3339), reason, pass, detail); err != nil {
 		return fmt.Errorf("log state for %s/%s: %w", p.project, agent, err)
 	}
 	if _, err := p.s.db.Exec(
@@ -248,7 +265,7 @@ type StateEvent = api.StateEvent
 // StateLog returns an agent's state-log rows, newest first, capped at limit (limit <= 0 means all —
 // bounded anyway by stateLogCap's own trim on write).
 func (p *ProjectStore) StateLog(agent string, limit int) ([]StateEvent, error) {
-	q := `SELECT id, project, agent, ts, reason, detail FROM state_log WHERE project=? AND agent=? ORDER BY id DESC`
+	q := `SELECT id, project, agent, ts, reason, pass, detail FROM state_log WHERE project=? AND agent=? ORDER BY id DESC`
 	args := []any{p.project, agent}
 	if limit > 0 {
 		q += ` LIMIT ?`
@@ -262,7 +279,7 @@ func (p *ProjectStore) StateLog(agent string, limit int) ([]StateEvent, error) {
 	var out []StateEvent
 	for rows.Next() {
 		var e StateEvent
-		if err := rows.Scan(&e.ID, &e.Project, &e.Agent, &e.TS, &e.Reason, &e.Detail); err != nil {
+		if err := rows.Scan(&e.ID, &e.Project, &e.Agent, &e.TS, &e.Reason, &e.Pass, &e.Detail); err != nil {
 			return nil, fmt.Errorf("scan state log for %s/%s: %w", p.project, agent, err)
 		}
 		out = append(out, e)
@@ -287,6 +304,9 @@ type AgentState struct {
 	// LastNudge is the task id this agent was last pushed a work-available nudge about ('' = none).
 	// Also not part of what SetState writes — SetLastNudge is its only writer.
 	LastNudge string `json:"lastNudge,omitempty"`
+	// PhaseSince is when the phase was last written, UTC RFC3339 ('' = never). Stamped by SetState
+	// and SetPhase, so the watcher over a long-running phase has an age to measure.
+	PhaseSince string `json:"phaseSince,omitempty"`
 }
 
 // Review is one review item attached to a PR; it crosses the wire, so it is
@@ -300,8 +320,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left,last_nudge FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft, &st.LastNudge)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left,last_nudge,phase_since FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft, &st.LastNudge, &st.PhaseSince)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -319,9 +339,10 @@ func (p *ProjectStore) SetState(st AgentState, reason StateReason, detail string
 		st.Phase = "idle"
 	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO agent_state (project,agent,task,branch,phase,container) VALUES (?,?,?,?,?,?)
-		ON CONFLICT(project,agent) DO UPDATE SET task=excluded.task, branch=excluded.branch, phase=excluded.phase, container=excluded.container`,
-		p.project, st.Agent, st.Task, st.Branch, st.Phase, st.Container)
+		INSERT INTO agent_state (project,agent,task,branch,phase,container,phase_since) VALUES (?,?,?,?,?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET task=excluded.task, branch=excluded.branch, phase=excluded.phase,
+		  container=excluded.container, phase_since=CASE WHEN agent_state.phase=excluded.phase THEN agent_state.phase_since ELSE excluded.phase_since END`,
+		p.project, st.Agent, st.Task, st.Branch, st.Phase, st.Container, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("set state %s: %w", st.Agent, err)
 	}
@@ -348,7 +369,9 @@ func whatChanged(phase, task, container string) string {
 // the read-then-echo SetState forces is how a held container got dropped at four call sites. Needs an
 // existing row (SetState creates those); reason/detail follow SetState's own contract.
 func (p *ProjectStore) SetPhase(agent, phase string, reason StateReason, detail string) error {
-	res, err := p.s.db.Exec(`UPDATE agent_state SET phase=? WHERE project=? AND agent=?`, phase, p.project, agent)
+	res, err := p.s.db.Exec(
+		`UPDATE agent_state SET phase=?, phase_since=CASE WHEN phase=? THEN phase_since ELSE ? END WHERE project=? AND agent=?`,
+		phase, phase, time.Now().UTC().Format(time.RFC3339), p.project, agent)
 	if err != nil {
 		return fmt.Errorf("set phase %s: %w", agent, err)
 	}
@@ -618,4 +641,52 @@ func (p *ProjectStore) AwaitingPR(agent string) (pr, task string, err error) {
 		return "", "", fmt.Errorf("awaiting pr for %s: %w", agent, err)
 	}
 	return pr, task, nil
+}
+
+// PRState is where the machine has a merge intent, and when it got there. "open" alone cannot tell a
+// PR nobody has read from one a reviewer holds, and both from one at the gate.
+func (p *ProjectStore) PRState(id string) (state, since string, err error) {
+	row := p.s.db.QueryRow(`SELECT state, state_since FROM prs WHERE project=? AND id=?`, p.project, id)
+	if err := row.Scan(&state, &since); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", fmt.Errorf("pr state %s: %w", id, err)
+	}
+	return state, since, nil
+}
+
+// SetPRState moves a merge intent, stamping only a real change so a state's age is its own.
+func (p *ProjectStore) SetPRState(id, state string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE prs SET state=?, state_since=CASE WHEN state=? THEN state_since ELSE ? END WHERE project=? AND id=?`,
+		state, state, time.Now().UTC().Format(time.RFC3339), p.project, id)
+	if err != nil {
+		return fmt.Errorf("set pr state %s: %w", id, err)
+	}
+	return nil
+}
+
+// RunState is where the machine has a run, and when it got there. Its own column because a state the
+// machine cannot store is one it can never enter — "dropping" has no status of its own.
+func (p *ProjectStore) RunState(id string) (state, since string, err error) {
+	row := p.s.db.QueryRow(`SELECT state, state_since FROM runs WHERE project=? AND id=?`, p.project, id)
+	if err := row.Scan(&state, &since); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", nil
+		}
+		return "", "", fmt.Errorf("run state %s: %w", id, err)
+	}
+	return state, since, nil
+}
+
+// SetRunState moves a run, stamping only a real change so a state's age is its own.
+func (p *ProjectStore) SetRunState(id, state string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE runs SET state=?, state_since=CASE WHEN state=? THEN state_since ELSE ? END WHERE project=? AND id=?`,
+		state, state, time.Now().UTC().Format(time.RFC3339), p.project, id)
+	if err != nil {
+		return fmt.Errorf("set run state %s: %w", id, err)
+	}
+	return nil
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // ruledReviewer registers a reviewer and gives it an assigned review of each pr, over a task named
-// after it — the state assignReview leaves behind, which ruleOn then completes.
+// after it — the state AssignReview leaves behind, which ruleOn then completes.
 func ruledReviewer(t *testing.T, h *Hub, reviewer string, prs ...string) {
 	t.Helper()
 	ps := h.store.For(testProject)
@@ -93,7 +93,7 @@ func TestTheHeldReviewOutranksAnOlderVerdict(t *testing.T) {
 	if cs, _ := ps.Comments("td-1"); len(cs) != 0 {
 		t.Errorf("the older verdict's task took the comment: td-1 has %v", cs)
 	}
-	// The older one stays reachable BY NAME, which is the point of widening rather than moving.
+	// The older one stays Reachable BY NAME, which is the point of widening rather than moving.
 	if out, code := execAs(t, h, "brokkr", "comment", "td-1", "and one about the earlier PR"); code != 0 {
 		t.Fatalf("naming a task it has ruled on failed (%d): %s", code, out)
 	}
@@ -120,7 +120,7 @@ func TestAReviewerStillCannotWanderTheBacklog(t *testing.T) {
 	if cs, _ := ps.Comments("td-elsewhere"); len(cs) != 0 {
 		t.Errorf("the comment landed anyway: %v", cs)
 	}
-	// The refusal names what IS reachable — a wall with no way forward is the house's own complaint.
+	// The refusal names what IS Reachable — a wall with no way forward is the house's own complaint.
 	if !strings.Contains(out, "td-1") {
 		t.Errorf("the refusal should name the task it can comment on, got %q", out)
 	}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // clearTestDeps is a minimal agent.Deps: enough for the arming paths, which never reach
@@ -31,7 +31,7 @@ func (clearTestDeps) Rehydrate(_, _ string)                       {}
 func (clearTestDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
-func (d clearTestDeps) Deliver(_, _, text string, _ workflow.Delivery) error {
+func (d clearTestDeps) Deliver(_, _, text string, _ core.Delivery) error {
 	if d.delivered != nil {
 		*d.delivered = append(*d.delivered, text)
 	}
@@ -59,7 +59,7 @@ func armedFlag(t *testing.T, ps *store.ProjectStore, name string) bool {
 }
 
 // TestArmingWaitsForTheBoundary is the rule the feature rests on: an agent holding a leaf task has
-// file-tree memory /clear would silently invalidate (claimLeaf resets the worktree on its OWN next
+// file-tree memory /clear would silently invalidate (ClaimLeaf resets the worktree on its OWN next
 // claim, not this one), so the clear is ARMED and waits. It used to be refused outright, which left
 // the user confirming into an error with nothing set.
 func TestArmingWaitsForTheBoundary(t *testing.T) {

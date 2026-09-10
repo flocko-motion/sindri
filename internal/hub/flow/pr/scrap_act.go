@@ -1,0 +1,134 @@
+// package: hub/flow/pr / scrap_act
+// type:    logic (PR discard)
+// job:     ScrapPR — discard a PR whose task is being closed/scrapped: stop any
+// reviewer mid-review, delete the task's branch, and flip the PR to
+// "scrapped" so it drops off the board. The worker is stopped by the paired
+// task close, not here.
+// limits:  git mechanics via hub/repo; persistence via the store. No git/tmux here.
+package pr
+
+import (
+	"fmt"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/prompts"
+	"path/filepath"
+
+	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/hub/repo"
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// DiscardPR scraps a PR on its own, for work the user simply does not want, and releases its
+// author. The release is the whole difference from ScrapPR, which leaves that to the paired task
+// close: with no close alongside, the author would sit in "submitted" awaiting a verdict on a PR
+// that no longer exists.
+func (a *Act) DiscardPR(project, prID string) error {
+	ps := a.Store.For(project)
+	pr, ok, err := ps.GetPR(prID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w %q", core.ErrNoSuchPR, prID)
+	}
+	author := pr.Agent
+	if err := a.ScrapPR(project, prID); err != nil {
+		return err
+	}
+	if author == "" {
+		return nil
+	}
+	// Only release an author still waiting on THIS PR. One that has moved on (or never
+	// blocked) must not be interrupted for a verdict it isn't expecting.
+	st, _ := ps.GetState(author)
+	if st.Phase == "submitted" || st.Phase == "resolving" {
+		// The interrupt needs it up; the verdict reaches it either way, mail being the half that
+		// waits for one that is down.
+		if a.Harness.Observe(project, author).Up {
+			_ = a.Harness.Interrupt(project, author)
+		}
+		_ = a.Harness.Say(project, author, prompts.MsgPRScrapped(prID), core.MailAndPush.From(api.SenderUser))
+		// A container holder rests back onto its FEATURE, not fully idle: an interim/milestone PR
+		// being discarded does not mean the feature itself is done (sd-5ef393 — the same shape as
+		// FinishTask's own fix).
+		next := store.AgentState{Agent: author, Phase: "idle"}
+		if st.Container != "" {
+			next = store.AgentState{Agent: author, Container: st.Container, Branch: st.Container, Phase: "idle"}
+		}
+		_ = ps.SetState(next, store.ReasonFreed, "PR discarded: "+prID)
+	}
+	_ = ps.Log(author, "pr-scrapped", prID)
+	a.Deps.Notify()
+	return nil
+}
+
+// ScrapPR discards a PR (host-only), the companion to closing its task. It does NOT touch the
+// working agent — the paired FinishTask frees it, and doing both would double-message the worker.
+func (a *Act) ScrapPR(project, prID string) error {
+	ps := a.Store.For(project)
+	pr, ok, err := ps.GetPR(prID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w %q", core.ErrNoSuchPR, prID)
+	}
+
+	// Stop any reviewer mid-review: the branch is about to vanish, so the review is moot. Abort,
+	// tell it, close the review record so it stops showing as "reviewing", idle it. Best-effort.
+	revs, _ := ps.Reviews(prID)
+	for _, r := range revs {
+		if r.Verdict != "" {
+			continue // already finished — nothing in flight
+		}
+		if a.Harness.Probe(project, r.Author).Up {
+			_ = a.Harness.Interrupt(project, r.Author)
+			_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), core.MailAndPush)
+		}
+		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
+		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"}, store.ReasonFreed, "review cancelled: "+prID+" scrapped with its task")
+		_ = ps.Log(r.Author, "review-cancelled", prID)
+	}
+
+	// Discard the work. Best-effort but LOUD: a failure is recorded on the PR rather than
+	// leaving the branch as it was, silently.
+	disposal := ""
+	if pr.Branch != "" {
+		wt := ""
+		if ag, ok, _ := ps.GetAgent(pr.Agent); ok && ag.Workspace != "" && ag.Workspace != "." {
+			wt = filepath.Join(a.Deps.ProjectRoot(project), ag.Workspace)
+		}
+		var derr error
+		disposal, derr = a.discardBranch(project, pr, wt)
+		if derr != nil {
+			_ = ps.LogPR(prID, "scrap-branch-failed", derr.Error())
+		}
+	}
+
+	pr.Status = "scrapped"
+	if err := ps.PutPR(pr); err != nil {
+		return err
+	}
+	_ = ps.LogPR(prID, "scrapped", "discarded with its task; "+disposal)
+	a.Deps.Notify()
+	return nil
+}
+
+// discardBranch throws away a scrapped PR's work and says what it did. A planner's branch is
+// STANDING, so scrapping empties it instead: deleting it detached the worktree to free the name,
+// leaving the planner on a HEAD no branch held, committing there and unable to rebase ever again.
+func (a *Act) discardBranch(project string, pr store.PR, wt string) (string, error) {
+	root := a.Deps.ProjectRoot(project)
+	if pr.Branch != core.PlannerBranch(pr.Agent) {
+		return "branch " + pr.Branch + " removed", repo.ScrapBranch(root, wt, pr.Branch)
+	}
+	base, err := a.BaseBranch(root)
+	if err != nil {
+		base = pr.Base // the reference branch moved or is unreadable; the PR's own base still holds
+	}
+	if wt == "" {
+		return "", fmt.Errorf("standing branch %s has no worktree to reset", pr.Branch)
+	}
+	return "branch " + pr.Branch + " reset to " + base, git.ResetBranchTo(wt, base)
+}

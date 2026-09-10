@@ -1,12 +1,12 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/core"
 	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // TestTheSenderIsStatedNotSniffed is the groundwork this task exists for: provenance used to be read
@@ -21,16 +21,16 @@ func TestTheSenderIsStatedNotSniffed(t *testing.T) {
 	for _, c := range []struct {
 		what   string
 		text   string
-		d      workflow.Delivery
+		d      core.Delivery
 		expect string
 	}{
 		// Each of the four the wire type documents, including the two that were unreachable.
-		{"the hub in its own voice", "[hub] merged", workflow.MailOnly, "hub"},
-		{"a reviewer's verdict", "[reviewer] rejected: thin tests", workflow.MailOnly.From("reviewer"), "reviewer"},
-		{"the user", "[user] have a look", workflow.MailOnly.From(api.SenderUser), api.SenderUser},
-		{"another agent", "the adapter shells out twice", workflow.MailOnly.From("nori"), "nori"},
+		{"the hub in its own voice", "[hub] merged", core.MailOnly, "hub"},
+		{"a reviewer's verdict", "[reviewer] rejected: thin tests", core.MailOnly.From("reviewer"), "reviewer"},
+		{"the user", "[user] have a look", core.MailOnly.From(api.SenderUser), api.SenderUser},
+		{"another agent", "the adapter shells out twice", core.MailOnly.From("nori"), "nori"},
 		// And the tag in the text no longer decides anything: this one says user and is from an agent.
-		{"a tagged body from an agent", "[user] quoted text", workflow.MailOnly.From("gloin"), "gloin"},
+		{"a tagged body from an agent", "[user] quoted text", core.MailOnly.From("gloin"), "gloin"},
 	} {
 		if err := h.Deliver(testProject, "dvalin", c.text, c.d); err != nil {
 			t.Fatalf("%s: %v", c.what, err)
@@ -77,7 +77,7 @@ func TestAnAgentsNoteGoesThroughTheOneDeliveryPath(t *testing.T) {
 // one that does not exist — so it must not be attempted, reported, or waited on.
 func TestDeliveringToTheUserNeverAttemptsAPush(t *testing.T) {
 	h := newHub(t)
-	if err := h.Deliver(testProject, api.SenderUser, "a note", workflow.MailAndPush.From("nori")); err != nil {
+	if err := h.Deliver(testProject, api.SenderUser, "a note", core.MailAndPush.From("nori")); err != nil {
 		t.Fatalf("delivering to the user should not fail: %v", err)
 	}
 	mail, _ := h.store.AllMail(0)
@@ -89,12 +89,12 @@ func TestDeliveringToTheUserNeverAttemptsAPush(t *testing.T) {
 // TestEveryDeliveryClassCarriesItsSenderUnchanged: From returns a COPY, so naming a sender on one call
 // cannot leak into the shared classification values every other call site uses.
 func TestEveryDeliveryClassCarriesItsSenderUnchanged(t *testing.T) {
-	tagged := workflow.MailAndPush.From("reviewer")
+	tagged := core.MailAndPush.From("reviewer")
 	if tagged.Sender != "reviewer" {
 		t.Fatalf("From should name the sender, got %q", tagged.Sender)
 	}
-	if workflow.MailAndPush.Sender != "" {
-		t.Errorf("the shared classification was mutated: %q", workflow.MailAndPush.Sender)
+	if core.MailAndPush.Sender != "" {
+		t.Errorf("the shared classification was mutated: %q", core.MailAndPush.Sender)
 	}
 	if !tagged.Mail || !tagged.Push {
 		t.Error("naming a sender must not change how the message travels")
@@ -115,7 +115,7 @@ func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.wf.RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
+	if err := h.prFlow().RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
 		t.Fatalf("RejectPR: %v", err)
 	}
 	mail, _ := h.store.AllMail(0)

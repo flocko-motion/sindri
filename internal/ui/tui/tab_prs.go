@@ -5,7 +5,7 @@
 // the fixed-width detail (metadata + linked task + reviews) on the
 // right. Detail is lazily fetched.
 // limits:  renders PR state and actions; verdict/merge logic is the hub's
-// (-> client / workflow_pr.go).
+// (-> client / hub/flow/pr).
 package tui
 
 import (

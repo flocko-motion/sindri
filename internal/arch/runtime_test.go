@@ -38,7 +38,7 @@ var runtimeQueryMethods = map[string]bool{
 // with WHY. A key is either a whole file ("internal/hub/watchdog.go") or one function within it
 // ("internal/hub/state.go#AllStats") for a file that also carries a call site with no such excuse.
 // Anything else calling a query method must read the watchdog's observation instead
-// (hub.watchdog.get/.pods, or workflow.Deps' AgentUp/AgentIdle).
+// (hub.watchdog.get/.pods, or fleet.Deps' AgentUp/AgentIdle).
 var declaredRuntimeQueriers = map[string]string{
 	// The observer itself: the one place a listing or a capacity sample is taken, on its own cadence.
 	"internal/hub/watchdog.go": "the observer — the one place a listing or a capacity sample is taken",
@@ -66,7 +66,7 @@ var agentProbeMethods = map[string]bool{
 
 // declaredAgentProbers are the call sites allowed to probe an agent directly, each with WHY. Same
 // key shape as declaredRuntimeQueriers. Anything else must read the watchdog's observation instead
-// (agent.Deps' AgentUp/AgentClients, or workflow.Deps' AgentUp/AgentIdle).
+// (agent.Deps' AgentUp/AgentClients, or fleet.Deps' AgentUp/AgentIdle).
 var declaredAgentProbers = map[string]string{
 	"internal/hub/watchdog.go":      "the observer's own probe",
 	"internal/hub/agent/runtime.go": "the probe mechanism itself — these methods call each other here",
@@ -76,11 +76,11 @@ var declaredAgentProbers = map[string]string{
 	// gate and an explicit human model change, neither a sweep over the roster.
 	"internal/hub/agent/compact.go#Compact": "checked immediately before compacting — the caller's own assignment gate",
 	"internal/hub/agent/model.go#SetModel":  "checked immediately before an explicit model change",
-	// The workflow.Deps/agent.Deps seam itself: AgentAlive here IS the pass-through
-	// workflow.Deps.AgentAlive is documented to be, not a caller of it.
-	"internal/hub/wiring.go": "the workflow.Deps/agent.Deps seam — AgentAlive here is the wiring, not a caller",
+	// The fleet.Deps/agent.Deps seam itself: AgentAlive here IS the pass-through
+	// fleet.Deps.AgentAlive is documented to be, not a caller of it.
+	"internal/hub/wiring.go": "the fleet.Deps/agent.Deps seam — AgentAlive here is the wiring, not a caller",
 	// Each below acts on ONE named agent a specific request already identified — never a roster sweep
-	// (-> workflow.Deps.AgentAlive's own doc: "for a caller needing the answer as of now, never a tick").
+	// (-> fleet.Deps.AgentAlive's own doc: "for a caller needing the answer as of now, never a tick").
 	"internal/hub/workflow/planner.go": "a plan assignment / an edit note, each to the one agent named",
 	"internal/hub/workflow/task.go":    "UnassignTask, checked against the one agent holding the task",
 	"internal/hub/workflow/scrap.go":   "ScrapPR, checked against the one reviewer holding the review",
@@ -172,7 +172,7 @@ func TestNothingPollsTheRuntimeWithoutDeclaringWhy(t *testing.T) {
 	}
 	for _, u := range undeclared {
 		t.Errorf("%s queries the container runtime directly — read the watchdog's observation instead "+
-			"(hub.watchdog.get/.pods, or workflow.Deps' AgentUp/AgentIdle), or add it to "+
+			"(hub.watchdog.get/.pods, or fleet.Deps' AgentUp/AgentIdle), or add it to "+
 			"declaredRuntimeQueriers with the reason it needs a fresh reading", u)
 	}
 }
@@ -190,7 +190,7 @@ func TestNothingProbesAnAgentWithoutDeclaringWhy(t *testing.T) {
 	}
 	for _, u := range undeclared {
 		t.Errorf("%s probes an agent directly — read the watchdog's observation instead "+
-			"(agent.Deps' AgentUp/AgentClients, or workflow.Deps' AgentUp/AgentIdle), or add it to "+
+			"(agent.Deps' AgentUp/AgentClients, or fleet.Deps' AgentUp/AgentIdle), or add it to "+
 			"declaredAgentProbers with the reason it needs a fresh reading", u)
 	}
 }

@@ -1,0 +1,427 @@
+package fleet
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/tasks"
+	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/observe"
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// stubDeps is a no-op fleet.Deps that records the agents it interrupts/injects —
+// enough to drive ScrapPR without a real hub. (First workflow Engine test harness;
+// extend as more Engine methods get covered.)
+type stubDeps struct {
+	root         string
+	alive        bool
+	interrupted  []string
+	injected     []string
+	injectedText []string // the message bodies too, for tests that assert what an agent was told
+	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
+	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
+	ctxOK        bool     // false = nothing recorded yet, which the observation says as a zero window
+	// compactThreshold overrides CompactionThreshold's answer; 0 (the default) means "never due" —
+	// no real formula returns exactly 0 for a positive window, so it is a safe sentinel rather than
+	// a real threshold every unrelated fullness test would otherwise trip on.
+	compactThreshold int
+	comments         map[string][]store.Comment // by task id, for the views that render a thread
+	busy             map[string]bool            // agents mid-turn, so AgentIdle answers false for them
+	posted           []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
+	postFails        bool                       // AddTaskComment refuses, for the paths that must survive it
+	delivered        []core.Delivery            // how each message was classified, in step with injected/injectedText
+	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
+	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
+	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
+	// The observation's own fields (-> Observe): the session's runtime word, and how long the pane
+	// has stood still.
+	runtime  string
+	stillFor time.Duration
+	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
+	// the retier check never fires for a test that has not opted into it.
+	tierModels   map[string]string
+	modelSet     []string // "name=model" for every SetModel call, in order
+	setModelErr  error
+	holdsNothing bool
+	compacted    []string // agents Compact was called for, in order
+	compactErr   error
+	cleared      []string // agents Clear was called for, in order
+	clearErr     error
+	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
+	// means the caller sees no override, same as an unconfigured project.
+	projectConfig    config.Config
+	projectConfigErr error
+	// escalated records Escalate calls as "name: question", in order.
+	escalated []string
+	started   []string // agents StartAgent was called for, in order
+	startErr  error
+}
+
+func (d *stubDeps) ProjectRoot(string) string { return d.root }
+
+// saying is an observation of a LIVE session reporting word, for the nudge paths that used to take
+// the bare string. The word crosses inside the observation now, which is the whole point of the split.
+func saying(word string) observe.Observation {
+	return observe.Observation{TakenAt: time.Now(), Up: true, State: observe.ParseState(word)}
+}
+
+// sayingWhileDown is the same reading of a pod that is gone. Liveness rides the observation rather
+// than being asked separately, so a caller cannot judge one reading and prod on another.
+func sayingWhileDown(word string) observe.Observation {
+	o := saying(word)
+	o.Up = false
+	return o
+}
+
+// newEngine wires ONE stub as both halves of the split seam, so a test still asserts against a
+// single recorder — the split is about who may call what, not about having two fixtures.
+func newEngine(st *store.Store, d *stubDeps, sources ...tasks.Source) *Engine {
+	// Background as the lifetime: a test IS an entrypoint, and no fixture here turns on the engine
+	// outliving it. A case that needs the lifetime cancelled builds its own.
+	return New(context.Background(), st, d, d, sources...)
+}
+
+// storelessEngine is for a case that exercises the harness side alone. It still gets a real store —
+// a running action is a STATE now, so even preparing a session writes a phase, and a fixture with no
+// store would panic rather than test anything.
+func storelessEngine(t *testing.T, d *stubDeps, sources ...tasks.Source) *Engine {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	return newEngine(st, d, sources...)
+}
+
+// testGate is the passing gate every fixture gets unless it declares its own. A project MUST declare
+// one (-> repo.Gate), so an unconfigured stub would refuse every submit in this package and test the
+// refusal rather than the flow under examination.
+const testGate = "sindri-test-gate.sh"
+
+func (d *stubDeps) ProjectConfig(string) (config.Config, error) {
+	if d.projectConfigErr != nil {
+		return config.Config{}, d.projectConfigErr
+	}
+	cfg := d.projectConfig
+	if cfg.Verify == "" && d.root != "" {
+		// Written where the gate looks for it — runVerify stats the path in the worktree it is
+		// checking, and every fixture here gates the root or a worktree built out of it.
+		d.writeTestGate(d.root)
+		cfg.Verify = "./" + testGate // a command, run through a shell, so a bare name would need PATH
+	}
+	return cfg, nil
+}
+
+// writeTestGate materialises the stub's gate, in the root and in any worktree under it, since the
+// gate runs against whichever tree the run named. Excluded from git as it is written: several tests
+// assert the gate leaves a CLEAN tree, and an untracked script of our own would be the dirt.
+func (d *stubDeps) writeTestGate(root string) {
+	_ = os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte(testGate+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, testGate), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	entries, err := os.ReadDir(filepath.Join(root, ".worktrees"))
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			_ = os.WriteFile(filepath.Join(root, ".worktrees", e.Name(), testGate), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+		}
+	}
+}
+
+// Escalate records the question, so a test can assert the hub stopped an agent rather than merely
+// telling it something it could not act on.
+func (d *stubDeps) Escalate(_, name, question string) (string, error) {
+	d.escalated = append(d.escalated, name+": "+question)
+	return "", nil
+}
+
+func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
+func (d *stubDeps) Container(_, name string) string { return name }
+func (d *stubDeps) Notify()                         {}
+
+// Deliver records what was sent and HOW, so a test can assert the classification a sender chose —
+// which is half of what this feature is (-> core.Delivery). The recipient/text lists stay as they
+// were, since every existing assertion about "what was injected" is about the same messages.
+func (d *stubDeps) Deliver(_, name, text string, del core.Delivery) error {
+	if d.deliverErr {
+		return fmt.Errorf("nothing could be delivered to %s", name)
+	}
+	d.injected = append(d.injected, name)
+	d.injectedText = append(d.injectedText, text)
+	d.delivered = append(d.delivered, del)
+	return nil
+}
+func (d *stubDeps) Interrupt(_, name string) error {
+	d.interrupted = append(d.interrupted, name)
+	return nil
+}
+
+// Observe is the harness's standing look, off the same fields the fixture already sets. Probe is the
+// fresh one; nothing here distinguishes them, since no test in this package turns on the difference.
+func (d *stubDeps) Observe(_, name string) observe.Observation {
+	// An agent nothing marked busy is AT A PROMPT, which is what the sweeps read; `busy` says a turn
+	// is running, and an explicit runtime beats both.
+	state := observe.ParseState(d.runtime)
+	if d.runtime == "" {
+		state = observe.AtPrompt
+		if d.busy[name] {
+			state = observe.Working
+		}
+	}
+	o := observe.Observation{
+		TakenAt: time.Now(), Up: d.alive, State: state, Model: d.currentModel,
+		StillSince: time.Now().Add(-d.stillFor),
+	}
+	if d.ctxOK {
+		// Nothing recorded yet is a zero window, which is how the observation says "unreadable" —
+		// there is no separate ok flag to carry any more.
+		o.Fill, o.Window = d.ctxTokens, d.ctxWindow
+	}
+	return o
+}
+
+func (d *stubDeps) Probe(project, name string) observe.Observation { return d.Observe(project, name) }
+
+func (d *stubDeps) Say(project, name, text string, del core.Delivery) error {
+	return d.Deliver(project, name, text, del)
+}
+
+// Start records who was woken, so a test can assert work arriving for an empty pool brings a
+// reviewer back rather than waiting for one that never comes.
+func (d *stubDeps) Start(_, name string) error {
+	d.started = append(d.started, name)
+	return d.startErr
+}
+
+func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
+func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
+	if d.postFails {
+		return errors.New("the thread is unreachable")
+	}
+	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
+	return nil
+}
+func (d *stubDeps) KnownProjects() []store.Project { return d.projects }
+func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
+	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
+}
+
+func (d *stubDeps) CurrentModel(_, _ string) string { return d.currentModel }
+
+func (d *stubDeps) ModelForTier(tier string) (string, bool) {
+	m, ok := d.tierModels[tier]
+	return m, ok
+}
+
+// ModelMatches mirrors the real adapter's own substring tolerance (a detected model id may carry
+// more than the plain tier id names, e.g. a dated snapshot suffix) rather than a bare equality —
+// exact-string test cases pass either way, since a string always contains itself.
+func (d *stubDeps) ModelMatches(want, detected string) bool {
+	return strings.Contains(detected, want)
+}
+
+func (d *stubDeps) SetModel(_ context.Context, _, name, model string) error {
+	d.modelSet = append(d.modelSet, name+"="+model)
+	return d.setModelErr
+}
+
+func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
+
+func (d *stubDeps) Compact(_ context.Context, _, name string) error {
+	d.compacted = append(d.compacted, name)
+	return d.compactErr
+}
+
+func (d *stubDeps) Clear(_ context.Context, _, name string) error {
+	d.cleared = append(d.cleared, name)
+	return d.clearErr
+}
+
+func (d *stubDeps) CompactionThreshold(int) int {
+	if d.compactThreshold == 0 {
+		return math.MaxInt
+	}
+	return d.compactThreshold
+}
+
+// TestScrapPRStopsReviewer: scrapping a PR under review flips it to "scrapped",
+// interrupts the reviewer and closes its open review record, so the reviewer no
+// longer shows as reviewing a PR whose branch is gone. (ProjectRoot points at a
+// non-repo, so the branch delete no-ops-with-a-log — the status flip must still land.)
+func TestScrapPRStopsReviewer(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("repo")
+	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "td-1", Agent: "wrk", Branch: "td-1", Status: "submitted"}); err != nil {
+		t.Fatal(err)
+	}
+	rid, err := ps.AddReview("pr-1", "check it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AssignReview(rid, "rev"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ps.ReviewingPR("rev"); got != "pr-1" {
+		t.Fatalf("precondition: reviewer should be reviewing pr-1, got %q", got)
+	}
+
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
+	if err := e.prAct().ScrapPR("repo", "pr-1"); err != nil {
+		t.Fatalf("ScrapPR: %v", err)
+	}
+
+	if pr, _, _ := ps.GetPR("pr-1"); pr.Status != "scrapped" {
+		t.Fatalf("PR status = %q, want scrapped", pr.Status)
+	}
+	if got, _ := ps.ReviewingPR("rev"); got != "" {
+		t.Fatalf("reviewer should no longer be reviewing (verdict recorded), got %q", got)
+	}
+}
+
+// TestScrapEmptiesAStandingBranch: a planner's branch is its HOME, created at launch and reused
+// for every proposal. Deleting it meant detaching the worktree to free the name, which left the
+// planner on a HEAD no branch held — it kept committing there and could never rebase again. Scrap
+// must throw the plans away and leave the branch, attached, at the reference branch.
+func TestScrapEmptiesAStandingBranch(t *testing.T) {
+	root := t.TempDir()
+	if err := exec.Command("git", "init", "-q", "-b", "main", root).Run(); err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	run := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	run(root, "commit", "-q", "--allow-empty", "-m", "base")
+	wt := filepath.Join(root, ".worktrees", "galar")
+	run(root, "worktree", "add", "-q", "-b", "plan-galar", wt, "HEAD")
+	run(wt, "commit", "-q", "--allow-empty", "-m", "a proposal the user does not want")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "galar", Role: "planner", Workspace: ".worktrees/galar"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-plan-galar", Task: "os-new", Agent: "galar", Branch: "plan-galar", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+
+	e := newEngine(st, &stubDeps{root: root, alive: false})
+	if err := e.prAct().ScrapPR("proj", "pr-plan-galar"); err != nil {
+		t.Fatalf("ScrapPR: %v", err)
+	}
+
+	// The branch still exists AND the worktree is still on it — the failure was losing both.
+	if out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "refs/heads/plan-galar").Output(); err != nil {
+		t.Fatalf("a standing branch must survive a scrap: %v %s", err, out)
+	}
+	if b, err := git.CurrentBranch(wt); err != nil || b != "plan-galar" {
+		t.Fatalf("worktree must stay attached to plan-galar, got %q (%v)", b, err)
+	}
+	// And the plans are gone: the branch sits back on base.
+	base, _ := exec.Command("git", "-C", root, "rev-parse", "main").Output()
+	tip, _ := exec.Command("git", "-C", wt, "rev-parse", "HEAD").Output()
+	if strings.TrimSpace(string(tip)) != strings.TrimSpace(string(base)) {
+		t.Errorf("plans should be discarded: tip %s, base %s", tip, base)
+	}
+}
+
+// TestDiscardPRReleasesItsAuthor: scrapping a PR on its own has no paired task close to free
+// the author, so DiscardPR must — otherwise a planner whose proposal the user discards waits in
+// "submitted" for a verdict on a PR that no longer exists.
+func TestDiscardPRReleasesItsAuthor(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "galar", Role: "planner", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-os-new", Task: "os-new", Agent: "galar", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
+	deps := &stubDeps{root: root, alive: true}
+	e := newEngine(st, deps)
+
+	if err := e.prAct().DiscardPR("proj", "pr-os-new"); err != nil {
+		t.Fatalf("DiscardPR: %v", err)
+	}
+	if pr, _, _ := ps.GetPR("pr-os-new"); pr.Status != "scrapped" {
+		t.Errorf("PR status = %q, want scrapped", pr.Status)
+	}
+	if got, _ := ps.GetState("galar"); got.Phase != "idle" {
+		t.Errorf("author phase = %q, want idle — it must not wait on a PR that is gone", got.Phase)
+	}
+	if len(deps.injected) == 0 {
+		t.Error("the author must be told its PR was scrapped")
+	}
+}
+
+// TestDiscardPRLeavesAnUninvolvedAgentAlone: an author that has moved on must not be
+// interrupted for a verdict it is not expecting.
+func TestDiscardPRLeavesAnUninvolvedAgentAlone(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "eitri", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	// Already working something else — not waiting on this PR.
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
+	deps := &stubDeps{root: root, alive: true}
+	e := newEngine(st, deps)
+
+	if err := e.prAct().DiscardPR("proj", "pr-td-1"); err != nil {
+		t.Fatalf("DiscardPR: %v", err)
+	}
+	if got, _ := ps.GetState("eitri"); got.Phase != "working" {
+		t.Errorf("phase = %q, want working left untouched", got.Phase)
+	}
+	if len(deps.interrupted) != 0 {
+		t.Errorf("an agent not waiting on the PR must not be interrupted, got %v", deps.interrupted)
+	}
+}

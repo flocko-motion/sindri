@@ -4,7 +4,7 @@
 // to execute against — including uncommitted changes, which a `git worktree
 // add` checkout (-> MaterializeReview) never sees.
 // limits:  a plain recursive file copy; the container mount, cache, and cleanup
-// timing are workflow's (-> workflow/execrun.go).
+// timing are the run subject's (-> hub/flow/run).
 package repo
 
 import (
@@ -16,7 +16,7 @@ import (
 )
 
 // runSkipDirs skip .git (no history needed) and node_modules/target (the run's cache mount replaces
-// them -> workflow/execrun.go). .worktrees is load-bearing rather than tidiness: a run against the
+// them -> hub/flow/run). .worktrees is load-bearing rather than tidiness: a run against the
 // repo ROOT has its destination INSIDE its source, so without it the walk sweeps in every other
 // agent's live worktree and then recurses into its own half-built copy — before the container
 // starts, so the run's cap is not yet counting.

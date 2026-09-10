@@ -58,8 +58,10 @@ type Situation struct {
 	ClearArmed bool
 	Stopped    bool
 
-	// The workflow state — what the hub has given it.
+	// The workflow state — what the hub has given it. InPhase is how long it has stood in that
+	// phase: a running action IS a phase, and one nobody measures the age of is a stuck agent.
 	Phase      string
+	InPhase    time.Duration
 	Task       string
 	Container  string
 	Branch     string
@@ -165,7 +167,8 @@ func (g *Gatherer) in(project, name string, pool Pool) (Situation, error) {
 	s := Situation{
 		Project: project, Name: name, Observation: obs, StillFor: obs.StillFor(g.now()),
 		Role: a.Role, Retired: a.Retired, ClearArmed: a.ClearArmed, Stopped: a.Stopped,
-		Phase: st.Phase, Task: st.Task, Container: st.Container, Branch: st.Branch,
+		Phase: st.Phase, InPhase: since(st.PhaseSince, g.now()), Task: st.Task,
+		Container: st.Container, Branch: st.Branch,
 		Escalation: st.Escalation, LastNudge: st.LastNudge, Pool: pool,
 	}
 	if !ok {
@@ -218,4 +221,20 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 		}
 	}
 	return false
+}
+
+// since is how long ago an RFC3339 stamp was, zero when there is none or it cannot be read — an
+// unstamped phase reads as brand new, which is the direction that never frees an agent by mistake.
+func since(stamp string, now time.Time) time.Duration {
+	if stamp == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return 0
+	}
+	if d := now.Sub(t); d > 0 {
+		return d
+	}
+	return 0
 }

@@ -1,11 +1,12 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/observe"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // loggedPushSuppressed reports whether a suppressed-push event was recorded for the agent.
@@ -99,7 +100,7 @@ func TestKickoffReachesARetiredAgent(t *testing.T) {
 
 	// No real pod is running here, so the push still fails to land — the log is what proves the gate
 	// itself let it through rather than refusing on sight.
-	_ = h.Deliver(testProject, "dvalin", workflow.MsgKickoff, workflow.PushOnly)
+	_ = h.Deliver(testProject, "dvalin", prompts.MsgKickoff, core.PushOnly)
 	if loggedPushSuppressed(t, h, "dvalin") {
 		t.Error("a retired agent's kickoff must not be gated — it is the only way it learns that")
 	}
@@ -122,7 +123,7 @@ func TestEscalatedAgentIsStillNudgedAboutWaitingMail(t *testing.T) {
 
 	// No real pod is running here, so the push itself cannot land — what this proves is narrower but
 	// exactly the bug: it must fail for lack of a pane, never because WakeRefusal gated it.
-	h.wf.NudgeMailWaiting(testProject, "dvalin")
+	h.agentFlow().NudgeMailWaiting(testProject, "dvalin")
 	if loggedPushSuppressed(t, h, "dvalin") {
 		t.Error("the mail-waiting push must not be gated on the very state it exists to end")
 	}

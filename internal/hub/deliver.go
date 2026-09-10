@@ -3,38 +3,21 @@
 // job:     carry out a classified delivery — write the mail that must be read, push the wake
 // that should act now, and record on the mail row whether that wake actually landed.
 // limits:  the mechanics of one send. WHICH class a message is belongs to its sender
-// (-> workflow.Delivery); the mailbox itself is the store's.
+// (-> core.Delivery); the mailbox itself is the store's.
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"os"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
-
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
-
-// maxUserMessageLen is the longest message an agent may send THE USER. Short on purpose: a person
-// reads it on a screen, and the cap is what makes an agent cut the preamble and say the thing.
-// REFUSED over-length, never truncated: a silent cut teaches nothing.
-const maxUserMessageLen = 300
-
-// tooLongFor reports whether msg is more than recipient should be sent. ONLY the user has a limit:
-// an agent reading is a model, and one cap for everyone refused the messages worth sending — a
-// rejection's feedback does not fit in 300 characters.
-func tooLongFor(recipient, msg string) (n, limit int, over bool) {
-	if recipient != api.SenderUser {
-		return 0, 0, false
-	}
-	n = len([]rune(msg))
-	return n, maxUserMessageLen, n > maxUserMessageLen
-}
 
 // senderFor is who a message is from: what the sender stated, else the hub in its own voice — which is
 // what an unattributed hub message IS, rather than a value to guess at.
-func senderFor(d workflow.Delivery) string {
+func senderFor(d core.Delivery) string {
 	if d.Sender != "" {
 		return d.Sender
 	}
@@ -46,8 +29,8 @@ func senderFor(d workflow.Delivery) string {
 //
 // It asks no rule whether the message is WORTH sending. That judgement belongs where the message is
 // composed — a sender knows what it is about to say and why — and asking it here made the ruleset
-// and the delivery path call each other through the composition root (-> workflow.Surface.Wake).
-func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
+// and the delivery path call each other through the composition root (-> fleet.Surface.Wake).
+func (h *Hub) Deliver(project, name, text string, d core.Delivery) error {
 	if !d.Sends() {
 		return fmt.Errorf("delivery to %s/%s asks for neither mail nor push, so it is not a message", project, name)
 	}
@@ -98,7 +81,7 @@ func (h *Hub) MailAgent(project, name, msg string) error {
 	}
 	// The "[user] " prefix stays in the rendered line, where a reader wants it, but it is no longer the
 	// mechanism: the sender is stated.
-	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly.From(api.SenderUser))
+	return h.Deliver(project, name, "[user] "+msg, core.MailOnly.From(api.SenderUser))
 }
 
 // ReplyToMail is the user answering an agent, from either front-end. The recipient comes from the
@@ -114,9 +97,6 @@ func (h *Hub) ReplyToMail(id int64, msg string) error {
 	if original.Sender == "hub" || original.Sender == "" {
 		return fmt.Errorf("message %d came from the hub, which has nobody behind it to read a reply", id)
 	}
-	if n, limit, over := tooLongFor(original.Sender, msg); over {
-		return fmt.Errorf("that reply is %d characters and the limit is %d — the cost is the user's attention", n, limit)
-	}
 	// The sender is stored qualified (repo/agent) where it came from another repo, so resolve it the
 	// same way an agent's reply does rather than assuming the reading repo.
 	project, name := original.Project, original.Sender
@@ -124,5 +104,5 @@ func (h *Hub) ReplyToMail(id int64, msg string) error {
 		project, name = p, n
 	}
 	// Mail, not a push: the user chose to answer in writing, and `tell` is the verb that interrupts.
-	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly.From(api.SenderUser).Answering(id))
+	return h.Deliver(project, name, "[user] "+msg, core.MailOnly.From(api.SenderUser).Answering(id))
 }

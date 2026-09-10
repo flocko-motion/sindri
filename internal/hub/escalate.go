@@ -9,13 +9,14 @@ package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // heldByEscalation wraps a verb's own gate with the escalation hold, asked FIRST. THE LINE IS WHAT
@@ -26,7 +27,7 @@ import (
 func heldByEscalation(verb string, gate func(registry.Caller) string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Escalation != "" {
-			return workflow.ReplyEscalated(verb, c.Escalation)
+			return prompts.ReplyEscalated(verb, c.Escalation)
 		}
 		if gate == nil {
 			return ""
@@ -63,7 +64,7 @@ func (h *Hub) cmdEscalate(c registry.Caller, args []string, out io.Writer) (int,
 	if err != nil {
 		return 1, err
 	}
-	fmt.Fprintln(out, workflow.ReplyEscalationRaised(question, on))
+	fmt.Fprintln(out, prompts.ReplyEscalationRaised(question, on))
 	return 0, nil
 }
 
@@ -73,7 +74,7 @@ func (h *Hub) cmdResume(c registry.Caller, _ []string, out io.Writer) (int, erro
 	if err := h.Resume(c.Project, c.Agent, "resumed with the user's answer in hand"); err != nil {
 		return 1, err
 	}
-	fmt.Fprintln(out, workflow.ReplyResumed)
+	fmt.Fprintln(out, prompts.ReplyResumed)
 	return 0, nil
 }
 
@@ -126,8 +127,8 @@ func (h *Hub) ResumeByUser(project, name, answer string) error {
 	if question == "" {
 		return nil // nothing was cleared, so there is nothing to announce
 	}
-	return h.Deliver(project, name, workflow.MsgResumedByUser(question, answer),
-		workflow.MailAndPush.From(api.SenderUser))
+	return h.Deliver(project, name, prompts.MsgResumedByUser(question, answer),
+		core.MailAndPush.From(api.SenderUser))
 }
 
 // Resume clears an agent's escalation and records why, whoever asked. The agent clears its own once

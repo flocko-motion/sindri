@@ -5,7 +5,7 @@
 // the two halves of one question (must it be read, must it wake) rather than two
 // unrelated endpoints.
 // limits:  pure transport over Hub methods; the classification is the sender's
-// (-> workflow.Delivery) and the mailbox is the store's.
+// (-> core.Delivery) and the mailbox is the store's.
 package hub
 
 import (

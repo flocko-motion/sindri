@@ -34,9 +34,9 @@ changes and GitHub issues are all tasks: each is worked, closed, submitted and
 reviewed identically, and no caller may branch on which kind it holds. Where the
 kinds genuinely differ — a task sindri owns keeps its status in the hub's store, a
 mirrored one keeps it at its source — that difference lives behind one operation
-(`workflow.Engine.SetStatus`) and stops there. A caller that has to ask what kind of
+(`hub/flow/pr`'s `SetStatus`) and stops there. A caller that has to ask what kind of
 task it has is a caller that will one day forget to; four of them did, each leaving a
-finished openspec change reading open. `internal/hub/workflow/onehome_test.go` holds
+finished openspec change reading open. `internal/hub/flow/fleet/onehome_test.go` holds
 the line for status specifically: only the owned source may write `owned_tasks`.
 
 ## CLI and TUI are interchangeable front-ends
@@ -69,6 +69,38 @@ Each non-test `.go` file opens with the four-field header `brokkr map` reads, an
 `rendering`, `ui`, `command`, `entrypoint`. Closed on purpose — a vocabulary anyone
 may extend describes nothing, and a file that fits none of the seven is usually a
 file doing two jobs. `internal/arch/vocab_test.go` fails the build on an eighth.
+
+## The workflow is a reconciler, in three layers
+
+What an agent should be doing next is decided by a **level-triggered reconciler**, split so that
+deciding and acting cannot be the same act.
+
+- `internal/hub/flow/machine` is the **engine**, and it names nothing of sindri's. It owns the loop: one
+  action in flight per subject with its own `ctx`, notifies coalesced while that action runs,
+  cancel-and-restart when a fresh decision disagrees, a periodic floor under every dropped event, and
+  the record of each pass under one correlation id. It is tested against a fake world and intent.
+- `internal/hub/flow` is the **flow**: the states an agent can stand in, each DECLARED as a struct
+  that reads as its own documentation — title, what it means, every way out with the condition that
+  takes it — plus the world they read and the closed vocabularies they answer in. Each role has its
+  own flow over a set of shared states; they add up to one registry, because the subject is an agent
+  and not a role. `internal/arch/flow_test.go` fails the build if this package imports anything that
+  can write, so `Decide` is pure by construction rather than by intention.
+- The **acting halves** gather the world and perform what the maps decide, one package per subject:
+  `flow/pr`, `flow/task`, `flow/run`, `flow/roles`. Each is a map beside the code that acts on what
+  the map decides, and the line is drawn per FILE — anything named `*_act.go` is the acting half and
+  is the only place that writes state or touches the harness. `internal/hub/flow/fleet` holds the
+  four running machines and is what every acting half re-decides through (`core.Flows`).
+
+**An event carries no meaning.** It is a prompt to go and look, and the answer comes from the whole
+world. A dropped event costs latency and never correctness, ordering stops mattering, and a cancelled
+transition needs no compensation — the machine re-decides from wherever it landed. Nothing here
+builds reliable delivery, ordering or replay; all three are edge-triggered thinking.
+
+**A running action is a state.** Anything that takes time — assigning, clearing, compacting,
+retiering — has a name in the phase vocabulary, an age the store records, and a rule that frees an
+agent left standing in one. The test is not duration but whether an event can arrive in the middle,
+which in practice means whether there is a `ctx` worth cancelling. No directive may mean "a state I
+have no name for".
 
 ## Context is handed through, never invented
 

@@ -2,8 +2,8 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,12 +104,12 @@ func TestNewAgentValidation(t *testing.T) {
 func TestGlobalProjectAcceptsOnlyAReviewer(t *testing.T) {
 	h := newHub(t)
 	for _, role := range []string{"worker", "planner", "coauthor"} {
-		if _, err := h.agents.NewAgent(workflow.GlobalProject, "x-"+role, role, ""); err == nil {
-			t.Errorf("a %s should be refused in %s", role, workflow.GlobalProject)
+		if _, err := h.agents.NewAgent(api.GlobalProject, "x-"+role, role, ""); err == nil {
+			t.Errorf("a %s should be refused in %s", role, api.GlobalProject)
 		}
 	}
-	if _, err := h.agents.NewAgent(workflow.GlobalProject, "ori", "reviewer", ""); err != nil {
-		t.Errorf("a reviewer should be accepted in %s: %v", workflow.GlobalProject, err)
+	if _, err := h.agents.NewAgent(api.GlobalProject, "ori", "reviewer", ""); err != nil {
+		t.Errorf("a reviewer should be accepted in %s: %v", api.GlobalProject, err)
 	}
 }
 
@@ -244,14 +244,14 @@ func TestStartupAdvice(t *testing.T) {
 }
 
 // TestReviewInstructionsCarryArchitecture: both review-instruction paths (the no-arg
-// `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
+// `sindri` directive = prompts.DirReview, and the injected = prompts.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "dwalin", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
-		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(prompts.DirReview("pr-1", "td-1", "a task title", "dwalin", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+		t.Errorf("prompts.DirReview must tell the reviewer to read the architecture doc")
 	}
-	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
-		t.Errorf("workflow.MsgReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(prompts.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
+		t.Errorf("prompts.MsgReview must tell the reviewer to read the architecture doc")
 	}
 }
 
@@ -304,7 +304,7 @@ func TestImportCarriesTheTdBacklogOnce(t *testing.T) {
 	}
 
 	// Closing it and re-syncing must not bring it back: the import is spent.
-	if err := h.wf.CloseTask(tag, owned[0].ID); err != nil {
+	if err := h.prFlow().CloseTask(tag, owned[0].ID); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if err := h.Refresh(tag); err != nil {
@@ -333,10 +333,10 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 // and a change, so it is exercised end-to-end, not here.)
 func TestClosingAnAlreadyEndedOpenspecChangeSucceeds(t *testing.T) {
 	h := newHub(t)
-	if err := h.wf.CloseTask(testProject, "os-abc123"); err != nil {
+	if err := h.prFlow().CloseTask(testProject, "os-abc123"); err != nil {
 		t.Fatalf("an already-ended change is the postcondition, not a failure: %v", err)
 	}
-	if err := h.wf.ScrapTask(testProject, "os-abc123", false, false); err == nil {
+	if err := h.prFlow().ScrapTask(testProject, "os-abc123", false, false); err == nil {
 		t.Error("a scrap means to destroy something it expects to find, so it must still say it is missing")
 	}
 }
@@ -355,7 +355,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	}
 	h.repo(root)
 	tag := RepoTag(root)
-	id, err := h.wf.CreateTask(tag, api.TaskSpec{Title: "implement the widget feature", Type: "task"})
+	id, err := h.taskFlow().CreateTask(tag, api.TaskSpec{Title: "implement the widget feature", Type: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	ps := h.store.For(tag)
 	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup")
 
-	if err := h.wf.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
+	if err := h.prFlow().CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
 		t.Fatalf("closing a held task should be allowed: %v", err)
 	}
 	if st, _ := ps.GetState("eitri"); st.Task != "" || st.Phase == "working" {
@@ -384,7 +384,7 @@ func TestApprovePR(t *testing.T) {
 	}
 
 	// Human approve moves an open PR to approved, no reviewer agent involved.
-	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
+	if err := h.prFlow().ApprovePR(testProject, "pr-td-1"); err != nil {
 		t.Fatalf("approve open PR: %v", err)
 	}
 	pr, ok, err := ps.GetPR("pr-td-1")
@@ -397,7 +397,7 @@ func TestApprovePR(t *testing.T) {
 
 	// Approvals accumulate: an already-approved PR takes a second approval as another badge,
 	// rather than the first verdict locking out any that follow.
-	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
+	if err := h.prFlow().ApprovePR(testProject, "pr-td-1"); err != nil {
 		t.Fatalf("re-approving an approved PR should accumulate a badge: %v", err)
 	}
 	if revs, rerr := ps.Reviews("pr-td-1"); rerr != nil || api.ApprovalCount(revs) != 2 {
@@ -411,12 +411,12 @@ func TestApprovePR(t *testing.T) {
 	if err := ps.PutPR(pr); err != nil {
 		t.Fatalf("put pr: %v", err)
 	}
-	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err == nil {
+	if err := h.prFlow().ApprovePR(testProject, "pr-td-1"); err == nil {
 		t.Fatalf("approving a rejected PR should be refused")
 	}
 
 	// Unknown PR errors.
-	if err := h.wf.ApprovePR(testProject, "pr-nope"); err == nil {
+	if err := h.prFlow().ApprovePR(testProject, "pr-nope"); err == nil {
 		t.Fatalf("approving an unknown PR should error")
 	}
 }

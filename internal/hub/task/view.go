@@ -1,7 +1,7 @@
 // package: hub/task / view
 // type:    logic (task presentation)
 // job:     aliases to internal/api's tree/descendants/open-done/pending-approval —
-// they cross the wire, so that's where they live now; hub/workflow keeps
+// they cross the wire, so that's where they live now; hub/flow/task keeps
 // calling them by these names.
 // limits:  pure functions over store rows; no rendering, no I/O. Board-badge counts
 // that need the whole BoardState live in the hub (sections.go).

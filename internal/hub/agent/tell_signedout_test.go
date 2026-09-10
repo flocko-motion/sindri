@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"io"
 	"strings"
 	"testing"
@@ -14,7 +15,6 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // signedOutPane is Claude's auth banner as the classifier matches it.
@@ -181,7 +181,7 @@ func (tellDeps) Rehydrate(_, _ string)                       {}
 func (tellDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (tellDeps) ForgetFill(_, _ string)                      {}
 
-func (tellDeps) Deliver(_, _, _ string, _ workflow.Delivery) error { return nil }
+func (tellDeps) Deliver(_, _, _ string, _ core.Delivery) error { return nil }
 
 // Observation mirrors the always-up fake runtime this fixture backs, so the situation-derived rules
 // see the same liveness AgentUp reports.

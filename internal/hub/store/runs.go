@@ -3,7 +3,7 @@
 // job:     the run-queue row: schedule, read, and the two mutations a human can make
 // on one (cancel, reprioritise). The schema lives in workflow.go alongside its
 // siblings; execution and scheduling policy are the hub's, not this file's.
-// limits:  primitive columns only; queue order is derived, not stored (-> workflow/run.go).
+// limits:  primitive columns only; queue order is derived, not stored (-> hub/flow/run).
 package store
 
 import (
@@ -105,7 +105,7 @@ func (p *ProjectStore) SetRunStatus(id, status string) error {
 }
 
 // SetRunResult records a run's terminal outcome in one write: status, its full uncapped output
-// (capping happens only when fetched, -> capRunOutput), and the command's exit code.
+// (capping happens only when fetched, -> CapRunOutput), and the command's exit code.
 func (p *ProjectStore) SetRunResult(id, status, output string, exitCode int) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := p.s.db.Exec(`UPDATE runs SET status=?, output=?, exit_code=?, finished_at=?, updated_at=? WHERE project=? AND id=?`,

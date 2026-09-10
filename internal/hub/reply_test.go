@@ -2,12 +2,12 @@ package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // execIn runs a verb as an agent of a NAMED project — execAs is fixed to the test project, and the
@@ -83,7 +83,7 @@ func TestAReplyToTheHubIsRefusedWithSomewhereToGo(t *testing.T) {
 func TestReplyingToTheUserIsNotCharged(t *testing.T) {
 	h, ps := noteSender(t, "dvalin")
 	// Spend the whole grant first, so any charge would refuse the reply.
-	for i := 0; i < workflow.NotesPerClaim; i++ {
+	for i := 0; i < prompts.NotesPerClaim; i++ {
 		if out, code := execAs(t, h, "dvalin", "fyi", "something worth knowing"); code != 0 {
 			t.Fatalf("note %d refused early (%d): %s", i+1, code, out)
 		}

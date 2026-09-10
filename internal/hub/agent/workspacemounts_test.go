@@ -1,9 +1,8 @@
 package agent
 
 import (
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"testing"
-
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // mountFor is the mode a role's pod gets at one container path, and whether it is mounted at all.
@@ -46,7 +45,7 @@ func TestAPlannerWritesOnlyOpenspec(t *testing.T) {
 // looking around would land in another agent's PR as its work. The trees are covered by an empty
 // read-only directory: not readable, not writable, and not even the wrong thing to read.
 func TestACoauthorCannotReachAnotherAgentsWorktree(t *testing.T) {
-	at := "/workspace/" + workflow.AgentTrees
+	at := "/workspace/" + prompts.AgentTrees
 	mode, ok := mountFor("coauthor", at)
 	if !ok {
 		t.Fatalf("%s is not covered for a coauthor — every agent's worktree is under it", at)
@@ -66,18 +65,18 @@ func TestACoauthorCannotReachAnotherAgentsWorktree(t *testing.T) {
 }
 
 // TestACoauthorGetsAScratchTree is the other half: it can no longer look at anyone's worktree, so it
-// is given one of its own for the hub to check work out into (-> workflow.CmdScratch).
+// is given one of its own for the hub to check work out into (-> fleet.CmdScratch).
 func TestACoauthorGetsAScratchTree(t *testing.T) {
-	mode, ok := mountFor("coauthor", workflow.ScratchMount)
+	mode, ok := mountFor("coauthor", prompts.ScratchMount)
 	if !ok {
-		t.Fatalf("a coauthor has no %s — it could then inspect nothing but its own tree", workflow.ScratchMount)
+		t.Fatalf("a coauthor has no %s — it could then inspect nothing but its own tree", prompts.ScratchMount)
 	}
 	if mode != "rw" {
-		t.Errorf("%s is mounted %q, want rw: building and testing there is the point", workflow.ScratchMount, mode)
+		t.Errorf("%s is mounted %q, want rw: building and testing there is the point", prompts.ScratchMount, mode)
 	}
 	// No other role gets one: they each have a worktree of their own already.
 	for _, role := range []string{"worker", "reviewer", "planner"} {
-		if _, ok := mountFor(role, workflow.ScratchMount); ok {
+		if _, ok := mountFor(role, prompts.ScratchMount); ok {
 			t.Errorf("%s was given a scratch tree", role)
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // defaultPodManifest must stay empty when nothing exists on EITHER of its two sources — a fresh
@@ -44,7 +43,7 @@ func newHubWithTools(t *testing.T, host map[string]string, manifest map[string]s
 
 func userMail(t *testing.T, h *Hub) []string {
 	t.Helper()
-	mail, err := h.store.For(workflow.GlobalProject).UnreadMail(api.SenderUser)
+	mail, err := h.store.For(api.GlobalProject).UnreadMail(api.SenderUser)
 	if err != nil {
 		t.Fatalf("UnreadMail: %v", err)
 	}

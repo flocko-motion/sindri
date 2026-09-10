@@ -16,7 +16,7 @@ import (
 )
 
 // newGitRepo makes a minimal repo with one commit — enough for prepareWorkspace's ordinary,
-// non-GlobalProject path.
+// non-api.GlobalProject path.
 func newGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -33,7 +33,7 @@ func newGitRepo(t *testing.T) string {
 	return dir
 }
 
-// TestPrepareWorkspaceForGlobalReviewerNeedsNoRepository: a GlobalProject pod mounts no repository
+// TestPrepareWorkspaceForGlobalReviewerNeedsNoRepository: a api.GlobalProject pod mounts no repository
 // at all — the fixed workspace directory just needs to exist, whatever root points at.
 func TestPrepareWorkspaceForGlobalReviewerNeedsNoRepository(t *testing.T) {
 	s, st := newService(t)
@@ -50,7 +50,7 @@ func TestPrepareWorkspaceForGlobalReviewerNeedsNoRepository(t *testing.T) {
 	}
 }
 
-// TestPrepareWorkspaceStillAddsAWorktreeForAnOrdinaryReviewer: the GlobalProject branch must not
+// TestPrepareWorkspaceStillAddsAWorktreeForAnOrdinaryReviewer: the api.GlobalProject branch must not
 // swallow the ordinary path — a project-bound reviewer still gets a real git worktree.
 func TestPrepareWorkspaceStillAddsAWorktreeForAnOrdinaryReviewer(t *testing.T) {
 	s, st := newService(t)
@@ -68,7 +68,7 @@ func TestPrepareWorkspaceStillAddsAWorktreeForAnOrdinaryReviewer(t *testing.T) {
 }
 
 // TestPrepareWorkspaceRefusesARepoWithNoCommits: unchanged behaviour for the ordinary path — a
-// GlobalProject reviewer must not accidentally bypass this by some other route.
+// api.GlobalProject reviewer must not accidentally bypass this by some other route.
 func TestPrepareWorkspaceRefusesARepoWithNoCommits(t *testing.T) {
 	s, st := newService(t)
 	root := t.TempDir()

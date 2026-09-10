@@ -4,7 +4,7 @@
 // task sync reads as one of its sources, and the only task table a mutation
 // writes to.
 // limits:  primitive columns and CRUD; ids, status vocabulary and the sync are the
-// hub's (-> hub/workflow).
+// hub's (-> hub/owned).
 package store
 
 import (

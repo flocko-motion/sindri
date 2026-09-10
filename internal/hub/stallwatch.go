@@ -3,15 +3,16 @@
 // job:     ask the workflow to nudge any agent that holds work but has read idle past the dwell, so
 // an agent that stopped mid-assignment is noticed instead of holding a task indefinitely.
 // limits:  just the cadence and who to ask about; the rule and the message live in
-// workflow/stall.go, and the dwell is measured by the watchdog.
+// hub/flow/roles' stall_act.go, and the dwell is measured by the watchdog.
 package hub
 
 import (
 	"time"
 )
 
-// stallInterval only has to be short against the dwell, which is minutes: a stall that has already
-// lasted that long is not made worse by being found a few seconds later.
+// stallInterval is short against the dwell, which is minutes. A TIMER ON PURPOSE: a stall is the
+// ABSENCE of an event — a screen that stopped changing — so nothing can announce it. The observer
+// answers this when it starts publishing (openspec change the-observer-announces).
 const stallInterval = 20 * time.Second
 
 // stallwatch nudges stalled agents until stopped; one per hub, started by New.
@@ -66,8 +67,8 @@ func (s *stallwatch) sweep() {
 		// that finished and stopped calling `sindri` would otherwise never read what it was sent, which
 		// would make "mail must be read" false exactly when it mattered. What it has already been told
 		// about is kept per MESSAGE in the mailbox, not in this map, so a hub restart announces nothing
-		// twice (-> workflow.NudgeMailWaiting).
-		s.h.wf.NudgeMailWaiting(a.Project, a.Name)
+		// twice (-> fleet.NudgeMailWaiting).
+		s.h.agentFlow().NudgeMailWaiting(a.Project, a.Name)
 		obs := s.h.observed(a.Project, a.Name)
 		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
 		// resumes and dies again is a new spell rather than one already prodded for. The INSTANT, which
@@ -84,7 +85,7 @@ func (s *stallwatch) sweep() {
 		if s.nudged[key].Equal(since) {
 			continue // already prodded for this spell
 		}
-		if s.h.wf.NudgeStalled(a.Project, a.Name, obs, time.Since(since)) {
+		if s.h.agentFlow().NudgeStalled(a.Project, a.Name, obs, time.Since(since)) {
 			s.nudged[key] = since
 		}
 	}

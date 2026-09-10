@@ -71,7 +71,7 @@ func TestRepoForgetDeletesAgentsKeepsRepo(t *testing.T) {
 	}
 }
 
-// TestGlobalProjectRegistersAtStartup: nothing ever names GlobalProject in a request the way a real
+// TestGlobalProjectRegistersAtStartup: nothing ever names api.GlobalProject in a request the way a real
 // repo's root does (there is no directory to lazily register from), so it must already be in the
 // registry the moment the hub opens, with a path whose basename repoSlug reads back unchanged.
 func TestGlobalProjectRegistersAtStartup(t *testing.T) {
@@ -82,10 +82,10 @@ func TestGlobalProjectRegistersAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ok {
-		t.Fatal("GlobalProject should already be registered when the hub opens")
+		t.Fatal("api.GlobalProject should already be registered when the hub opens")
 	}
 	if got := filepath.Base(path); got != api.GlobalProject {
-		t.Errorf("GlobalProject's registered path is %q, whose basename is %q, want %q", path, got, api.GlobalProject)
+		t.Errorf("api.GlobalProject's registered path is %q, whose basename is %q, want %q", path, got, api.GlobalProject)
 	}
 }
 
@@ -95,7 +95,7 @@ func TestGlobalProjectCannotBeForgotten(t *testing.T) {
 	h := newHub(t)
 
 	if err := h.projects.Forget(api.GlobalProject); err == nil {
-		t.Fatal("forgetting GlobalProject should be refused")
+		t.Fatal("forgetting api.GlobalProject should be refused")
 	}
 	if _, ok, _ := h.store.ProjectPath(api.GlobalProject); !ok {
 		t.Error("a refused forget must leave the registry row in place")

@@ -47,8 +47,20 @@ var ruleDerivers = map[string]string{
 	"internal/hub/commands.go": "renders the retirement note beside what the agent holds",
 	// Read off the SITUATION, which is the sanctioned carrier — the fact, for a caller that needs the
 	// fact rather than a rule: which armed clear to fire, and which directive a retired agent gets.
-	"internal/hub/workflow/engine.go": "reads ClearArmed off the situation, to fire the clear it names",
-	"internal/hub/workflow/task.go":   "reads Retired off the situation, to serve DirRetired",
+	"internal/hub/core/core.go":              "reads both off the situation and hands the FACT on — the one place either is read",
+	"internal/hub/flow/roles/session_act.go": "reads ClearArmed off the situation, to fire the clear it names",
+	"internal/hub/flow/task/task_act.go":     "reads Retired off the situation, to serve DirRetired",
+	"internal/hub/flow/pr/reviewer_act.go":   "reads Retired off the situation, to skip a parked reviewer",
+	"internal/hub/flow/fleet/flowdo.go":      "takes the arming BACK once the clear has answered it — its writer, not a second decider",
+	// The declared states read both off the situation for the same reason: which action follows an
+	// armed clear, and which words a retired agent is given. The surface's own wakeRefusal mirrors
+	// this table branch for branch, and now that the table is declared data that mirroring is
+	// checkable rather than remembered (-> hub/flow).
+	// The flow tree reads both off the situation for the same reason: a condition is the FACT, and
+	// where it leads is the map's. The surface's own wakeRefusal mirrors these maps, and now that
+	// they are declared data that mirroring is checkable rather than remembered (-> hub/flow).
+	"internal/hub/flow/cond":  "the facts themselves, as conditions a map watches",
+	"internal/hub/flow/roles": "the maps that say where each fact leads",
 	// The front-ends render them; a rule they applied themselves is what AgentView.NeedsUser exists
 	// to prevent, and importguard_test.go keeps them from reaching the surface anyway.
 	"internal/ui":  "front-ends render the flags they are given",
@@ -89,7 +101,7 @@ func TestTheSurfaceIsTheOnlyHomeForTheseRules(t *testing.T) {
 				return true
 			}
 			why, owned := ownedRules[sel.Sel.Name]
-			if !owned {
+			if !owned || vocabulary(sel) {
 				return true
 			}
 			seen++
@@ -114,6 +126,16 @@ func TestTheSurfaceIsTheOnlyHomeForTheseRules(t *testing.T) {
 		t.Errorf("%s.\nAsk the surface instead (situation.Situation.Allowed), or add the file to "+
 			"ruleDerivers with the reason it is not a second decider", p)
 	}
+}
+
+// vocabularyPackages are the flow's closed sets, whose members are NAMES rather than facts —
+// says.Retired is a speech, not a roster row, and the scan is by field name alone.
+var vocabularyPackages = map[string]bool{"says": true, "cond": true, "act": true, "verb": true, "topic": true}
+
+// vocabulary reports a selector reaching into one of those, which carries no rule with it.
+func vocabulary(sel *ast.SelectorExpr) bool {
+	root, ok := sel.X.(*ast.Ident)
+	return ok && vocabularyPackages[root.Name]
 }
 
 // allowedDeriver reports whether rel is declared, by exact path or by a declared directory prefix.

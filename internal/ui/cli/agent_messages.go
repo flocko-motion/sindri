@@ -3,7 +3,7 @@
 // job:     the two ways a user reaches an agent, as two actions: `tell` PUSHES into the live
 // session now, and `mail` WAITS to be read without interrupting. Each one-liner says
 // which it is, because that is where the choice is made.
-// limits:  thin calls into the backend; the delivery model is the hub's (-> workflow.Delivery).
+// limits:  thin calls into the backend; the delivery model is the hub's (-> core.Delivery).
 package cli
 
 import (

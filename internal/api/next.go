@@ -94,4 +94,12 @@ type NextExplain struct {
 	// other PR stands.
 	PickPR *PRReason  `json:"pickPR,omitempty"`
 	PRs    []PRReason `json:"prs,omitempty"`
+	// State is the state the named agent stands in, and Rule what the workflow would decide there —
+	// the WHY beside the what. "Handed sd-1 because worker/idle matched" answers in one line what
+	// reading the outcome alone leaves to be worked out.
+	State string `json:"state,omitempty"`
+	Rule  string `json:"rule,omitempty"`
+	// Flow is the role's declared states, rendered: what may happen in each and where each leads.
+	// The table is data, so "what happens when X" is a lookup rather than a read of the code.
+	Flow string `json:"flow,omitempty"`
 }

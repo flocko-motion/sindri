@@ -9,6 +9,7 @@
 package agent
 
 import (
+	"github.com/flo-at/sindri/internal/hub/core"
 	"sync"
 
 	"github.com/flo-at/sindri/internal/config"
@@ -16,7 +17,6 @@ import (
 	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // Deps is what the agent-management module needs back from the hub: the board, an agent's container
@@ -31,11 +31,11 @@ type Deps interface {
 	RefreshTask(project, id string) error
 	Rehydrate(project, name string)
 	// Kickoff is what a session coming up fresh is told, resolved from the agent's role by the hub
-	// (-> workflow.Engine.Kickoff) — the same division as Rehydrate: here the WHEN, there the WHAT.
+	// (-> fleet.Engine.Kickoff) — the same division as Rehydrate: here the WHEN, there the WHAT.
 	Kickoff(project, name string) string
 	// Deliver is the hub's ordinary delivery path, the one that reports its own failures — how a
 	// command that reset a session sends what follows.
-	Deliver(project, name, text string, d workflow.Delivery) error
+	Deliver(project, name, text string, d core.Delivery) error
 	// ForgetFill drops the hub's standing sample of an agent's context fill. The board reports THAT
 	// sample, not this package's memo, so invalidating one without the other leaves the stale figure.
 	ForgetFill(project, name string)

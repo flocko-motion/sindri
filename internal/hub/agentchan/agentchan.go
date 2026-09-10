@@ -150,7 +150,7 @@ func (s *Server) handler(project, name string) http.Handler {
 		writeJSON(w, cmds, err)
 	})
 	mux.HandleFunc("GET /directive", func(w http.ResponseWriter, r *http.Request) {
-		// Answers at once — see workflow.Engine.AgentDirective for why nothing here waits.
+		// Answers at once — see fleet.Engine.AgentDirective for why nothing here waits.
 		d, err := s.deps.Directive(r.Context(), project, name)
 		writeJSON(w, okMsg{d}, err)
 	})

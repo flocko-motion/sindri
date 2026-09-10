@@ -1,13 +1,13 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/container"
 	hubagent "github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // greetable seeds one idle agent in role, observed as up, with a fake runtime recording everything
@@ -38,10 +38,10 @@ func TestALaunchedPlannerIsGreetedWithItsDirective(t *testing.T) {
 	h, rt := greetable(t, "planner")
 	h.greet(testProject, "dvalin")
 	sent := rt.joined()
-	if !strings.Contains(sent, workflow.DirPlanner) {
+	if !strings.Contains(sent, prompts.DirPlanner) {
 		t.Errorf("a launched planner should wake holding its own directive: %s", sent)
 	}
-	if strings.Contains(sent, workflow.MsgKickoff) {
+	if strings.Contains(sent, prompts.MsgKickoff) {
 		t.Errorf("that fetch is the round trip this feature removes: %s", sent)
 	}
 }
@@ -51,7 +51,7 @@ func TestALaunchedPlannerIsGreetedWithItsDirective(t *testing.T) {
 func TestALaunchedWorkerIsStillSentToFetch(t *testing.T) {
 	h, rt := greetable(t, "worker")
 	h.greet(testProject, "dvalin")
-	if sent := rt.joined(); !strings.Contains(sent, workflow.MsgKickoff) {
+	if sent := rt.joined(); !strings.Contains(sent, prompts.MsgKickoff) {
 		t.Errorf("a launched worker should still be told to run `sindri`: %s", sent)
 	}
 }
@@ -67,7 +67,7 @@ func TestAClearedPlannerIsHandedItsDirective(t *testing.T) {
 	if !strings.Contains(sent, "/clear") {
 		t.Fatalf("precondition: the session was never cleared: %s", sent)
 	}
-	if !strings.Contains(sent, workflow.DirPlanner) {
+	if !strings.Contains(sent, prompts.DirPlanner) {
 		t.Errorf("the kickoff behind the clear should carry the planner's directive: %s", sent)
 	}
 }
@@ -93,7 +93,7 @@ func TestTheArmedClearSweepHandsThePlannerItsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.agents.FireArmedClears(t.Context(), testProject)
-	if sent := rt.joined(); !strings.Contains(sent, workflow.DirPlanning) {
+	if sent := rt.joined(); !strings.Contains(sent, prompts.DirPlanning) {
 		t.Errorf("the sweep's kickoff should carry the planner's directive too: %s", sent)
 	}
 }

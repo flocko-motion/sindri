@@ -2,7 +2,7 @@
 // type:    adapter (SQLite, hub-owned)
 // job:     what an author answered before a submit was accepted, kept per ATTEMPT — one open
 // questionnaire per agent, finished when the submit it belongs to is taken.
-// limits:  rows only; which questions are asked, and what an answer is worth, are the workflow's.
+// limits:  rows only; which questions are asked, and what an answer is worth, are hub/flow/pr's.
 package store
 
 import (

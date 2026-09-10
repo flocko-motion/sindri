@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // SetState must log every call under the caller's own reason and detail — the whole point of
 // requiring them: a transition nobody can say why for should not be writable.
@@ -115,32 +118,53 @@ func TestStateLogCapsPerAgent(t *testing.T) {
 	}
 }
 
-// state_log is purged whole at hub restart — never durable, unlike the activity log.
-func TestStateLogPurgedAtRestart(t *testing.T) {
+// The record SURVIVES a restart, which is the whole reason it is worth keeping: the interesting
+// failures span one, and a hub that restarts on install was a hub that forgot its own evidence.
+func TestStateLogSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
-	path := dir + "/s.db"
-	st, err := Open(path)
+	path := filepath.Join(dir, "sindri.db")
+	first, err := Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open: %v", err)
 	}
-	if err := st.For("repo").LogState("brokkr", ReasonStatus, "before restart"); err != nil {
-		t.Fatal(err)
+	if err := first.For("repo").LogState("brokkr", ReasonStatus, "before restart"); err != nil {
+		t.Fatalf("LogState: %v", err)
 	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
+	first.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
 	}
+	defer again.Close()
+	log, err := again.For("repo").StateLog("brokkr", 0)
+	if err != nil {
+		t.Fatalf("StateLog: %v", err)
+	}
+	if len(log) != 1 || log[0].Detail != "before restart" {
+		t.Errorf("the record must survive a restart, got %+v", log)
+	}
+}
 
-	st2, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
+// A reconcile pass's steps share one correlation id, so an agent's story is ONE query rather than
+// several logs aligned by eye — which is what every hub bug chased this week needed by hand.
+func TestAPassIsOneQuery(t *testing.T) {
+	p := openTmpProject(t)
+	for _, step := range []string{"decided", "started", "finished"} {
+		if err := p.LogPass("brokkr", step, "p-00002a", step+" something"); err != nil {
+			t.Fatalf("LogPass: %v", err)
+		}
 	}
-	t.Cleanup(func() { st2.Close() })
-	log, err := st2.For("repo").StateLog("brokkr", 0)
+	log, err := p.StateLog("brokkr", 0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("StateLog: %v", err)
 	}
-	if len(log) != 0 {
-		t.Errorf("state_log must be purged at restart, got %+v", log)
+	if len(log) != 3 {
+		t.Fatalf("want three rows, got %+v", log)
+	}
+	for _, e := range log {
+		if e.Pass != "p-00002a" {
+			t.Errorf("every line of one pass must carry its id, got %+v", e)
+		}
 	}
 }
 
@@ -208,5 +232,32 @@ func TestClearEscalationLogsWhatWasCleared(t *testing.T) {
 	want := "escalation cleared: should this touch prod config?"
 	if len(log) == 0 || log[0].Detail != want {
 		t.Fatalf("want the clear row to name what it cleared (%q), got %+v", want, log)
+	}
+}
+
+// TestPhaseSinceStampsOnlyARealChange: a long-running action IS a phase, and the watcher over one
+// measures its age — a re-write of the same phase that restamped it would hide an agent stuck there.
+func TestPhaseSinceStampsOnlyARealChange(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "clearing"}, ReasonAdvanced, "clearing"); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+	first, err := p.GetState("brokkr")
+	if err != nil || first.PhaseSince == "" {
+		t.Fatalf("PhaseSince must be stamped on a phase change, got %+v (err %v)", first, err)
+	}
+	if err := p.SetPhase("brokkr", "clearing", ReasonAdvanced, "still clearing"); err != nil {
+		t.Fatalf("SetPhase: %v", err)
+	}
+	again, _ := p.GetState("brokkr")
+	if again.PhaseSince != first.PhaseSince {
+		t.Errorf("re-writing the same phase must not restamp it: %q -> %q", first.PhaseSince, again.PhaseSince)
+	}
+	if err := p.SetPhase("brokkr", "working", ReasonAdvanced, "cleared"); err != nil {
+		t.Fatalf("SetPhase: %v", err)
+	}
+	moved, _ := p.GetState("brokkr")
+	if moved.PhaseSince == "" {
+		t.Errorf("a real phase change must stamp PhaseSince, got %+v", moved)
 	}
 }

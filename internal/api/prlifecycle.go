@@ -23,22 +23,30 @@ var prEventMilestone = map[string]bool{
 	"reopened":     true,
 	"withdrawn":    true,
 	"merged":       true,
+	"milestone":    true, // it landed over work its task gained, so it was a milestone after all
 	"merge-failed": true,
 	"scrapped":     true,
 
-	"precheck-pass":         false,
-	"precheck-skipped":      false,
-	"precheck-conflict":     false,
-	"precheck-gate-fail":    false,
-	"checkout-failed":       false,
-	"scrap-branch-failed":   false,
-	"review-amended":        false,
-	"review-prepare-failed": false,
-	"reject-prepare-failed": false,
-	"review-repaired":       false,
-	"review-requested":      false,
-	"conflict":              false,
-	"warning":               false,
+	"precheck-pass":      false,
+	"precheck-skipped":   false,
+	"precheck-conflict":  false,
+	"precheck-gate-fail": false,
+	"checkout-failed":    false,
+	// review-prepare-failed and reject-prepare-failed are gone with the preparation that produced
+	// them: a hand-over hands over, and the session is the receiving agent's map to clear.
+	"scrap-branch-failed": false,
+	"review-amended":      false,
+	"review-repaired":     false,
+	"review-requested":    false,
+	"conflict":            false,
+	"warning":             false,
+
+	// The flow machine's own account of this pull request (-> hub/flow/pr). Diagnostics, not
+	// milestones: the states it moves through say the same things "merged" and "scrapped" already
+	// say, and a lifecycle listing both would tell the story twice.
+	"resumed": false, // the author was brought onto the base its own milestone moved
+	"state":   false,
+	"pass":    false,
 }
 
 // PREventKind reports whether a type belongs in the summary, and whether the vocabulary knows it.

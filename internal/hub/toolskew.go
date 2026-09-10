@@ -11,13 +11,13 @@ package hub
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // hostLookupTimeout bounds the host-side probes: check() runs inside New, before Serve answers the
@@ -92,7 +92,7 @@ func (t *toolskew) say(msg string) {
 		return
 	}
 	if msg != "" {
-		if err := t.h.Deliver(workflow.GlobalProject, api.SenderUser, msg, workflow.MailOnly.From("hub")); err != nil {
+		if err := t.h.Deliver(api.GlobalProject, api.SenderUser, msg, core.MailOnly.From("hub")); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: mailing tool-version mismatch: %v\n", err)
 			return
 		}

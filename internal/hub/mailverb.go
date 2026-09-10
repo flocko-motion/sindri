@@ -4,18 +4,19 @@
 // those messages read; `mail list` for a scoped look at the project's mailbox without
 // marking anything. Pick-up is explicit and it is what survives a crash between
 // delivery and processing, which an injection cannot.
-// limits:  reading only; who writes mail is the sender's (-> workflow.Delivery), and the
+// limits:  reading only; who writes mail is the sender's (-> core.Delivery), and the
 // record is the store's (reading MARKS, it never deletes).
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // mailHelp advertises all three in one line, since they are one verb: no argument READS, a name
@@ -26,7 +27,7 @@ const mailHelp = "read what is waiting for you (mail), send an agent a message (
 // cmdMail prints an agent's unread messages and marks them read, OLDEST FIRST — a later message often
 // supersedes an earlier one. Marked per message as it is printed, so nothing handed over stays unread.
 func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, error) {
-	// "list" is reserved ahead of send, mirroring CmdTasks (-> taskread.go); nothing else is reserved.
+	// "list" is reserved ahead of send, mirroring CmdTasks (-> hub/flow/task); nothing else is.
 	if len(args) > 0 && args[0] == "list" {
 		return h.mailList(c, out)
 	}
@@ -39,7 +40,7 @@ func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, err
 		return 1, err
 	}
 	if len(unread) == 0 {
-		fmt.Fprintln(out, workflow.ReplyNoMail)
+		fmt.Fprintln(out, prompts.ReplyNoMail)
 		return 0, nil
 	}
 	fmt.Fprintf(out, "%d message(s) waiting, oldest first:\n", len(unread))
@@ -51,7 +52,7 @@ func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, err
 			return 1, err
 		}
 	}
-	fmt.Fprintf(out, "\n%s\n", workflow.ReplyMailRead(len(unread)))
+	fmt.Fprintf(out, "\n%s\n", prompts.ReplyMailRead(len(unread)))
 	h.notify() // the unread count is on the board, and it has just changed
 	return 0, nil
 }
@@ -98,7 +99,7 @@ func (h *Hub) mailList(c registry.Caller, out io.Writer) (int, error) {
 func (h *Hub) sendMail(c registry.Caller, to, msg string, out io.Writer) (int, error) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
-		fmt.Fprintln(out, workflow.ReplyMailNoMessage(to))
+		fmt.Fprintln(out, prompts.ReplyMailNoMessage(to))
 		return 2, nil
 	}
 	project, name, err := h.resolveRecipient(to)
@@ -106,23 +107,18 @@ func (h *Hub) sendMail(c registry.Caller, to, msg string, out io.Writer) (int, e
 		fmt.Fprintf(out, "%v\n", err)
 		return 1, nil
 	}
-	// After resolving, because the limit is the RECIPIENT's: only the user has one (-> tooLongFor).
-	if n, limit, over := tooLongFor(name, msg); over {
-		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, limit))
-		return 1, nil
-	}
 	if project == c.Project && name == c.Agent {
-		fmt.Fprintln(out, workflow.ReplyMailToSelf)
+		fmt.Fprintln(out, prompts.ReplyMailToSelf)
 		return 1, nil
 	}
 	// The sender is QUALIFIED where the address was bare: a message from another repo is useless
 	// without knowing which one it came from, and the reply path is then the bare name again.
 	from := h.repoName(c.Project) + "/" + c.Agent
-	if err := h.Deliver(project, name, msg, workflow.MailOnly.From(from)); err != nil {
+	if err := h.Deliver(project, name, msg, core.MailOnly.From(from)); err != nil {
 		return 1, err
 	}
 	_ = h.store.For(c.Project).Log(c.Agent, "mail-sent", name+": "+msg)
-	fmt.Fprintln(out, workflow.ReplyMailSent(name, h.repoName(project)))
+	fmt.Fprintln(out, prompts.ReplyMailSent(name, h.repoName(project)))
 	return 0, nil
 }
 
@@ -164,7 +160,7 @@ const replyHelp = "answer a message you were sent, without needing to know who s
 // cmdReply answers by mail id; the recipient comes from the stored row, so no name is ever needed.
 func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) < 2 {
-		fmt.Fprintln(out, workflow.ReplyReplyUsage)
+		fmt.Fprintln(out, prompts.ReplyReplyUsage)
 		return 2, nil
 	}
 	id, err := api.ParseMailID(args[0])
@@ -174,7 +170,7 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 	}
 	msg := strings.TrimSpace(strings.Join(args[1:], " "))
 	if msg == "" {
-		fmt.Fprintln(out, workflow.ReplyReplyUsage)
+		fmt.Fprintln(out, prompts.ReplyReplyUsage)
 		return 2, nil
 	}
 	original, ok, merr := h.store.MailByID(id)
@@ -188,12 +184,7 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		return 1, nil
 	}
 	if original.Sender == "hub" || original.Sender == "" {
-		fmt.Fprintln(out, workflow.ReplyReplyToHub)
-		return 1, nil
-	}
-	// Judged against WHO reads it, so it waits until the sender is known (-> tooLongFor).
-	if n, limit, over := tooLongFor(original.Sender, msg); over {
-		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, limit))
+		fmt.Fprintln(out, prompts.ReplyReplyToHub)
 		return 1, nil
 	}
 	project, name := c.Project, original.Sender
@@ -207,10 +198,10 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		return 1, nil
 	}
 	from := h.repoName(c.Project) + "/" + c.Agent
-	if err := h.Deliver(project, name, msg, workflow.MailOnly.From(from).Answering(id)); err != nil {
+	if err := h.Deliver(project, name, msg, core.MailOnly.From(from).Answering(id)); err != nil {
 		return 1, err
 	}
 	_ = h.store.For(c.Project).Log(c.Agent, "mail-reply", fmt.Sprintf("%d to %s: %s", id, name, msg))
-	fmt.Fprintln(out, workflow.ReplyReplied(original.Sender, api.MailID(id)))
+	fmt.Fprintln(out, prompts.ReplyReplied(original.Sender, api.MailID(id)))
 	return 0, nil
 }

@@ -3,7 +3,7 @@
 // job:     what the quality gate said — the latest result for a PR, and every commit's verdict with
 // the verify command that produced it — plus who is waiting to be told a run has landed.
 // limits:  rows only. Which verdict may be reused, and who gets told, are the workflow's
-// (-> hub/workflow/gate.go). The schema lives in workflow.go with its siblings.
+// (-> hub/flow/pr's gate). The schema lives in workflow.go with its siblings.
 package store
 
 import (
@@ -104,7 +104,7 @@ func (p *ProjectStore) RunWaiters(runID string) ([]string, error) {
 // AgentWaitingOnRun reports whether agent's next move depends on a run the fleet's own queue is
 // holding: one it queued itself (a self-check, a `sindri run`), or one it asked to be told about
 // (-> AddRunWaiter, a reviewer's `sindri lint <pr>`). Either way the hub, not the agent, decides
-// when it moves next (-> workflow.Stalled).
+// when it moves next (-> fleet.Stalled).
 func (p *ProjectStore) AgentWaitingOnRun(agent string) (bool, error) {
 	var waiting bool
 	err := p.s.db.QueryRow(`

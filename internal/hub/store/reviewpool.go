@@ -1,9 +1,9 @@
 // package: hub/store / reviewpool
 // type:    adapter (SQLite, hub-owned)
-// job:     what a reviewer holds and has ruled on, fleet-wide — a pooled (GlobalProject) reviewer's
+// job:     what a reviewer holds and has ruled on, fleet-wide — a pooled (api.GlobalProject) reviewer's
 // rows are never filed under its own project, so every caller that cannot assume it holds a
-// project-bound reviewer answers this instead of workflow.go's *ProjectStore methods.
-// limits:  reads only; the rows themselves are workflow.go's (AddReview/RecordVerdict/AssignReview).
+// project-bound reviewer answers this instead of the *ProjectStore methods beside them.
+// limits:  reads only; the rows themselves are reviews.go's (AddReview/RecordVerdict/AssignReview).
 package store
 
 import (
@@ -51,4 +51,24 @@ func (s *Store) RuledPRs(home, author string) ([]string, error) {
 		out = append(out, pr)
 	}
 	return out, rows.Err()
+}
+
+// UnclaimedReview is home's own oldest unclaimed row if it has one, else the fleet's — a pooled
+// reviewer lives in a project that holds no pull requests at all, so asking its own store alone
+// answers "nothing waiting" while a repo's review sits unread. It reports which project holds it.
+func (s *Store) UnclaimedReview(home string, id *int64, pr *string) (project string, found bool, err error) {
+	if found, err = s.For(home).UnclaimedReview(id, pr); err != nil || found {
+		return home, found, err
+	}
+	err = s.db.QueryRow(`
+		SELECT r.project, r.id, r.pr FROM reviews r JOIN prs pp ON pp.project=r.project AND pp.id=r.pr
+		WHERE r.author='' AND r.verdict='' AND pp.status='open'
+		ORDER BY r.id LIMIT 1`).Scan(&project, id, pr)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("unclaimed review, fleet-wide: %w", err)
+	}
+	return project, true, nil
 }

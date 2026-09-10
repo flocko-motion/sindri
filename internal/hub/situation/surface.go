@@ -269,6 +269,15 @@ func (s Situation) parkedRefusal() string {
 	return ""
 }
 
+// ScreenStalled is the EVIDENCE of a stall: a screen still past the dwell, less the three vetoes for
+// an agent correctly motionless. WHICH states count is the flow's (-> hub/flow/roles).
+func (s Situation) ScreenStalled() bool {
+	if s.TurnCutOff() {
+		return s.StillFor >= RetryDwell
+	}
+	return !s.AwaitingHuman() && !s.SignedOut() && !s.WaitingOnRun && s.StillFor >= StallDwell
+}
+
 // stalled reports an agent holding work it has stopped doing. The evidence is the SCREEN standing
 // still — a pane frozen mid-turn keeps SAYING "working" for ever. Three states veto it, each one an
 // agent correctly motionless: blocked, signed-out, and queued behind the fleet's own gate.

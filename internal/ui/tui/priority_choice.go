@@ -4,7 +4,7 @@
 // step that says how far the rating carries — and states what carrying it would actually do,
 // so the wider choice cannot read as releasing work it only reordered.
 // limits:  labels and key-to-call plumbing only; what a scope reaches is the hub's
-// (-> api.PriorityEffect, workflow.SetPriority) and the wording is theme's.
+// (-> api.PriorityEffect, fleet.SetPriority) and the wording is theme's.
 package tui
 
 import (

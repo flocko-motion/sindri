@@ -2,7 +2,7 @@
 // type:    adapter (SQLite, hub-owned)
 // job:     a PR's reviews — who was asked, who holds one, what each ruled — and the queries
 // the pool and the board read them back through.
-// limits:  rows only; who may review what, and what a verdict means, are the workflow's.
+// limits:  rows only; who may review what, and what a verdict means, are hub/flow/pr's.
 package store
 
 import (

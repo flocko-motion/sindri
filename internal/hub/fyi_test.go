@@ -1,13 +1,13 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // noteSender seeds a worker holding a claim, with its note grant given as a claim gives it.
@@ -21,7 +21,7 @@ func noteSender(t *testing.T, name string) (*Hub, *store.ProjectStore) {
 	if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.GrantNotes(name, workflow.NotesPerClaim); err != nil {
+	if err := ps.GrantNotes(name, prompts.NotesPerClaim); err != nil {
 		t.Fatal(err)
 	}
 	return h, ps
@@ -52,8 +52,8 @@ func TestANoteReachesTheUsersMailboxAndSaysWhatIsLeft(t *testing.T) {
 	if !strings.Contains(out, "one note left") {
 		t.Errorf("the reply should say what is left: %s", out)
 	}
-	if n, _ := ps.NotesLeft("dvalin"); n != workflow.NotesPerClaim-1 {
-		t.Errorf("notes left = %d, want %d", n, workflow.NotesPerClaim-1)
+	if n, _ := ps.NotesLeft("dvalin"); n != prompts.NotesPerClaim-1 {
+		t.Errorf("notes left = %d, want %d", n, prompts.NotesPerClaim-1)
 	}
 }
 
@@ -62,7 +62,7 @@ func TestANoteReachesTheUsersMailboxAndSaysWhatIsLeft(t *testing.T) {
 // and guessing here means sending it again.
 func TestTheGrantIsSpentThenRefusedWithSomewhereElseToGo(t *testing.T) {
 	h, _ := noteSender(t, "dvalin")
-	for i := 0; i < workflow.NotesPerClaim; i++ {
+	for i := 0; i < prompts.NotesPerClaim; i++ {
 		if out, code := execAs(t, h, "dvalin", "fyi", "something", "worth", "knowing"); code != 0 {
 			t.Fatalf("note %d refused early (%d): %s", i+1, code, out)
 		}
@@ -76,7 +76,7 @@ func TestTheGrantIsSpentThenRefusedWithSomewhereElseToGo(t *testing.T) {
 			t.Errorf("the refusal should name %q as the home instead: %s", want, out)
 		}
 	}
-	if mail, _ := h.store.AllMail(0); len(mail) != workflow.NotesPerClaim {
+	if mail, _ := h.store.AllMail(0); len(mail) != prompts.NotesPerClaim {
 		t.Errorf("a refused note must not be stored: %d rows", len(mail))
 	}
 }
@@ -85,11 +85,11 @@ func TestTheGrantIsSpentThenRefusedWithSomewhereElseToGo(t *testing.T) {
 // finishing a claim with everything unspent must not start the next one at double.
 func TestTheGrantReplacesRatherThanAccumulates(t *testing.T) {
 	_, ps := noteSender(t, "dvalin")
-	if err := ps.GrantNotes("dvalin", workflow.NotesPerClaim); err != nil { // a second claim, nothing spent
+	if err := ps.GrantNotes("dvalin", prompts.NotesPerClaim); err != nil { // a second claim, nothing spent
 		t.Fatal(err)
 	}
-	if n, _ := ps.NotesLeft("dvalin"); n != workflow.NotesPerClaim {
-		t.Errorf("notes left = %d after a fresh grant, want %d — banking is what floods", n, workflow.NotesPerClaim)
+	if n, _ := ps.NotesLeft("dvalin"); n != prompts.NotesPerClaim {
+		t.Errorf("notes left = %d after a fresh grant, want %d — banking is what floods", n, prompts.NotesPerClaim)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestAnOverLongNoteIsRefusedNotTruncated(t *testing.T) {
 		t.Errorf("the refusal should say to cut it and not to split it: %s", out)
 	}
 	// And it costs nothing: the agent still has its whole grant to spend on a shorter note.
-	if n, _ := ps.NotesLeft("dvalin"); n != workflow.NotesPerClaim {
+	if n, _ := ps.NotesLeft("dvalin"); n != prompts.NotesPerClaim {
 		t.Errorf("a refusal should not spend the grant, got %d left", n)
 	}
 }
@@ -199,7 +199,7 @@ func TestAnAgentThatHasClaimedNothingHasNoNotes(t *testing.T) {
 
 // TestAReviewerGetsAGrantWhenGivenAReview is the role the reviewer of this change named: it reads whole
 // diffs across subsystems that are nobody's task, so it is the most likely to notice something with no
-// other home — and it reaches neither claimLeaf nor startSubtask, so nothing else would grant it.
+// other home — and it reaches neither ClaimLeaf nor StartSubtask, so nothing else would grant it.
 func TestAReviewerGetsAGrantWhenGivenAReview(t *testing.T) {
 	h := newHub(t)
 	ps := h.store.For(testProject)
@@ -211,14 +211,14 @@ func TestAReviewerGetsAGrantWhenGivenAReview(t *testing.T) {
 	}
 	// Through the reviewer's OWN pickup — asking the hub for work claims an unclaimed review. The other
 	// route (RequestReview picking a free reviewer) needs a live pod, which a test hub has not; both go
-	// through assignReview, which is where the grant is.
+	// through AssignReview, which is where the grant is.
 	if _, err := ps.AddReview("pr-td-1", "check it"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.wf.AgentDirective(t.Context(), testProject, "rev"); err != nil {
 		t.Fatalf("AgentDirective for the reviewer: %v", err)
 	}
-	if n, _ := ps.NotesLeft("rev"); n != workflow.NotesPerClaim {
+	if n, _ := ps.NotesLeft("rev"); n != prompts.NotesPerClaim {
 		t.Fatalf("a reviewer given a review should hold the grant, got %d", n)
 	}
 	out, code := execAs(t, h, "rev", "fyi", "the adapter shells out twice per sync; no task owns that")

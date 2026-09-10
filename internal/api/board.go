@@ -32,7 +32,7 @@ type AgentView struct {
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
-	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
+	// both read off its transcript (0 = not measured). Past fleet.ContextFullFraction of that
 	// window, its next assignment clears its context instead of compacting it, before handing the
 	// work over — automatic, so Status never needs a word for it. The window is per agent because
 	// it is the model's: one number for the fleet would clear 1M agents at 17%.

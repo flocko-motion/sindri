@@ -10,12 +10,40 @@ package registry
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // Caller is who is asking: their identity, role, and (from Phase 3) workflow
 // state. The registry filters the surface against this.
+// Standing is where the flow machine has this caller and what it offers there — the AUTHORITY on
+// what may run. The Blocked closures below survive only for questions no state can answer: a note
+// budget spent, a room the caller is not in.
+type Standing struct {
+	State string
+	Verbs []string
+	// Governs is every verb the flow knows about. One outside it has not changed hands yet and its
+	// own closure still decides, so the two swap over one verb at a time.
+	Governs []string
+	// Because is why this state holds things back, in its own words. A refusal that only lists
+	// alternatives leaves the caller to work out why the obvious verb is missing.
+	Because string
+	// Known is false when the machine could not place the caller; the closures then decide alone.
+	Known bool
+}
+
+// Refuses reports a verb the caller's state does not offer — and only for verbs the flow governs.
+func (s Standing) Refuses(name string) bool {
+	if !s.Known || !slices.Contains(s.Governs, name) {
+		return false
+	}
+	return !slices.Contains(s.Verbs, name)
+}
+
+// Caller is who is asking: their identity, role, and where the flow machine has them. The registry
+// filters the surface against this.
 type Caller struct {
 	// Ctx is the invocation's own context, carried here because Caller IS the invocation: a verb that
 	// drives the harness — clearing a session, switching its model — inherits it rather than rooting
@@ -39,6 +67,8 @@ type Caller struct {
 	// The QUESTION rather than a flag, so a verb held back by it answers in the agent's own words —
 	// the state is one the agent asked for, and hearing its own question back is what identifies it.
 	Escalation string
+	// Standing is where the flow machine has this caller, and what that state offers.
+	Standing Standing
 }
 
 // Command is one hub-side verb the browser can invoke.
@@ -76,6 +106,9 @@ func (cmd Command) HelpText(c Caller) string {
 // Available reports whether cmd is offered to caller right now.
 func (cmd Command) Available(c Caller) bool {
 	if len(cmd.Roles) > 0 && !slices.Contains(cmd.Roles, c.Role) {
+		return false
+	}
+	if c.Standing.Refuses(cmd.Name) {
 		return false
 	}
 	return cmd.Blocked == nil || cmd.Blocked(c) == ""
@@ -125,8 +158,13 @@ func (r *Registry) Surface(c Caller) []Offered {
 		if len(cmd.Roles) > 0 && !slices.Contains(cmd.Roles, c.Role) {
 			continue
 		}
-		var why string
-		if cmd.Blocked != nil {
+		// The same rule Resolve applies: an agent offered a verb that is then refused stops trusting
+		// the list.
+		why := ""
+		switch {
+		case c.Standing.Refuses(cmd.Name):
+			why = notHere(cmd.Name, c.Standing)
+		case cmd.Blocked != nil:
 			why = cmd.Blocked(c)
 		}
 		out = append(out, Offered{Command: cmd, Blocked: why})
@@ -143,10 +181,33 @@ func (r *Registry) Resolve(name string, c Caller) (cmd Command, reason string, o
 	if !exists || (len(cmd.Roles) > 0 && !slices.Contains(cmd.Roles, c.Role)) {
 		return Command{}, "", false
 	}
+	// The STATE decides first: what an agent may run is read off where it stands. Twenty closures
+	// asking the same questions is how a rule was applied in one and skipped three lines away.
+	if c.Standing.Refuses(name) {
+		return Command{}, notHere(name, c.Standing), false
+	}
 	if cmd.Blocked != nil {
 		if reason := cmd.Blocked(c); reason != "" {
 			return Command{}, reason, false
 		}
 	}
 	return cmd, "", true
+}
+
+// notHere refuses a verb by name and says what IS open instead: one shown a list without submit
+// concluded the hub was broken.
+func notHere(name string, s Standing) string {
+	if s.Because != "" {
+		if len(s.Verbs) == 0 {
+			return fmt.Sprintf("%s is not available: %s", name, s.Because)
+		}
+		return fmt.Sprintf("%s is not available: %s. Available here: %s.",
+			name, s.Because, strings.Join(s.Verbs, ", "))
+	}
+	if len(s.Verbs) == 0 {
+		return fmt.Sprintf("%s is not available where you are (%s), and nothing else is either — "+
+			"run `sindri` to see where you stand.", name, s.State)
+	}
+	return fmt.Sprintf("%s is not available where you are (%s). Available here: %s.",
+		name, s.State, strings.Join(s.Verbs, ", "))
 }

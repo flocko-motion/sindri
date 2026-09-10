@@ -97,7 +97,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	h.fillReviewers(prs)
 	h.fillAttempts(prs)
 	// Fleet-wide and position-ranked already (-> FleetRuns), so the board never re-derives either.
-	runs, err := h.wf.FleetRuns()
+	runs, err := h.runFlow().FleetRuns()
 	if err != nil {
 		return BoardState{}, err
 	}
@@ -427,7 +427,7 @@ func overlayUnreachable(status string, unreachable bool) string {
 // Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the
 // GitHub scan past its TTL.
 func (h *Hub) Refresh(project string) error {
-	err := h.wf.ForceSyncTasks(project)
+	err := h.taskFlow().ForceSyncTasks(project)
 	h.notify()
 	return err
 }

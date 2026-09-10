@@ -72,7 +72,7 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh(h.reqProject(r)))
 	})
 	mux.HandleFunc("POST /tasks/reconcile", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, okMsg{"reconciled"}, h.wf.ReconcileTasks(h.reqProject(r)))
+		writeJSON(w, okMsg{"reconciled"}, h.taskFlow().ReconcileTasks(h.reqProject(r)))
 	})
 	mux.HandleFunc("POST /task/comments/refresh", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the task id
@@ -224,7 +224,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"rebased"}, h.wf.RebaseAgent(h.agentReq(r, req.Name), req.Name))
+		writeJSON(w, okMsg{"rebased"}, h.prFlow().RebaseAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -307,7 +307,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		pr, err := h.wf.Merge(h.wf.PRProject(h.reqProject(r), req.Name), req.Name)
+		pr, err := h.prFlow().Merge(h.prFlow().PRProject(h.reqProject(r), req.Name), req.Name)
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("POST /milestone", func(w http.ResponseWriter, r *http.Request) {
@@ -315,16 +315,16 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		pr, err := h.wf.MilestonePR(h.agentReq(r, req.Name), req.Name)
+		pr, err := h.prFlow().MilestonePR(h.agentReq(r, req.Name), req.Name)
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
-		prs, err := h.wf.FleetPRs() // fleet-wide, matching the TUI board — not cwd-scoped
+		prs, err := h.prFlow().FleetPRs() // fleet-wide, matching the TUI board — not cwd-scoped
 		writeJSON(w, prs, err)
 	})
 	mux.HandleFunc("GET /pr", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		d, err := h.wf.PRInfo(h.wf.PRProject(h.reqProject(r), id), id)
+		d, err := h.prFlow().PRInfo(h.prFlow().PRProject(h.reqProject(r), id), id)
 		writeJSON(w, d, err)
 	})
 	mux.HandleFunc("POST /pr/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -333,21 +333,21 @@ func (h *Hub) Handler() http.Handler {
 			return
 		}
 		// The reject endpoint is the human path (TUI/CLI); resolve the PR fleet-wide.
-		writeJSON(w, okMsg{"rejected"}, h.wf.RejectPR(h.wf.PRProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
+		writeJSON(w, okMsg{"rejected"}, h.prFlow().RejectPR(h.prFlow().PRProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
 	})
 	mux.HandleFunc("POST /pr/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the PR id; the human approve path.
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"approved"}, h.wf.ApprovePR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
+		writeJSON(w, okMsg{"approved"}, h.prFlow().ApprovePR(h.prFlow().PRProject(h.reqProject(r), req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /pr/scrap", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the PR id; the human scrap path (discard with its task).
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"scrapped"}, h.wf.ScrapPR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
+		writeJSON(w, okMsg{"scrapped"}, h.prFlow().ScrapPR(h.prFlow().PRProject(h.reqProject(r), req.Name), req.Name))
 	})
 	// Discarding a PR on its own is a DIFFERENT operation from scrapping one alongside its
 	// task: with no close to free the author, this path has to release it (-> DiscardPR).
@@ -356,11 +356,11 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"scrapped"}, h.wf.DiscardPR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
+		writeJSON(w, okMsg{"scrapped"}, h.prFlow().DiscardPR(h.prFlow().PRProject(h.reqProject(r), req.Name), req.Name))
 	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		out, err := h.wf.LintPR(h.wf.PRProject(h.reqProject(r), id), id)
+		out, err := h.prFlow().LintPR(h.prFlow().PRProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("POST /pr/review", func(w http.ResponseWriter, r *http.Request) {
@@ -368,24 +368,24 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"review requested"}, h.wf.RequestReview(h.wf.PRProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
+		writeJSON(w, okMsg{"review requested"}, h.prFlow().RequestReview(h.prFlow().PRProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
 	})
 	mux.HandleFunc("GET /review-prompt", func(w http.ResponseWriter, r *http.Request) {
-		p, err := h.wf.ReviewPrompt(h.reqProject(r))
+		p, err := h.prFlow().ReviewPrompt(h.reqProject(r))
 		writeJSON(w, okMsg{p}, err)
 	})
 	mux.HandleFunc("GET /pr/materialize", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		path, err := h.wf.MaterializeReview(h.wf.PRProject(h.reqProject(r), id), id)
+		path, err := h.prFlow().MaterializeReview(h.prFlow().PRProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{path}, err)
 	})
 	h.runRoutes(mux) // the run queue's own surface (-> server_runs.go)
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
-		tasks, err := h.wf.Tasks(h.reqProject(r))
+		tasks, err := h.taskFlow().Tasks(h.reqProject(r))
 		writeJSON(w, tasks, err)
 	})
 	mux.HandleFunc("GET /task", func(w http.ResponseWriter, r *http.Request) {
-		t, err := h.wf.TaskInfo(h.reqProject(r), r.URL.Query().Get("id"))
+		t, err := h.taskFlow().TaskInfo(h.reqProject(r), r.URL.Query().Get("id"))
 		writeJSON(w, t, err)
 	})
 	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +398,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		id, err := h.wf.CreateTask(h.reqProject(r), req.Spec())
+		id, err := h.taskFlow().CreateTask(h.reqProject(r), req.Spec())
 		writeJSON(w, okMsg{id}, err)
 	})
 	mux.HandleFunc("POST /task/edit", func(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +406,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{req.ID}, h.wf.EditTask(h.reqProject(r), req.ID, req.Spec()))
+		writeJSON(w, okMsg{req.ID}, h.taskFlow().EditTask(h.reqProject(r), req.ID, req.Spec()))
 	})
 	mux.HandleFunc("POST /priority", func(w http.ResponseWriter, r *http.Request) {
 		var req PriorityReq
@@ -420,7 +420,7 @@ func (h *Hub) Handler() http.Handler {
 			writeJSON(w, okMsg{"ok"}, fmt.Errorf("unknown priority scope %q (task, unrated, all)", req.Scope))
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority, scope))
+		writeJSON(w, okMsg{"ok"}, h.taskFlow().SetPriority(h.reqProject(r), req.ID, req.Priority, scope))
 	})
 	// Assign a planner one thing to plan, as a phased brief (-> AssignPlan). Refused while that
 	// planner has a PR open, so a new plan can't be drafted over specs still awaiting a verdict.
@@ -429,35 +429,35 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.agentReq(r, req.Name), req.Name, req.Goal, req.Task))
+		writeJSON(w, okMsg{"assigned"}, h.taskFlow().AssignPlan(h.agentReq(r, req.Name), req.Name, req.Goal, req.Task))
 	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req ApproveTaskReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"approved"}, h.wf.ApproveTask(h.reqProject(r), req.ID, req.Subtree))
+		writeJSON(w, okMsg{"approved"}, h.taskFlow().ApproveTask(h.reqProject(r), req.ID, req.Subtree))
 	})
 	mux.HandleFunc("POST /task/reject", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // ID + Feedback (the rejection comment)
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"rejected"}, h.wf.RejectTask(h.reqProject(r), req.ID, req.Feedback))
+		writeJSON(w, okMsg{"rejected"}, h.taskFlow().RejectTask(h.reqProject(r), req.ID, req.Feedback))
 	})
 	mux.HandleFunc("POST /task/unassign", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // ID (+ unused Feedback)
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"unassigned"}, h.wf.UnassignTask(h.reqProject(r), req.ID))
+		writeJSON(w, okMsg{"unassigned"}, h.taskFlow().UnassignTask(h.reqProject(r), req.ID))
 	})
 	mux.HandleFunc("POST /task/close", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // ID (+ unused Feedback)
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"closed"}, h.wf.CloseTask(h.reqProject(r), req.ID))
+		writeJSON(w, okMsg{"closed"}, h.prFlow().CloseTask(h.reqProject(r), req.ID))
 	})
 	// The host's counterpart to close: restores a closed sindri-owned task, with a reason
 	// (-> Hub.ReopenTask, which also records it as a task comment).
@@ -473,7 +473,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.wf.ScrapTask(h.reqProject(r), req.ID, req.Subtree, req.PRs))
+		writeJSON(w, okMsg{"deleted"}, h.prFlow().ScrapTask(h.reqProject(r), req.ID, req.Subtree, req.PRs))
 	})
 	return mux
 }
@@ -514,9 +514,9 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.wf.HealPlannerTasks()               // a planner can't hold a backlog task — release any stale claim
-	h.wf.ReconcileMergingPRs()            // a merge in flight when we last died → merge-failed (outcome unknown)
-	h.wf.ReconcileRunningRuns(h.lifetime) // a run in flight when we last died → failed (outcome unknown)
+	h.taskFlow().HealPlannerTasks()              // a planner can't hold a backlog task — release any stale claim
+	h.prFlow().ReconcileMergingPRs()             // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.runFlow().ReconcileRunningRuns(h.lifetime) // a run in flight when we last died → failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.
@@ -525,7 +525,7 @@ func (h *Hub) Serve() error {
 		fmt.Fprintf(os.Stderr, "hub: WARNING — could not read the repo registry: %v\n", kerr)
 	}
 	for _, p := range known {
-		if err := h.wf.SyncTasks(p.Tag); err != nil {
+		if err := h.taskFlow().SyncTasks(p.Tag); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: WARNING — could not load tasks for %s: %v\n", p.Path, err)
 		}
 	}

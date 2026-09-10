@@ -1,11 +1,11 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/core"
 	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // mailAgent seeds a worker holding a task, the shape every sender delivers to.
@@ -31,7 +31,7 @@ func mailAgent(t *testing.T) (*Hub, *store.ProjectStore) {
 func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	h, ps := mailAgent(t)
 	if err := h.Deliver(testProject, "dvalin", "[reviewer] rejected: the gate is missing",
-		workflow.MailAndPush.From("reviewer")); err != nil {
+		core.MailAndPush.From("reviewer")); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	unread, err := ps.UnreadMail("dvalin")
@@ -41,7 +41,7 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	if unread[0].Pushed {
 		t.Error("the agent is down, so no push landed — the flag must say so")
 	}
-	// The sender is what the SENDER stated (-> workflow.Delivery.From), not what the body's tag happens
+	// The sender is what the SENDER stated (-> core.Delivery.From), not what the body's tag happens
 	// to say — that inference is what sd-bc3a1f removed, and only two senders could survive it.
 	if unread[0].Sender != "reviewer" {
 		t.Errorf("sender = %q, want the one the delivery stated", unread[0].Sender)
@@ -54,7 +54,7 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 // message, and a swallowed failure left hepti's mailbox marked announced to nobody.
 func TestPushOnlyKeepsNothing(t *testing.T) {
 	h, _ := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", workflow.PushOnly); err == nil {
+	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", core.PushOnly); err == nil {
 		t.Error("a push-only delivery to an agent with no session reported success; its caller cannot retry")
 	}
 	all, err := h.store.AllMail(0)
@@ -70,7 +70,7 @@ func TestPushOnlyKeepsNothing(t *testing.T) {
 // would let a sender that forgot to classify look like one that chose not to send.
 func TestADeliveryThatSendsNothingIsAFault(t *testing.T) {
 	h, _ := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "nothing", workflow.Delivery{}); err == nil {
+	if err := h.Deliver(testProject, "dvalin", "nothing", core.Delivery{}); err == nil {
 		t.Error("a delivery asking for neither mail nor push should be refused")
 	}
 }

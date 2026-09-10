@@ -5,7 +5,7 @@
 // completion, or a git error so the workflow can loop the worker through
 // conflict resolution.
 // limits:  git only; the policy (dirty-tree guard, phase transitions, the messages
-// shown to the worker) is the workflow's.
+// shown to the worker) is hub/flow/pr's.
 package repo
 
 import "github.com/flo-at/sindri/internal/adapter/git"

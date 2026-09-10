@@ -10,10 +10,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
 	"os"
 	"time"
-
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // clearSamplePeriod is how often a clear in flight is looked at again — long enough that Claude Code
@@ -59,7 +58,7 @@ func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed
 		s.deps.Notify()
 		return err
 	}
-	_ = s.deps.Deliver(project, name, s.deps.Kickoff(project, name), workflow.PushOnly)
+	_ = s.deps.Deliver(project, name, s.deps.Kickoff(project, name), core.PushOnly)
 	return nil
 }
 
@@ -90,7 +89,7 @@ func (s *Service) FireArmedClears(ctx context.Context, project string) {
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 			continue
 		}
-		_ = s.deps.Deliver(project, a.Name, s.deps.Kickoff(project, a.Name), workflow.PushOnly)
+		_ = s.deps.Deliver(project, a.Name, s.deps.Kickoff(project, a.Name), core.PushOnly)
 	}
 }
 

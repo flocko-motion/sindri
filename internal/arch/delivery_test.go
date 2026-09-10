@@ -2,7 +2,7 @@
 // type:    test (architecture invariant)
 // job:     fail the build if any code puts text into an agent's session without declaring
 // whether that message must be READ — every send states both properties
-// (-> workflow.Delivery), and the few sites that inject directly are listed here
+// (-> core.Delivery), and the few sites that inject directly are listed here
 // with the reason each is push-only.
 // limits:  the call sites only; which class a message is belongs to its sender, and the
 // workflow's own guard (-> workflow/classification_test.go) covers that package
@@ -108,7 +108,7 @@ func TestNothingInjectsWithoutDeclaringItsClass(t *testing.T) {
 	}
 	for _, u := range undeclared {
 		t.Errorf("%s injects into a session without declaring whether the message must be READ — send "+
-			"it through the delivery primitive (workflow.Delivery), or add the file to "+
+			"it through the delivery primitive (core.Delivery), or add the file to "+
 			"declaredInjectors with the reason it is push-only", u)
 	}
 }

@@ -3,7 +3,7 @@
 // job:     the `O` action on the Tasks tab: gate it to closed tasks, and the reason
 // form that restores one to open — the counterpart to close/openTaskRejectForm.
 // limits:  form + gate only; the reopen itself, and the sindri-owned-only scope, are
-// the hub's (-> client.ReopenTask -> workflow.Engine.ReopenTask).
+// the hub's (-> client.ReopenTask -> fleet.Engine.ReopenTask).
 package tui
 
 import (

@@ -59,7 +59,7 @@ func TestUnknownAgentStaysWithTheCaller(t *testing.T) {
 	}
 }
 
-// TestReqProjectResolvesGlobalProjectAsATagNotAPath: GlobalProject is already registered at
+// TestReqProjectResolvesGlobalProjectAsATagNotAPath: api.GlobalProject is already registered at
 // startup under its literal tag, never a path to hash — a client targeting it sends the tag
 // itself as the header, and reqProject must return that tag unchanged rather than treating it as
 // a cwd to register a phantom project under.

@@ -161,12 +161,6 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	// state_log is debug telemetry, never durable across a restart (-> its own schema comment): a hub
-	// up for weeks must not hold weeks of flicker just because nothing else trims it.
-	if _, err := db.Exec(`DELETE FROM state_log`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("purge state log: %w", err)
-	}
 	return &Store{db: db}, nil
 }
 
@@ -194,6 +188,12 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN notes_left INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE agent_state ADD COLUMN last_nudge TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_state ADD COLUMN phase_since TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE state_log ADD COLUMN pass TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prs ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prs ADD COLUMN state_since TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE runs ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE runs ADD COLUMN state_since TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mail ADD COLUMN in_reply_to INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mail ADD COLUMN notified INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE pr_lint ADD COLUMN sha TEXT NOT NULL DEFAULT ''`,

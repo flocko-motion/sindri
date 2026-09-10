@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -54,7 +55,7 @@ func TestAnAgentMailsAnotherByBareNameAcrossRepos(t *testing.T) {
 // The refusal has to name what it collided with and the way through, or a safety check becomes a dead end.
 func TestAnAmbiguousNameIsRefusedWithBothCandidates(t *testing.T) {
 	h := twoRepos(t)
-	// The same name in both repos — reachable by hand, since the schema keys mailboxes (project, name)
+	// The same name in both repos — Reachable by hand, since the schema keys mailboxes (project, name)
 	// and only the allocator keeps names unique.
 	if err := h.store.For("lib").PutAgent(store.Agent{Name: "nori", Role: "worker", Workspace: "ws"}); err != nil {
 		t.Fatal(err)
@@ -99,18 +100,18 @@ func TestAnUnknownRecipientIsRefused(t *testing.T) {
 	}
 }
 
-// TestAgentMailIsNeitherCappedNorBudgeted: the length cap belongs to the RECIPIENT, and only the
-// user has one. An agent reading is a model, which affords length a person will not — and one limit
-// for everyone was costing the messages worth sending, since a rejection's feedback and a gate
-// report do not fit in 300 characters. The per-claim grant and the fleet ceiling stay off this
-// channel for their own reason: those protect the user's attention, which this traffic never spends.
-func TestAgentMailIsNeitherCappedNorBudgeted(t *testing.T) {
+// TestMailIsNeitherCappedNorBudgeted: mail carries whatever length it needs, whoever reads it. A
+// length cap costs the messages worth sending — a rejection's feedback and a gate report do not fit
+// in a few hundred characters — and mail is ASKED FOR, read when its reader chooses, where the note
+// channel arrives unbidden and keeps its own cap for that reason (-> maxNoteLen). The per-claim grant
+// and the fleet ceiling stay off this channel too: those bound unprompted attention.
+func TestMailIsNeitherCappedNorBudgeted(t *testing.T) {
 	h := twoRepos(t)
-	long := strings.Repeat("x", maxUserMessageLen*4)
+	long := strings.Repeat("x", maxNoteLen*4)
 	if out, code := execAs(t, h, "dvalin", "mail", "galar", long); code != 0 {
 		t.Errorf("mail to an agent carries its length (%d): %s", code, out)
 	}
-	if all, _ := h.store.AllMail(0); len(all) != 1 || len([]rune(all[0].Body)) < maxUserMessageLen {
+	if all, _ := h.store.AllMail(0); len(all) != 1 || len([]rune(all[0].Body)) < maxNoteLen {
 		t.Errorf("it should be stored whole, never truncated: %+v", all)
 	}
 	// No grant is consulted: dvalin has claimed nothing, and can still mail an agent as often as it
@@ -119,6 +120,31 @@ func TestAgentMailIsNeitherCappedNorBudgeted(t *testing.T) {
 		if out, code := execAs(t, h, "dvalin", "mail", "galar", "another thing worth knowing"); code != 0 {
 			t.Fatalf("message %d should not be budgeted (%d): %s", i+1, code, out)
 		}
+	}
+}
+
+// TestAReplyToTheUserCarriesItsLength: the user is a recipient like any other on this channel. They
+// asked for the message — a reply answers one they wrote — so the cost is theirs to have chosen, and
+// capping it refused exactly the answers worth reading. The unprompted note keeps its cap instead.
+func TestAReplyToTheUserCarriesItsLength(t *testing.T) {
+	h := twoRepos(t)
+	if err := h.MailAgent(testProject, "dvalin", "what did the sync actually do?"); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := h.store.For(testProject).UnreadMail("dvalin")
+	if err != nil || len(waiting) != 1 {
+		t.Fatalf("the user's question should be waiting, got %+v (err %v)", waiting, err)
+	}
+	long := strings.Repeat("x", maxNoteLen*4)
+	if out, code := execAs(t, h, "dvalin", "reply", api.MailID(waiting[0].ID), long); code != 0 {
+		t.Fatalf("a reply to the user carries its length (%d): %s", code, out)
+	}
+	answer, err := h.store.For(testProject).UnreadMail(api.SenderUser)
+	if err != nil || len(answer) != 1 {
+		t.Fatalf("the answer should be in the user's mailbox, got %+v (err %v)", answer, err)
+	}
+	if len([]rune(answer[0].Body)) != len([]rune(long)) {
+		t.Errorf("stored whole, never truncated: %d of %d characters", len([]rune(answer[0].Body)), len([]rune(long)))
 	}
 }
 

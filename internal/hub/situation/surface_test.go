@@ -36,7 +36,7 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", false, past, true},
 		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", false, past, true},
 		{"between assignments, holding nothing", "idle", "", "idle", false, past, false},
-		// ori's case: assignReview writes "reviewing" and nothing else, so neither of the old disjuncts
+		// ori's case: AssignReview writes "reviewing" and nothing else, so neither of the old disjuncts
 		// could ever hold and a reviewer that stopped reading was invisible to every sweep.
 		{"a reviewer holding a PR, gone quiet", "reviewing", "", "idle", false, past, true},
 		{"a reviewer quiet, but not for long enough", "reviewing", "", "idle", false, under, false},

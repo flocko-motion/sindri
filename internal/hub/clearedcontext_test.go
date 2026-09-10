@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	hubagent "github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // clearableRuntime fakes the tmux/podman runtime, just enough for a clear's calls to succeed with no
@@ -203,8 +203,15 @@ func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dir != workflow.DirPreparing {
-		t.Fatalf("a full agent's claim should fire a clear and answer %q, got %q", workflow.DirPreparing, dir)
+	// THE WORK, not a placeholder. The clear runs inside the hand-over — claim, prepare, deliver are
+	// one state — and the ask settles that whole state before it reports, so what comes back is the
+	// task itself. "One moment, your instruction is right behind this" answered an ask that reported
+	// from the middle of a move; nothing reports from there any more.
+	if !strings.Contains(dir, "sd-1") {
+		t.Fatalf("a full agent's claim should fire a clear and hand over the work, got %q", dir)
+	}
+	if prompts.Deferring(dir) {
+		t.Errorf("the ask settled, so it must not answer with a running action: %q", dir)
 	}
 	if st, _ := h.store.For(testProject).GetState(agent); st.Task != "sd-1" {
 		t.Errorf("state.Task = %q, want sd-1 — the claim holds regardless of the clear firing", st.Task)

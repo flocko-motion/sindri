@@ -17,7 +17,7 @@ func TestAJustClaimedTaskIsNotABoundary(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	// A claim just written, exactly as claimLeaf/startSubtask leaves it: Task set, Phase "working".
+	// A claim just written, exactly as ClaimLeaf/StartSubtask leaves it: Task set, Phase "working".
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestAJustClaimedTaskIsNotABoundary(t *testing.T) {
 }
 
 // TestAPooledReviewerMidReviewIsNotABoundary is the safety-critical gap a review found: a
-// GlobalProject reviewer's held review is filed under the PR's own project, never GlobalProject
+// api.GlobalProject reviewer's held review is filed under the PR's own project, never api.GlobalProject
 // itself, so a project-scoped read used to say "boundary" while it was reading a diff — the exact
 // moment /clear or compaction must not fire, since it would silently invalidate that reading.
 func TestAPooledReviewerMidReviewIsNotABoundary(t *testing.T) {

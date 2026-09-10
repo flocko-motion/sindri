@@ -11,7 +11,7 @@ import (
 
 // compactFixture wires a service over a fake tmux backend and the real transcript reader (so
 // CompactionThreshold computes against an actual file, not a stub), with one agent registered and
-// idle. Deciding WHEN to compact is workflow.Engine's (task/review awareness Compact itself does
+// idle. Deciding WHEN to compact is fleet.Engine's (task/review awareness Compact itself does
 // not have); this only exercises Compact's own mechanics.
 func compactFixture(t *testing.T) (*Service, *fakeRuntime) {
 	t.Helper()

@@ -1,8 +1,8 @@
 // package: hub / refwatch
 // type:    logic (the tick behind reference-branch drift and PR health)
 // job:     re-check every project's reference branch on a slow loop, keep its open PRs
-// honest against it (-> workflow/prcheck.go) and against the review-row
-// invariants (-> workflow/reviewhealth.go), and close a meeting nobody is
+// honest against it (-> hub/flow/pr's prcheck_act.go) and against the review-row
+// invariants (-> hub/flow/pr's reviewhealth_act.go), and close a meeting nobody is
 // holding any more (-> chat.CloseIfIdle).
 // limits:  just the cadence and lifecycle; the checks live in workflow.
 package hub
@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
+
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
 
 // refInterval is slow on purpose: a reference branch moves when a human does something, not on a
@@ -70,7 +72,7 @@ func (r *refwatch) sweep(ctx context.Context) {
 		return
 	}
 	for _, p := range projects {
-		err := r.h.wf.SyncReference(p.Tag)
+		err := r.h.prFlow().SyncReference(p.Tag)
 		msg := ""
 		if err != nil {
 			msg = err.Error()
@@ -131,18 +133,23 @@ func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 				return
 			default:
 			}
-			r.h.wf.CheckOpenPRs(p.Tag)
-			// Noticed and resolved in the same breath: two agents in one tree is a fault the fleet
-			// carries until somebody looks, and waiting for the next ask left sudri holding a feature
-			// dvalin was inside (-> workflow.HealSplitHierarchies).
-			r.h.wf.HealSplitHierarchies(p.Tag)
-			r.h.wf.RepairReviewRows(p.Tag)
-			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
-			r.h.wf.AssignPendingWork(p.Tag)    // its worker-side twin, for the idle backlog claim
-			// A clear is armed regardless of whether any assignment ever triggers it, so an agent
-			// that never asks again still needs a backstop — unlike compact and model-select, which
-			// the gate now fires inline the moment it has an assignment to prepare for, this has no
-			// such trigger to lean on (-> workflow.Engine.claimNext, agent.Service.FireArmedClears).
+			r.h.prFlow().CheckOpenPRs(p.Tag)
+			// A BACKSTOP for the task sources, which announce nothing: td, openspec and GitHub are
+			// polled, so the cached read model only moves when something reads them. This is the one
+			// place that does on its own beat; every other event reaches the decider the moment it
+			// happens (-> workflowDeps.Notify), and the machine's floor re-decides regardless.
+			_ = r.h.taskFlow().SyncTasks(p.Tag)
+			r.h.wf.WakeProject(p.Tag, topic.TaskAvailable)
+			r.h.prFlow().RepairReviewRows(p.Tag)
+			// A BACKSTOP for the reviewer half, which the state machine does not yet drive in the
+			// background: its reviewer states answer an ask and no more, so an unclaimed review still
+			// needs a sweep to find it. The worker half needs none — a task event notifies the
+			// machine, and its floor re-decides every agent regardless (-> fleet.FloorInterval).
+			r.h.prFlow().AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
+			// A BACKSTOP for an armed clear on an agent no state machine pass will reach: the clearing
+			// state fires one for an agent standing idle, but a coauthor or a planner never lands
+			// there, and arming is a direct request that must not wait on work arriving
+			// (-> agent.Service.FireArmedClears).
 			r.h.agents.FireArmedClears(ctx, p.Tag)
 			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
 			// rather than any one agent's request, so both belong on this same sweep.
