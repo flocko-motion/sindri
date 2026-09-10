@@ -7,12 +7,12 @@ package task
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/owned"
+	"github.com/flo-at/sindri/internal/hub/world/owned"
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // SyncTasks refreshes a project's cached task set from its sources (td + openspec +

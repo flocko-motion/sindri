@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAnAgentAwaitingAVerdictIsHandedNothing: austri's pr-sd-a47b61 was rejected — its work was

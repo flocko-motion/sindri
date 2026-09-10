@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // TestCmdShowMailReadsAnyMessageWithoutMarkingIt is the deliberate width: a mail id is unguessable,

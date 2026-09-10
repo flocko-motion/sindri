@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // escalatedWorker seeds a worker holding a task and escalates it through the verb, returning the
@@ -293,7 +293,7 @@ func TestResumingIsRecordedAndReopensTheWork(t *testing.T) {
 // stuck agent by another name. This is the host route (POST /agent/resume, `sindri agent resume`).
 func TestTheUserCanClearAnEscalationToo(t *testing.T) {
 	h, ps := escalatedWorker(t, "keep both callers?")
-	if err := h.agentFlow().Resume(testProject, "dvalin", "escalation cleared by the user"); err != nil {
+	if err := h.AgentFlow().Resume(testProject, "dvalin", "escalation cleared by the user"); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	st, _ := ps.GetState("dvalin")
@@ -301,7 +301,7 @@ func TestTheUserCanClearAnEscalationToo(t *testing.T) {
 		t.Errorf("the user's clear should release the agent, got %q", st.Escalation)
 	}
 	// Idempotent, so neither caller has to ask whether there was one first.
-	if err := h.agentFlow().Resume(testProject, "dvalin", "again"); err != nil {
+	if err := h.AgentFlow().Resume(testProject, "dvalin", "again"); err != nil {
 		t.Errorf("clearing nothing should be a no-op, got %v", err)
 	}
 }
@@ -338,7 +338,7 @@ func TestAnEscalatedAgentWearsTheStatusAndNeedsTheUser(t *testing.T) {
 // any other directive: escalation is not an operation that would discard the context mail lands in.
 func TestAnEscalatedAgentIsStillToldItsMailInline(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false, 0); err != nil {
@@ -364,10 +364,10 @@ func TestAnEscalatedAgentIsStillToldItsMailInline(t *testing.T) {
 // after the fault it escalated on had already been fixed.
 func TestResumingAnAgentTellsIt(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.agentFlow().ResumeByUser(testProject, "dvalin", "one column, ship it"); err != nil {
+	if err := h.AgentFlow().ResumeByUser(testProject, "dvalin", "one column, ship it"); err != nil {
 		t.Fatalf("ResumeByUser: %v", err)
 	}
 
@@ -395,10 +395,10 @@ func TestResumingAnAgentTellsIt(t *testing.T) {
 // answer, and the agent still has to hear that it may move.
 func TestResumingWithoutAnAnswerStillTells(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "`sindri git` failed inside the hub"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "`sindri git` failed inside the hub"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.agentFlow().ResumeByUser(testProject, "dvalin", ""); err != nil {
+	if err := h.AgentFlow().ResumeByUser(testProject, "dvalin", ""); err != nil {
 		t.Fatalf("ResumeByUser: %v", err)
 	}
 	unread, _ := ps.UnreadMail("dvalin")
@@ -414,7 +414,7 @@ func TestResumingWithoutAnAnswerStillTells(t *testing.T) {
 // a notice about an escalation that never happened would be permanent noise.
 func TestResumingAnUnescalatedAgentSaysNothing(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := h.agentFlow().ResumeByUser(testProject, "dvalin", "carry on"); err != nil {
+	if err := h.AgentFlow().ResumeByUser(testProject, "dvalin", "carry on"); err != nil {
 		t.Fatalf("ResumeByUser: %v", err)
 	}
 	if unread, _ := ps.UnreadMail("dvalin"); len(unread) != 0 {
@@ -434,10 +434,10 @@ func TestTheResumeNoticeIsNotEatenByTheWakeGate(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.agentFlow().ResumeByUser(testProject, "dvalin", "one column"); err != nil {
+	if err := h.AgentFlow().ResumeByUser(testProject, "dvalin", "one column"); err != nil {
 		t.Fatalf("ResumeByUser: %v", err)
 	}
 	// No real pod is running here, so the push fails to land regardless; the log is what proves the

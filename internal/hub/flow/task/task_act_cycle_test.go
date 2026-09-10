@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // chainEngine seeds tasks a…d and parents them into whatever chain the links describe.

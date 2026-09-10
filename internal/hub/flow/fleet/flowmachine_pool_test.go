@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // poolFixture seeds an open, unclaimed review in "repo" plus whatever reviewers the test wants, in

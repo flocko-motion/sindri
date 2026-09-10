@@ -16,7 +16,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // prCheckPaths caps how many conflicting paths a finding names. A verdict with no evidence sends

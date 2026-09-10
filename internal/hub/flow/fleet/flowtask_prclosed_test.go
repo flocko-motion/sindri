@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAPRWhoseTaskClosedIsScrapped is hepti's row. A rejected PR is still LIVE (a resubmission

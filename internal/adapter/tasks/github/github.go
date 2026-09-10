@@ -20,7 +20,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/gh"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // issueListLimit must be explicit: gh defaults to 30 and silently drops the rest.

@@ -11,7 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"os"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // NeedsReview reports whether p is open, wants a review (never an interim PR — a mid-task

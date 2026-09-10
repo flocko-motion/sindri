@@ -10,14 +10,15 @@ package hub
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/project"
 	"sync"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 const (
@@ -123,7 +124,7 @@ type watchdog struct {
 
 // repoSample is one repo's doc situation: the doc the board recommends, and any missing source CLI.
 type repoSample struct {
-	docs        RepoDocState
+	docs        project.DocState
 	specMissing bool
 }
 
@@ -171,7 +172,7 @@ func (w *watchdog) seed() {
 	for _, a := range agents {
 		// Both provisional: the sweep refines them. Absence is a reading like any other, and one
 		// reading never settles anything on its own.
-		w.record(a, exists[w.h.container(a.Project, a.Name)], 0, agent.Observation{})
+		w.record(a, exists[w.h.container(a.Project, a.Name)], 0, harness.Observation{})
 	}
 }
 
@@ -209,7 +210,7 @@ func (w *watchdog) loop() {
 func (w *watchdog) headroom() api.FleetMemory {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return agent.Headroom(w.capacity)
+	return harness.Headroom(w.capacity)
 }
 
 // pods is the last pod listing the sweep took — what the orphan scan reads instead of listing again.
@@ -236,7 +237,7 @@ func (w *watchdog) sampleRepos() {
 	}
 	next := make(map[string]repoSample, len(projects))
 	for _, p := range projects {
-		next[p.Tag] = repoSample{docs: w.h.repoDocState(p.Path), specMissing: w.h.wf.TaskSourceToolMissing(p.Path)}
+		next[p.Tag] = repoSample{docs: w.h.projects.DocState(p.Path), specMissing: w.h.wf.TaskSourceToolMissing(p.Path)}
 	}
 	w.mu.Lock()
 	w.repos = next
@@ -303,7 +304,7 @@ func (w *watchdog) sweep(withProbes bool) {
 	for _, a := range agents {
 		gone := listErr == nil && !exists[w.h.container(a.Project, a.Name)]
 		if gone {
-			w.record(a, false, 0, agent.Observation{})
+			w.record(a, false, 0, harness.Observation{})
 		}
 		// Fanned out, not inline: it inspects the container of any launch in flight, and the serial
 		// part of a beat holds every other agent's reading behind whatever it waits for.
@@ -398,7 +399,7 @@ func (w *watchdog) probe(a store.Agent) {
 	defer cancel()
 	cs, ok := w.h.agents.ClientsCtx(ctx, a.Project, a.Name)
 	if !ok {
-		w.record(a, false, 0, agent.Observation{})
+		w.record(a, false, 0, harness.Observation{})
 		return
 	}
 	obs := w.h.agents.Observe(ctx, a.Project, a.Name)
@@ -408,7 +409,7 @@ func (w *watchdog) probe(a store.Agent) {
 // record folds one observation in: a success clears strikes, a failure holds the previous state and
 // its counts until downStrikes. No single reading settles anything, whatever its source — a missing
 // pod and a failed probe are both one observation, and a listing can be a moment out of date.
-func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observation) {
+func (w *watchdog) record(a store.Agent, up bool, clients int, obs harness.Observation) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}

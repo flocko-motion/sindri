@@ -21,7 +21,7 @@ import (
 	// is a subprocess Go's cache cannot see into, so without these edges a new import under one of
 	// them would leave a stale PASS here.
 	_ "github.com/flo-at/sindri/internal/hub/flow/fleet"
-	_ "github.com/flo-at/sindri/internal/hub/situation"
+	_ "github.com/flo-at/sindri/internal/hub/world/situation"
 )
 
 // boxAdapters are the packages that ARE an agent's box: the session, and the coding tool inside it.
@@ -49,7 +49,7 @@ var runQueuePods = map[string]string{
 func TestOnlyTheRunQueueNamesTheRuntime(t *testing.T) {
 	const runtime = `"github.com/flo-at/sindri/internal/container"`
 	seen := 0
-	for _, dir := range []string{"internal/hub/flow/fleet", "internal/hub/situation",
+	for _, dir := range []string{"internal/hub/flow/fleet", "internal/hub/world/situation",
 		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
@@ -84,7 +84,7 @@ func TestOnlyTheRunQueueNamesTheRuntime(t *testing.T) {
 // same prohibition, and a rule that reached for a pane would land there first.
 var orchestrators = []string{
 	"github.com/flo-at/sindri/internal/hub/flow/fleet",
-	"github.com/flo-at/sindri/internal/hub/situation",
+	"github.com/flo-at/sindri/internal/hub/world/situation",
 }
 
 // TestTheOrchestratorCannotReachTheBox walks the REAL import graph, so an indirect import fails too —
@@ -160,7 +160,7 @@ func TestNoPaneWordIsMatchedInTheHub(t *testing.T) {
 		t.Fatalf("only %d runtime words read out of observe.go — the guard is not reading the vocabulary", len(words))
 	}
 	files, hits := 0, 0
-	for _, dir := range []string{"internal/hub", "internal/hub/flow/fleet", "internal/hub/situation",
+	for _, dir := range []string{"internal/hub", "internal/hub/flow/fleet", "internal/hub/world/situation",
 		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent", "internal/hub/core"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
@@ -197,7 +197,7 @@ func TestNoPaneWordIsMatchedInTheHub(t *testing.T) {
 // so this guard and the code it guards cannot hold different ideas of what the words are.
 func paneWords(t *testing.T) map[string]bool {
 	t.Helper()
-	path := filepath.Join(moduleRoot(t), "internal", "hub", "observe", "state.go")
+	path := filepath.Join(moduleRoot(t), "internal", "hub", "world", "observe", "state.go")
 	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
@@ -294,9 +294,9 @@ var judgements = []string{"stalled", "blocked", "full", "needs", "idle"}
 // states a conclusion. "Idle" is the one to watch: "at an empty prompt" is an observation and "has
 // nothing to do" is a conclusion, and one identifier carried both until this split.
 func TestTheObservationCarriesNoJudgement(t *testing.T) {
-	names, files := exportedNamesIn(t, filepath.Join(moduleRoot(t), "internal", "hub", "observe"))
+	names, files := exportedNamesIn(t, filepath.Join(moduleRoot(t), "internal", "hub", "world", "observe"))
 	if files < 1 {
-		t.Fatal("no source found in internal/hub/observe — the scan is reading the wrong directory")
+		t.Fatal("no source found in internal/hub/world/observe — the scan is reading the wrong directory")
 	}
 	if len(names) < 8 {
 		t.Fatalf("only %d exported names found — the scan is not reading the observation", len(names))
@@ -305,7 +305,7 @@ func TestTheObservationCarriesNoJudgement(t *testing.T) {
 		for _, word := range judgements {
 			if strings.Contains(strings.ToLower(n), word) {
 				t.Errorf("the observation exports %q, which states a %q — that is true only against the "+
-					"work the agent holds, so it belongs to the orchestrator (-> hub/situation.Surface)", n, word)
+					"work the agent holds, so it belongs to the orchestrator (-> hub/world/situation.Surface)", n, word)
 			}
 		}
 	}

@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
-	"github.com/flo-at/sindri/internal/hub/situation"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,8 +22,8 @@ import (
 
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // Hub is a no-op fleet.Deps that records the agents it interrupts/injects —

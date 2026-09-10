@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // nestedFeature reproduces the tree that broke: a feature whose direct child is itself an epic with

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestARetiredAgentIsNeverAssignedWork is oin's loop, restated for a dispatcher that assigns rather

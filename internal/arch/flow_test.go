@@ -36,7 +36,7 @@ var flowMayImport = map[string]string{
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond": "the conditions a map watches",
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says": "what a map has the agent told",
 	"github.com/flo-at/sindri/internal/hub/flow/topic":      "the events a condition wakes on",
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb": "the verbs a map offers",
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb": "the verbs a map offers",
 
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker":   "collected into one registry",
 	"github.com/flo-at/sindri/internal/hub/flow/pr":                   "a merge intent's own map",
@@ -46,9 +46,9 @@ var flowMayImport = map[string]string{
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer": "collected into one registry",
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/coauthor": "collected into one registry",
 
-	"github.com/flo-at/sindri/internal/hub/situation": "the gathered world, already assembled",
-	"github.com/flo-at/sindri/internal/hub/store":     "the task and state SHAPES, never the store itself",
-	"github.com/flo-at/sindri/internal/api":           "wire types and pure board rules",
+	"github.com/flo-at/sindri/internal/hub/world/situation": "the gathered world, already assembled",
+	"github.com/flo-at/sindri/internal/hub/world/store":     "the task and state SHAPES, never the store itself",
+	"github.com/flo-at/sindri/internal/api":                 "wire types and pure board rules",
 }
 
 // TestTheDeciderCanReachNothingThatWrites walks hub/flow's imports. Purity was a comment on
@@ -186,7 +186,7 @@ var statePattern = regexp.MustCompile(`=\s*"([a-z]+/[a-z-]+)"`)
 //
 //   - *_act.go, for a subject that keeps its map and its acting half in ONE directory (flow/pr,
 //     flow/task, flow/run). There the suffix is the whole distinction.
-//   - flow/agent/*.go and flow/agent/verbs/*.go: the agent's maps live further DOWN
+//   - flow/agent/*.go and flow/agent/workspace/*.go: the agent's maps live further DOWN
 //     (flow/agent/roles/<role>/), and its vocabulary sits beside them in its own packages, so every
 //     file at these two levels already acts and a suffix would say nothing.
 //   - flow/machine and flow/fleet: the engine, and the assembly that runs one machine per subject.
@@ -198,8 +198,8 @@ func isActing(path string) bool {
 	if strings.Contains(p, "/flow/machine/") || strings.Contains(p, "/flow/fleet/") {
 		return true
 	}
-	// These two levels only: a role's own map sits in flow/agent/roles/<role>/, and act, cond, says
-	// and verb are its vocabulary — all of them stay declarations.
+	// These two levels only: a role's own map sits in flow/agent/roles/<role>/, and act, cond and
+	// says are its vocabulary — all of them stay declarations.
 	dir, _ := filepath.Split(p)
-	return strings.HasSuffix(dir, "/flow/agent/") || strings.HasSuffix(dir, "/flow/agent/verbs/")
+	return strings.HasSuffix(dir, "/flow/agent/") || strings.HasSuffix(dir, "/flow/agent/workspace/")
 }

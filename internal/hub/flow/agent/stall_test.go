@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // stallStore is one worker holding a task, and one waiting on a verdict.

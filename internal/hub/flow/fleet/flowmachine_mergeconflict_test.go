@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAMilestoneConflictKeepsTheContainer is the shape austri found (sd-5ef393): the pre-merge

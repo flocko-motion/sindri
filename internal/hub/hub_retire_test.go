@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestUnretiringTellsTheAgent is sd-9d36d2: DirRetired sends an agent away from ever asking again,
@@ -121,7 +121,7 @@ func TestUnretiringAnEscalatedAgentStillWaitsOnTheEscalation(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,7 +172,7 @@ func TestEscalatedAgentIsStillNudgedAboutWaitingMail(t *testing.T) {
 	if _, err := ps.AddMail("dvalin", "user", "one column, ship it", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
 	// Fake the pane as an idle, running session — what a real watchdog sweep would have recorded.

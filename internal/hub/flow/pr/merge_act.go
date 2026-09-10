@@ -12,13 +12,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 	"log"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ReconcileMergingPRs settles anything a previous hub died holding — the map's own Orphaned exit

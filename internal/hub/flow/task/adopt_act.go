@@ -10,7 +10,7 @@ package task
 import (
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // AdoptChild is what happens when a task gains a child while an agent is working it: the agent

@@ -12,7 +12,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
@@ -46,7 +46,7 @@ func (r *refwatch) sweep(ctx context.Context) {
 		return
 	}
 	for _, p := range projects {
-		err := r.h.prFlow().SyncReference(p.Tag)
+		err := r.h.PRFlow().SyncReference(p.Tag)
 		msg := ""
 		if err != nil {
 			msg = err.Error()
@@ -107,19 +107,19 @@ func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 				return
 			default:
 			}
-			r.h.prFlow().CheckOpenPRs(p.Tag)
+			r.h.PRFlow().CheckOpenPRs(p.Tag)
 			// A BACKSTOP for the task sources, which announce nothing: td, openspec and GitHub are
 			// polled, so the cached read model only moves when something reads them. This is the one
 			// place that does on its own beat; every other event reaches the decider the moment it
 			// happens (-> workflowDeps.Notify), and the machine's floor re-decides regardless.
-			_ = r.h.taskFlow().SyncTasks(p.Tag)
+			_ = r.h.TaskFlow().SyncTasks(p.Tag)
 			r.h.wf.WakeProject(p.Tag, topic.TaskAvailable)
-			r.h.prFlow().RepairReviewRows(p.Tag)
+			r.h.PRFlow().RepairReviewRows(p.Tag)
 			// A BACKSTOP for the reviewer half, which the state machine does not yet drive in the
 			// background: its reviewer states answer an ask and no more, so an unclaimed review still
 			// needs a sweep to find it. The worker half needs none — a task event notifies the
 			// machine, and its floor re-decides every agent regardless (-> fleet.FloorInterval).
-			r.h.prFlow().AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
+			r.h.PRFlow().AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
 			// A BACKSTOP for an armed clear on an agent no state machine pass will reach: the clearing
 			// state fires one for an agent standing idle, but a coauthor or a planner never lands
 			// there, and arming is a direct request that must not wait on work arriving

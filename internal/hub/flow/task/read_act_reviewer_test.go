@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // reviewerEngine seeds a small backlog with a hierarchy and a spec label, plus the PR a reviewer

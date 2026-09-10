@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ownedEngine seeds ONE task sindri owns, in both the owned table and the read model a sync leaves —

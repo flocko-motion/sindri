@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / worker
+// package: hub/flow/agent/roles/worker / worker
 // type:    logic (the worker's flow, declared)
 // job:     the map of how a worker works — every state it can be in, what the hub does there, what
 // moves it out, what it may type, and what it is told. Read this file to know the worker.
@@ -7,11 +7,11 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 // The worker's states. Named here so the map below reads as one page rather than as forward

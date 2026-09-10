@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // Seq 0 holds the submit summary, which is the PR's own text already, so it is never a comment.

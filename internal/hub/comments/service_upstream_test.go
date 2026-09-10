@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // stubSource is a minimal tasks.Source that claims every id it's asked about and records the body

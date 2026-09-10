@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // wakeRefusalCase is one point in the matrix sd-72af71 asks for: WakeRefusal must agree with

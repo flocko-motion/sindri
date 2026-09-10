@@ -15,8 +15,8 @@ import (
 
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ReviewDirective is what a reviewer is told: the ONE PR it holds, whose branch sits in its one

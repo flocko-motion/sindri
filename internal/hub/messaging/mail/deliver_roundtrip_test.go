@@ -14,7 +14,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestMailIsKeptForAnAgentThatCannotBeReached is the gap the whole feature exists to close: the agent

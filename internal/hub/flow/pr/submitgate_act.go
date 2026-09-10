@@ -11,7 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // EMPTY OF CONTENT, specific in shape. The hub never saw the diff, so "that pattern" means whatever

@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestReconcileRepairsAStaleInProgress: a task marked in_progress that nobody holds is stale, which

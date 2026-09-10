@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // recorder is a Delivery that remembers what was typed into each agent, which is the only way to

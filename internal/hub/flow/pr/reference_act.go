@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // refTipKey namespaces the remembered tip by project AND branch, so re-pointing `reference:` at a

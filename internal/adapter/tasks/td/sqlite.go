@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 	_ "modernc.org/sqlite"
 )
 

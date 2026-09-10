@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // thread is one comment per source, so a test can tell apart "rendered" from "rendered the one

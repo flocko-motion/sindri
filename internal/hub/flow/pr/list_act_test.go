@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestPRListShowsOnlyAWorkersOwnPRs: a worker's question is "what did I submit, and what happened

@@ -11,7 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // ApproveTask clears the approval gate on a proposed task (user-only), making it claimable, and

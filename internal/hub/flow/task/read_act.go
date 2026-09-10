@@ -15,9 +15,9 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // childIDs are the ids of the tasks parented by id, in listing order.

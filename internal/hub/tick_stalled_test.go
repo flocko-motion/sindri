@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestStalledForIsWhatTheBoardAndTheNudgeShare: the board word and the injected prod read one
@@ -163,7 +163,7 @@ func TestStalledForNeedsAnObservation(t *testing.T) {
 
 	a := store.Agent{Project: "proj", Name: "gone"}
 	for i := 0; i <= downStrikes; i++ {
-		h.watch.record(a, false, 0, agent.Observation{}) // past the strike threshold: down
+		h.watch.record(a, false, 0, harness.Observation{}) // past the strike threshold: down
 	}
 	if _, stalled := h.stalledFor("proj", "gone"); stalled {
 		t.Error("a down agent must not read as stalled")

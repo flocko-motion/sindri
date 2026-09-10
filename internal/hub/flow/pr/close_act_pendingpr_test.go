@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestClosingATaskRejectsItsPendingPR: a PR exists to land work into a task, so with the task closed

@@ -3,7 +3,7 @@ package fleet
 import (
 	"bytes"
 	"context"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // stubDeps is the fake hub every subject's tests share (-> hub/flowtest), named here as the fleet's

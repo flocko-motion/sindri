@@ -9,7 +9,7 @@ import (
 	"context"
 
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // AgentDirective is the no-arg `sindri` answer, returned AT ONCE, mail served inline ahead of it

@@ -3,7 +3,7 @@ package hub
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // setLiveness writes an observation under watch.mu. The raw `h.watch.obs[key] = ...` pattern used

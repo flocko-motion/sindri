@@ -3,12 +3,12 @@ package fleet
 import (
 	"context"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestNextUpRanksPackagesAndLeavesTogether is the rule the two-queue assigner broke: a rating is

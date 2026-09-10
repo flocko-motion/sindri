@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // ID derives a stable os-XXXXXX task id from a change name. One-way — reversed by changeName.

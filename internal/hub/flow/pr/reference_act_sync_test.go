@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // syncFixture is a repo pinned to "main" with one agent on its own worktree branch, plus the engine

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // surfaceFor seeds a worker in the given phase and returns the verbs it can RUN right now. The

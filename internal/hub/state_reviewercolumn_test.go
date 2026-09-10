@@ -3,7 +3,7 @@ package hub
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestTheBoardSaysWhoIsReviewing: whether a PR is being looked at, and by whom, is the hub's answer.

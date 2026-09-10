@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestWorkerCanCommentOnItsOwnTask is the base case DONE WHEN names: a worker can record a

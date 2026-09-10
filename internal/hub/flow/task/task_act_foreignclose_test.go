@@ -4,7 +4,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestClosingAForeignTaskLeavesItClosed is dain's loop, at the level it happens. SetStatus's closed

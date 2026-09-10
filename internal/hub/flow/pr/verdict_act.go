@@ -15,8 +15,8 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // CmdApprove marks a PR approved (the human still merges — the only hard gate). A second, third…
@@ -44,40 +44,31 @@ func (a *Act) CmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 	if c.Role == "planner" {
 		return a.plannerApprove(ps, c, pr, out)
 	}
-	if !api.PRApprovable(pr) {
-		fmt.Fprintf(out, "%s is %s — only an open or already-approved PR can be approved.\n", pr.ID, pr.Status)
+	// approveVoice, not the caller's name: a reviewer's badge is its review row, stamped below.
+	if _, err := a.approve(pr.Project, pr.ID, approveVoice(c)); err != nil {
+		fmt.Fprintf(out, "%v\n", err) // an already-settled PR is the agent's to read, not a hub fault
 		return 1, nil
 	}
-	pr.Status = "approved"
-	if err := ps.PutPR(pr); err != nil {
-		return 1, err
-	}
 	_ = a.Store.For(c.Project).Log(c.Agent, "approve", pr.ID)
-	_ = ps.LogPR(pr.ID, "approved", "by "+c.Agent)
-	if err := a.stampVerdict(c, pr.Project, pr.ID, "pass", ""); err != nil {
-		return 1, fmt.Errorf("%s is approved, but recording who approved it failed: %w", pr.ID, err)
+	if c.Role != "coauthor" { // its badge is approve's own, written under its name (-> approve)
+		a.completeReview(pr.Project, c.Project, pr.ID, c.Agent, "pass", "")
 	}
-	a.Deps.Notify()
 	fmt.Fprintf(out, "%s approved — awaiting human merge ('sindri merge %s').\n", pr.ID, pr.ID)
 	return 0, nil
+}
+
+// approveVoice is the name an approval speaks in — the reviewer's role, a coauthor's own name. The
+// same division rejectVoice draws, so one PR's badges read alike whichever verdict landed.
+func approveVoice(c registry.Caller) string {
+	if c.Role == "coauthor" {
+		return c.Agent
+	}
+	return "reviewer"
 }
 
 // ownWork reports whether the caller wrote the code under review. 05-workflow's self-review rule is
 // about the COMMITS: a task it wrote is fine to rule on, its own branch never is.
 func ownWork(pr store.PR, c registry.Caller) bool { return pr.Agent == c.Agent }
-
-// stampVerdict records who ruled: on the review row a reviewer was assigned (-> completeReview), or
-// outright for a coauthor, which holds no row and stays where it is — with the user, not in a queue.
-// prProject is the caller's own already-resolved project — openPR resolved and gated it, so this
-// does not re-derive it unsafely from a bare id.
-func (a *Act) stampVerdict(c registry.Caller, prProject, prID, verdict, findings string) error {
-	if c.Role != "coauthor" {
-		a.completeReview(prProject, c.Project, prID, c.Agent, verdict, findings)
-		return nil
-	}
-	_, err := a.Store.For(c.Project).AddVerdict(prID, "", c.Agent, verdict, findings, false)
-	return err
-}
 
 // plannerApprove records a planner's badge: additional and optional, beside whatever a reviewer
 // decides, never instead of it. It never touches pr.Status — self-review of a planner's own plan
@@ -114,31 +105,45 @@ func (a *Act) completeReview(prProject, home, prID, agent, verdict, findings str
 	_ = a.Harness.Say(home, agent, prompts.MsgKickoff, mail.PushOnly)
 }
 
-// ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
-// approved and records the badge — a human verdict otherwise left no trace in the reviews a
-// PR's detail shows, only the bare status.
+// ApprovePR is the human approve path (TUI/CLI), and the agent's own is CmdApprove: both are the
+// one operation below, told who is asking.
 func (a *Act) ApprovePR(project, prID string) error {
+	_, err := a.approve(project, prID, api.SenderUser)
+	return err
+}
+
+// approve opens the merge gate on one PR in the voice of whoever ruled — "user", "reviewer", or a
+// coauthor by name, which is also the author its badge carries. The one implementation, as reject's
+// has been: written twice, the human path silently lacked the guards and the log entry the agent's
+// had, and nothing kept the pair in step.
+//
+// Only a reviewer has a review row of its own to stamp (-> completeReview); everyone else's badge is
+// the verdict written here. The caller-specific parts — refusing self-review, a planner's advisory
+// badge, freeing the reviewer — stay with the caller that has them.
+func (a *Act) approve(project, prID, voice string) (store.PR, error) {
 	ps := a.Store.For(project)
 	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
-		return err
+		return store.PR{}, err
 	}
 	if !ok {
-		return fmt.Errorf("%w %q", core.ErrNoSuchPR, prID)
+		return store.PR{}, fmt.Errorf("%w %q", core.ErrNoSuchPR, prID)
 	}
 	if !api.PRApprovable(pr) {
-		return fmt.Errorf("%s is %s — only an open or already-approved PR can be approved", prID, pr.Status)
+		return pr, fmt.Errorf("%s is %s — only an open or already-approved PR can be approved", prID, pr.Status)
 	}
 	pr.Status = "approved"
 	if err := ps.PutPR(pr); err != nil {
-		return err
+		return pr, err
 	}
-	if _, err := ps.AddVerdict(prID, "", "user", "pass", "", false); err != nil {
-		return err
+	if voice != "reviewer" {
+		if _, err := ps.AddVerdict(prID, "", voice, "pass", "", false); err != nil {
+			return pr, err
+		}
 	}
-	_ = ps.LogPR(prID, "approved", "by user")
+	_ = ps.LogPR(prID, "approved", "by "+voice)
 	a.Deps.Notify()
-	return nil
+	return pr, nil
 }
 
 // CmdRevoke withdraws the caller's own PR so it can keep working on the same branch. Without it the

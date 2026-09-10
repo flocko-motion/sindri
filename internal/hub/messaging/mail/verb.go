@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // Help advertises all three in one line, since they are one verb: no argument READS, a name

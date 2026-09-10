@@ -9,6 +9,7 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/project"
 	"log"
 	"path/filepath"
 	"sync"
@@ -16,10 +17,10 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/commands"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/sections"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
@@ -97,7 +98,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	h.fillReviewers(prs)
 	h.fillAttempts(prs)
 	// Fleet-wide and position-ranked already (-> FleetRuns), so the board never re-derives either.
-	runs, err := h.runFlow().FleetRuns()
+	runs, err := h.RunFlow().FleetRuns()
 	if err != nil {
 		return BoardState{}, err
 	}
@@ -164,7 +165,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		sit := sits[agentKey{a.Project, a.Name}]
 		allowed := sit.Allowed()
 		// The word is the surface's now. Retiring an intent reality has caught up with is still a
-		// WRITE, and the board is the caller that owns making it (-> agent.Service.SettleIntent).
+		// WRITE, and the board is the caller that owns making it (-> harness.Service.SettleIntent).
 		h.agents.SettleIntent(a.Project, a.Name, l.up, observed[i])
 		status := allowed.Status
 		agents = append(agents, AgentView{
@@ -181,7 +182,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			ContextTokens: l.tokens, ContextWindow: l.window, Escalation: st.Escalation,
 			// The transcript sees a model switched by hand inside Claude Code before the roster does,
 			// so the detected one wins while the agent is up — both readings off the same sample.
-			Model:      agent.ModelInUse(a.Model, l.model, l.up),
+			Model:      harness.ModelInUse(a.Model, l.model, l.up),
 			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}
@@ -193,12 +194,12 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			orphans = append(orphans, p)
 		}
 	}
-	chat, err := h.chatView()
+	chat, err := h.ChatView()
 	if err != nil {
 		return BoardState{}, err
 	}
 	// Carried in the snapshot so the TUI's recommendation matches the one hub startup prints.
-	docs := make(map[string]RepoDocState, len(projects))
+	docs := make(map[string]project.DocState, len(projects))
 	for _, p := range projects {
 		docs[p.Tag] = repos[p.Tag].docs
 	}
@@ -210,7 +211,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: repos[selected].specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
-		DefaultMemory: agent.MemoryOrDefault(""),
+		DefaultMemory: harness.MemoryOrDefault(""),
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
 		// one here would put a process spawn on every board read, and there are many.
 		Memory: h.watch.headroom(),
@@ -253,7 +254,7 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, u
 // the user — resolved against the board they describe. A front-end renders what it finds here, so
 // a board that left this out would silently drop every marker.
 func withSections(b BoardState) BoardState {
-	b.Sections = commands.Resolved(b)
+	b.Sections = sections.Resolved(b)
 	return b
 }
 
@@ -386,7 +387,7 @@ func overlayUnreachable(status string, unreachable bool) string {
 // Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the
 // GitHub scan past its TTL.
 func (h *Hub) Refresh(project string) error {
-	err := h.taskFlow().ForceSyncTasks(project)
+	err := h.TaskFlow().ForceSyncTasks(project)
 	h.notify()
 	return err
 }
@@ -408,7 +409,7 @@ func (h *Hub) StateLog(project, name string) ([]store.StateEvent, error) {
 // attributed to its author on the Agents tab while the PRs tab, correctly, showed nothing.
 func openPRFor(prs []store.PR, project, agent string) string {
 	for _, p := range prs {
-		if p.Project == project && p.Agent == agent && PROpen(p) {
+		if p.Project == project && p.Agent == agent && api.PROpen(p) {
 			return p.ID
 		}
 	}

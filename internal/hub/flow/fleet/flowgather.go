@@ -7,14 +7,14 @@ package fleet
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 
 	"github.com/flo-at/sindri/internal/hub/flow"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // subject splits "project/agent", the identity the machine watches an agent by.

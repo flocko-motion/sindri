@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAnInterimMergeDoesNotLandTheFeature is the bug `sindri contribute` hit in practice: its PR

@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
-	ownedpkg "github.com/flo-at/sindri/internal/hub/owned"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	ownedpkg "github.com/flo-at/sindri/internal/hub/world/owned"
 	"io"
 	"path/filepath"
 	"strings"
@@ -21,10 +21,10 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/brokkr/lint"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // Tasks refreshes from td and returns all cached tasks for a project (for `task

@@ -10,7 +10,6 @@ package fleet
 import (
 	"context"
 	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
@@ -22,8 +21,8 @@ import (
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	flowtask "github.com/flo-at/sindri/internal/hub/flow/task"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TaskSourceToolMissing reports a task source wanting a tool the repo calls for but that is not on
@@ -65,7 +64,6 @@ func (e *Engine) Handles() *core.Core { return e.Core }
 // Built per call: they hold nothing of their own beyond the handles below them.
 func (e *Engine) prAct() *prflow.Act      { return prflow.New(e.Core) }
 func (e *Engine) roleAct() *agentflow.Act { return agentflow.New(e.Core) }
-func (e *Engine) verbAct() *verbs.Act     { return verbs.New(e.Core) }
 func (e *Engine) taskAct() *taskflow.Act  { return taskflow.New(e.Core) }
 func (e *Engine) runAct() *runflow.Act    { return runflow.New(e.Core) }
 

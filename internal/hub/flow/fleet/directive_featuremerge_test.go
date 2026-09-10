@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestMergingAFinishedFeatureReleasesTheWorker is what a merge is FOR. The merge path had one branch

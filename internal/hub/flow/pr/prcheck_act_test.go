@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // prCheckEngine builds a repo whose base has moved past one open PR, and an engine over it.

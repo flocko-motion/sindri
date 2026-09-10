@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestARejectedWorkerIsStillCaughtByTheStallNudge closes the gap a reviewer's own bug (sd-98fa96)

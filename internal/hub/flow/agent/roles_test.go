@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 )
 

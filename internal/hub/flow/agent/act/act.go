@@ -1,4 +1,4 @@
-// package: hub/flow/act / act
+// package: hub/flow/agent/act / act
 // type:    logic (the actions a state can run, as identities)
 // job:     name every action a flow file may attach to a state, with the outcomes it can finish
 // with — an identity and nothing more, so a flow file can name an action without importing anything

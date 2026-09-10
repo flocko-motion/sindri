@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / attention
+// package: hub/flow/agent/roles/worker / attention
 // type:    logic (the worker's two attention states, declared)
 // job:     the two places a worker goes when something needs its attention rather than its hands —
 // mail it has not read, and work it has stopped doing.
@@ -6,11 +6,11 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (

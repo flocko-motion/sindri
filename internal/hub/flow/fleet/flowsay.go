@@ -8,7 +8,7 @@ package fleet
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	hubtask "github.com/flo-at/sindri/internal/hub/task"
+	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/flow"

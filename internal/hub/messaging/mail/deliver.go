@@ -11,7 +11,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // SenderFor is who a message is from: what the sender stated, else the hub in its own voice — which is

@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // showUsage is what every unrecognised shape gets, so a typo reads as "here is the grammar" rather

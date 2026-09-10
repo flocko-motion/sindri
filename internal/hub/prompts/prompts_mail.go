@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // DirMail is unread mail served AHEAD of the rest of `sindri`'s answer (-> Engine.serveMail), which

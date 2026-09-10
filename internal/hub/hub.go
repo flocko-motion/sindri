@@ -12,7 +12,7 @@ import (
 	"context"
 	"fmt"
 	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/workspace"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/flow/task"
@@ -27,16 +27,16 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/agent/agentchan"
+	"github.com/flo-at/sindri/internal/hub/api/agents/channel"
+	"github.com/flo-at/sindri/internal/hub/api/serve"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/flow/fleet"
+	"github.com/flo-at/sindri/internal/hub/harness"
 	"github.com/flo-at/sindri/internal/hub/messaging/chat"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/project"
-	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -56,10 +56,10 @@ type Hub struct {
 	mail     *mail.Box           // the fleet's mailbox and the one door into it (internal/hub/messaging/mail)
 	chat     *chat.Service       // the user's chatroom relay (internal/hub/messaging/chat)
 	comments *comments.Service   // task-comment sync (internal/hub/comments)
-	agents   *agent.Service      // agent management: identity/auth/memory/inject/runtime/lifecycle
+	agents   *harness.Service    // agent management: identity/auth/memory/inject/runtime/lifecycle
 	wf       *fleet.Engine       // the machines every subject re-decides through (-> hub/flow/fleet)
 	projects *project.Service    // repo-registry management (internal/hub/project)
-	agentCh  *agentchan.Server   // the inbound agent command channel (internal/hub/agent/agentchan)
+	agentCh  *channel.Server     // the inbound agent command channel (internal/hub/agent/agentchan)
 	sit      *situation.Gatherer // where each agent stands, and what may happen to it (internal/hub/situation)
 	watch    *watchdog           // agent liveness, observed on a loop (internal/hub/watchdog.go)
 	ticks    *ticks              // every sweep the hub runs on a clock (internal/hub/ticks.go)
@@ -130,12 +130,12 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
 	// reaches h.agents at request time.
-	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
+	h.agentCh = channel.New(h.store, agentchanDeps{h})
 	// Before agents and wf, which both ask it: the observer behind it reads h.watch and h.agents at
 	// CALL time, so neither has to exist yet.
-	h.sit = situation.NewGatherer(h.store, harness{h})
-	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, harness{h}, h.mail, spec.Source{}, github.Source{}).
+	h.sit = situation.NewGatherer(h.store, hubHarness{h})
+	h.agents = harness.New(h.store, agentDeps{h}, h.agentCh)
+	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, hubHarness{h}, h.mail, spec.Source{}, github.Source{}).
 		Gated(spec.Source{}).
 		Reconciling()
 	h.projects = project.New(h.store, projectDeps{h})
@@ -218,26 +218,53 @@ func (h *Hub) Close() error {
 	// status has no loop of its own to stop — watchdog.close() above already ended what drove it.
 	h.agentCh.CloseAll()
 	h.endLife()
-	server.FlushAccessLog() // emit any open access-log run before we go quiet
+	serve.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 
-// agentFlow is the acting half of an agent's flow, over the hub's own handles.
-func (h *Hub) agentFlow() *agentflow.Act { return agentflow.New(h.wf.Handles()) }
+// AgentFlow is the acting half of an agent's flow, over the hub's own handles.
+func (h *Hub) AgentFlow() *agentflow.Act { return agentflow.New(h.wf.Handles()) }
 
-// prFlow is the acting half of a pull request's flow, over the hub's own handles.
-func (h *Hub) prFlow() *prflow.Act { return prflow.New(h.wf.Handles()) }
+// PRFlow is the acting half of a pull request's flow, over the hub's own handles.
+func (h *Hub) PRFlow() *prflow.Act { return prflow.New(h.wf.Handles()) }
 
-// runFlow is the acting half of a queued run's flow, over the hub's own handles.
-func (h *Hub) runFlow() *runflow.Act { return runflow.New(h.wf.Handles()) }
+// RunFlow is the acting half of a queued run's flow, over the hub's own handles.
+func (h *Hub) RunFlow() *runflow.Act { return runflow.New(h.wf.Handles()) }
 
-// agentVerbs is the surface an agent TYPES at, over the hub's own handles — separate from the
-// actions its map runs on its behalf (-> agentFlow).
-func (h *Hub) agentVerbs() *verbs.Act { return verbs.New(h.wf.Handles()) }
+// agentWorkspace is what an agent types against its OWN tree — `git` and `scratch` — over the
+// hub's handles. Separate from the actions its map runs on its behalf (-> AgentFlow).
+func (h *Hub) agentWorkspace() *workspace.Act { return workspace.New(h.wf.Handles()) }
 
-// taskFlow is the acting half of a task's flow, over the hub's own handles. Built per call: it holds
+// TaskFlow is the acting half of a task's flow, over the hub's own handles. Built per call: it holds
 // nothing of its own, and a field would be a second place for the handles to live.
-func (h *Hub) taskFlow() *task.Act { return task.New(h.wf.Handles()) }
+func (h *Hub) TaskFlow() *task.Act { return task.New(h.wf.Handles()) }
+
+// The six readers below hand out the subsystems the front-end's routes act on. Readers rather than
+// one shared struct: the hub stays the single place they are assembled, and a caller reaches
+// exactly the one it names (-> hub/api/frontend.Hub).
+
+// Fleet is the machines every subject re-decides through.
+func (h *Hub) Fleet() *fleet.Engine { return h.wf }
+
+// Agents is identity, auth, memory, injection and pod lifecycle.
+func (h *Hub) Agents() *harness.Service { return h.agents }
+
+// Projects is the repo registry.
+func (h *Hub) Projects() *project.Service { return h.projects }
+
+// Chat is the user's chatroom relay.
+func (h *Hub) Chat() *chat.Service { return h.chat }
+
+// Mail is the fleet's mailbox and the one door into it.
+func (h *Hub) Mail() *mail.Box { return h.mail }
+
+// Comments is task-comment sync.
+func (h *Hub) Comments() *comments.Service { return h.comments }
+
+// StartupAdvice is what each registered repo should be told once, at boot — a config that will not
+// load, or a missing architecture doc. Delegated: the rule is the registry's (-> hub/project), and
+// the hub is what has a startup to say it at.
+func (h *Hub) StartupAdvice() []string { return h.projects.StartupAdvice() }
 
 // SocketPath is the global hub's control socket.
 func (h *Hub) SocketPath() string { return paths.HubSocket() }

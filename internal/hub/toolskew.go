@@ -12,7 +12,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/harness"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"os"
 	"sort"
@@ -110,7 +110,7 @@ func defaultPodManifest() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if v, ok := agent.PodBrokkrVersion(); ok {
+	if v, ok := harness.PodBrokkrVersion(); ok {
 		if m == nil {
 			m = map[string]string{}
 		}

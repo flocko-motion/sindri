@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/serve"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
@@ -47,45 +47,45 @@ func (h *Hub) observed(project, name string) observe.Observation {
 }
 
 // harness adapts the hub to fleet.Harness: the agent's box, and nothing that names a task.
-type harness struct{ h *Hub }
+type hubHarness struct{ h *Hub }
 
-func (x harness) Observe(project, name string) observe.Observation {
+func (x hubHarness) Observe(project, name string) observe.Observation {
 	return x.h.observed(project, name)
 }
 
 // Probe takes a FRESH look where Observe reports the standing one — for a caller that needs the
 // answer as of now. Under the hub's lifetime, since fleet.Harness carries no context of its own.
-func (x harness) Probe(project, name string) observe.Observation {
+func (x hubHarness) Probe(project, name string) observe.Observation {
 	o := x.h.observed(project, name)
 	o.Up = x.h.agents.AgentAlive(x.h.lifetime, project, name)
 	o.TakenAt = time.Now()
 	return o
 }
 
-func (x harness) Say(project, name, text string, d mail.Delivery) error {
+func (x hubHarness) Say(project, name, text string, d mail.Delivery) error {
 	return x.h.mail.Deliver(project, name, text, d)
 }
 
-func (x harness) Clear(ctx context.Context, project, name string) error {
+func (x hubHarness) Clear(ctx context.Context, project, name string) error {
 	return x.h.agents.Clear(ctx, project, name)
 }
 
-func (x harness) SetModel(ctx context.Context, project, name, model string) error {
+func (x hubHarness) SetModel(ctx context.Context, project, name, model string) error {
 	return x.h.agents.SetModel(ctx, project, name, model)
 }
 
 // Interrupt and Start run under the hub's lifetime for the same reason Probe does.
-func (x harness) Interrupt(project, name string) error {
+func (x hubHarness) Interrupt(project, name string) error {
 	return x.h.agents.Interrupt(x.h.lifetime, project, name)
 }
 
-func (x harness) Start(project, name string) error {
+func (x hubHarness) Start(project, name string) error {
 	return x.h.agents.Launch(x.h.lifetime, project, name, false, false, 0, 0, io.Discard)
 }
 
-func (x harness) Container(project, name string) string { return x.h.container(project, name) }
+func (x hubHarness) Container(project, name string) string { return x.h.container(project, name) }
 
-func (x harness) ModelMatches(want, detected string) bool {
+func (x hubHarness) ModelMatches(want, detected string) bool {
 	return x.h.agents.ModelMatches(want, detected)
 }
 
@@ -95,13 +95,15 @@ type agentDeps struct{ h *Hub }
 func (d agentDeps) Notify()                                   { d.h.notify() }
 func (d agentDeps) ContainerName(project, name string) string { return d.h.container(project, name) }
 func (d agentDeps) ProjectRoot(project string) string         { return d.h.projectRoot(project) }
-func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.architectureDoc(project) }
+func (d agentDeps) ArchitectureDoc(project string) string {
+	return d.h.projects.ArchitectureDoc(project)
+}
 func (d agentDeps) RefreshTask(project, id string) error {
-	return d.h.taskFlow().RefreshTask(project, id)
+	return d.h.TaskFlow().RefreshTask(project, id)
 }
 
 func (d agentDeps) SetTaskStatus(project, id, want string) error {
-	return d.h.prFlow().SetStatus(project, id, want)
+	return d.h.PRFlow().SetStatus(project, id, want)
 }
 func (d agentDeps) Rehydrate(project, name string) { d.h.rehydrate(project, name) }
 
@@ -134,7 +136,7 @@ func (d agentDeps) AgentClients(project, name string) int {
 }
 
 func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
-	return d.h.projectConfig(project)
+	return d.h.projects.Config(project)
 }
 
 // mailDeps adapts the hub to mail.Deps: the mailbox owns the message, the hub owns the session it
@@ -203,7 +205,7 @@ func (d projectDeps) RepoName(project string) string { return d.h.repoName(proje
 func (d projectDeps) RepoTag(root string) string     { return repoTag(root) }
 func (d projectDeps) Notify()                        { d.h.notify() }
 
-// agentchanDeps adapts the hub to agentchan.Deps: the channel owns transport, the hub behaviour.
+// agentchanDeps adapts the hub to channel.Deps: the channel owns transport, the hub behaviour.
 type agentchanDeps struct{ h *Hub }
 
 func (d agentchanDeps) Commands(project, name string) (any, error) {
@@ -219,7 +221,7 @@ func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, 
 	return d.h.agents.ForToken(token)
 }
 func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler {
-	return server.LogRequests(label, next)
+	return serve.LogRequests(label, next)
 }
 
 // workflowDeps adapts the hub to fleet.Deps, so workflow need not import the hub.
@@ -228,10 +230,12 @@ type workflowDeps struct{ h *Hub }
 func (d workflowDeps) ProjectRoot(project string) string { return d.h.projectRoot(project) }
 
 func (d workflowDeps) ProjectConfig(project string) (config.Config, error) {
-	return d.h.projectConfig(project)
+	return d.h.projects.Config(project)
 }
 
-func (d workflowDeps) ArchitectureDoc(project string) string { return d.h.architectureDoc(project) }
+func (d workflowDeps) ArchitectureDoc(project string) string {
+	return d.h.projects.ArchitectureDoc(project)
+}
 
 // Notify tells the board AND the decider. Every event used to reach the board alone, and that gap is
 // where every timer in the hub came from. It names no subject on purpose — the notify carries no
@@ -250,7 +254,7 @@ func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
 }
 
 func (d workflowDeps) Escalate(project, name, question string) (string, error) {
-	return d.h.agentFlow().Escalate(project, name, question)
+	return d.h.AgentFlow().Escalate(project, name, question)
 }
 
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).

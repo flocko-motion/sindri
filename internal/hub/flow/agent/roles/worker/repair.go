@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / repair
+// package: hub/flow/agent/roles/worker / repair
 // type:    logic (the worker's repair states, declared)
 // job:     the three places a worker goes when the world moved under it — a verdict came back, the
 // feature landed without it, or somebody else got inside its tree. Each is a state because each
@@ -7,11 +7,11 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (

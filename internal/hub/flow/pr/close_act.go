@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // CloseTask is the "done" close, dispatched by backend: td closes, openspec archives, GitHub closes

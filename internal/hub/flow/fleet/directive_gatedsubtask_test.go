@@ -3,14 +3,14 @@ package fleet
 import (
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	hubtask "github.com/flo-at/sindri/internal/hub/task"
+	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // gatedFeature is the tree a planner edit produces mid-flight: a worker holds feature td-EPIC and is

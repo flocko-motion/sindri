@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestARejectionIsMailedAndTheNudgeIsNot walks two real senders end to end, which is what the rule

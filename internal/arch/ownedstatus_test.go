@@ -13,8 +13,8 @@ import (
 // keeps recurring: four sites grew their own "if OwnsTask", and the three that forgot each left a
 // finished openspec change reading open.
 var ownedStatusWriters = map[string]string{
-	"internal/hub/store/owned.go":       "the column's own accessor",
-	"internal/hub/owned/owned.go":       "the source that OWNS these rows — writing them is its job",
+	"internal/hub/world/store/owned.go": "the column's own accessor",
+	"internal/hub/world/owned/owned.go": "the source that OWNS these rows — writing them is its job",
 	"internal/hub/flow/pr/close_act.go": "SetStatus, the one verb that knows where each kind's status lives",
 }
 

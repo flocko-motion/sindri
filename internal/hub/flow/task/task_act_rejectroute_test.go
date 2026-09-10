@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestARejectionIsAboutTheWorkInHand is hepti's misrouting: told "your PR for sd-57e895 was REJECTED"

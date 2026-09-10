@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // idleAgentWithMail seeds a live agent sitting at an empty prompt with one unread message — the exact

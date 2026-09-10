@@ -8,7 +8,7 @@ package flowtest
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // AssignReviewer gives agent an Assigned (author-set, unverdicted) review row on pr — the shape

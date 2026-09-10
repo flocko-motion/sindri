@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // unownedSubtask seeds a feature sindri owns whose remaining subtask is an openspec change it does

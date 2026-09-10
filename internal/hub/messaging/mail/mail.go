@@ -10,7 +10,7 @@ package mail
 import (
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // Deps is the mailbox's seam back to the hub: the session a push is typed into, the board that

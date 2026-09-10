@@ -14,16 +14,16 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	hubtask "github.com/flo-at/sindri/internal/hub/task"
+	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // FleetPRs is fleet-wide, so `pr list` matches the TUI regardless of the caller's cwd.

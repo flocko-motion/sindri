@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestScrapTaskGoesDeepestFirst: a subtree scrap must reach the grandchild before the

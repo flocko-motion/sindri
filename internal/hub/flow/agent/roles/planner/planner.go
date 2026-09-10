@@ -1,4 +1,4 @@
-// package: hub/flow/roles/planner / planner
+// package: hub/flow/agent/roles/planner / planner
 // type:    logic (the planner's flow, declared)
 // job:     the map of how a planner works. It never touches the backlog: its work arrives as a
 // CONVERSATION, so the only questions are whether a plan is in hand and whether one has shipped.
@@ -6,11 +6,11 @@
 package planner
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (
@@ -54,7 +54,7 @@ var planning = flow.State{
 		{cond.Escalated, Escalated, "it stopped on a question"},
 	},
 	Verbs: flow.Offers{
-		{verb.Plan, Submitted, "ship the spec edits as a pull request"},
+		{verb.Openspec, Submitted, "ship the spec edits as a pull request"},
 		{verb.CreateTask, flow.Stay, "propose a task"},
 		{verb.State, Idle, "say you are done"},
 		{verb.Task, flow.Stay, "read the backlog"},
@@ -126,7 +126,7 @@ var escalated = flow.State{
 		{verb.Fyi, flow.Stay, "one note to the user"},
 		{verb.Rebase, flow.Stay, "align onto the reference branch"},
 		{verb.State, flow.Stay, "say where you are"},
-		{verb.Chat, flow.Stay, "say something in the meeting room"},
+		{verb.Meeting, flow.Stay, "say something in the meeting room"},
 	},
 }
 

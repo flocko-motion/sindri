@@ -4,8 +4,8 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // plannerEngine seeds one flat proposal and the planner that authored it, for the tests that ask

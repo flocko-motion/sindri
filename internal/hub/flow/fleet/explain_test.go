@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestExplainNextNamesEveryReason walks the backlog shapes that have each cost an afternoon this

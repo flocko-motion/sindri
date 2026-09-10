@@ -7,7 +7,7 @@ package agent
 
 import (
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TierPrefers builds nextUp's tiebreak for one agent: a task whose tier's model matches what it is

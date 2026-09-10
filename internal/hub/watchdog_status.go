@@ -10,7 +10,7 @@ package hub
 import (
 	"sync"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // statuswatch diffs the derived status word; one per hub, its sweep driven externally.

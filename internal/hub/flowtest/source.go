@@ -8,7 +8,7 @@ package flowtest
 import (
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // ForeignSource claims every os- id and finishes it silently, the way a repo-held status does.

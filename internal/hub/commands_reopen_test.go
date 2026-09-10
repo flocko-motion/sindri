@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestPlannerCanReopenAClosedTask: the base case — a planner reopens a closed task it owns, with a

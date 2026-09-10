@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // prListUsage is prs's own help, printed alongside any refusal so the accepted form is never left

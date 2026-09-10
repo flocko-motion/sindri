@@ -4,18 +4,20 @@
 // snapshot on connect and a fresh one on every change until the client goes away.
 // They have their own shape: no request body, no single response, and a lifetime
 // bounded by the client rather than by the handler.
-// limits:  transport only; assembling a snapshot is the read model's (-> State, chatView).
+// limits:  transport only; assembling a snapshot is the read model's (-> State, ChatView).
 package hub
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
-// handleEvents streams board state as Server-Sent Events: the current state on
+// HandleEvents streams board state as Server-Sent Events: the current state on
 // connect, then a fresh snapshot on every change, until the client disconnects.
-func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
+func (h *Hub) HandleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -29,7 +31,7 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := h.events.subscribe()
 	defer unsub()
 
-	project := h.reqProject(r) // the selected repo scopes the board's tasks
+	project := h.ReqProject(r) // the selected repo scopes the board's tasks
 	send := func() {
 		st, err := h.State(project)
 		if err != nil {
@@ -53,24 +55,24 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// chatView builds the current chatroom snapshot (roster + recent transcript).
-func (h *Hub) chatView() (ChatView, error) {
+// ChatView builds the current chatroom snapshot (roster + recent transcript).
+func (h *Hub) ChatView() (api.ChatView, error) {
 	members, err := h.chat.Members()
 	if err != nil {
-		return ChatView{}, err
+		return api.ChatView{}, err
 	}
 	log, err := h.chat.Transcript(0)
 	if err != nil {
-		return ChatView{}, err
+		return api.ChatView{}, err
 	}
-	return ChatView{Members: members, Log: log}, nil
+	return api.ChatView{Members: members, Log: log}, nil
 }
 
-// handleChatEvents streams the chatroom as Server-Sent Events: the snapshot on
+// HandleChatEvents streams the chatroom as Server-Sent Events: the snapshot on
 // connect, then a fresh one on every board change (chat included), until the
 // client disconnects. This is how the user's live views (the `chat join` CLI and
 // the TUI chat tab) receive forwarded messages — the star topology's user leg.
-func (h *Hub) handleChatEvents(w http.ResponseWriter, r *http.Request) {
+func (h *Hub) HandleChatEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -84,7 +86,7 @@ func (h *Hub) handleChatEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsub()
 
 	send := func() {
-		v, err := h.chatView()
+		v, err := h.ChatView()
 		if err != nil {
 			return
 		}

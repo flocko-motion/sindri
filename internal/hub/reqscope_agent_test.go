@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAgentOfAnotherRepoIsFound is the Agents tab in global scope: it lists the whole fleet, so
@@ -22,7 +22,7 @@ func TestAgentOfAnotherRepoIsFound(t *testing.T) {
 	// A request from a different checkout — the header is the caller's repo, not fjalar's.
 	req := httptest.NewRequest("POST", "/agent/stop", nil)
 	req.Header.Set("X-Sindri-Project", t.TempDir())
-	if got := h.agentReq(req, "fjalar"); got != "ranke-ts" {
+	if got := h.AgentReq(req, "fjalar"); got != "ranke-ts" {
 		t.Errorf("agentReq = %q, want the agent's own project ranke-ts", got)
 	}
 }
@@ -39,11 +39,11 @@ func TestOwnRepoWinsANameClash(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/agent/stop", nil)
 	req.Header.Set("X-Sindri-Project", t.TempDir())
-	own := h.reqProject(req) // registers the caller's repo under its own tag
+	own := h.ReqProject(req) // registers the caller's repo under its own tag
 	if err := h.store.For(own).PutAgent(store.Agent{Name: "dvalin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := h.agentReq(req, "dvalin"); got != own {
+	if got := h.AgentReq(req, "dvalin"); got != own {
 		t.Errorf("agentReq = %q, want the caller's own project %q", got, own)
 	}
 }
@@ -54,7 +54,7 @@ func TestUnknownAgentStaysWithTheCaller(t *testing.T) {
 	h := newHub(t)
 	req := httptest.NewRequest("POST", "/agent/stop", nil)
 	req.Header.Set("X-Sindri-Project", t.TempDir())
-	if got := h.agentReq(req, "nobody"); got != h.reqProject(req) {
+	if got := h.AgentReq(req, "nobody"); got != h.ReqProject(req) {
 		t.Errorf("agentReq = %q, want the caller's own project", got)
 	}
 }
@@ -71,7 +71,7 @@ func TestReqProjectResolvesGlobalProjectAsATagNotAPath(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/agents", nil)
 	req.Header.Set("X-Sindri-Project", api.GlobalProject)
-	if got := h.reqProject(req); got != api.GlobalProject {
+	if got := h.ReqProject(req); got != api.GlobalProject {
 		t.Errorf("reqProject = %q, want %q unchanged", got, api.GlobalProject)
 	}
 	after, err := h.store.Projects()

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // idByTitle finds a task's minted id by its title, so a test can check for it as a plain value

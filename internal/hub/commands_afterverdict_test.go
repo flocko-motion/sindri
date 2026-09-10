@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ruledReviewer registers a reviewer and gives it an assigned review of each pr, over a task named
@@ -176,7 +176,7 @@ func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.prFlow().RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
+	if err := h.PRFlow().RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
 		t.Fatalf("RejectPR: %v", err)
 	}
 	mail, _ := h.store.AllMail(0)

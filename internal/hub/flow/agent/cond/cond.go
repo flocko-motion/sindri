@@ -1,4 +1,4 @@
-// package: hub/flow/cond / cond
+// package: hub/flow/agent/cond / cond
 // type:    logic (the questions a state asks about the world)
 // job:     every condition a flow file can watch, as a value it names — the question, the topics
 // worth waking for, and nothing else. PURE: a condition is handed a gathered world and cannot

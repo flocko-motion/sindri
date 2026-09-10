@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / session
+// package: hub/flow/agent/roles/worker / session
 // type:    logic (the worker's session states, declared)
 // job:     the three things the hub does to a worker's session before handing it work — clear it,
 // switch the model under it — each a state of its own, because an event can arrive in
@@ -7,11 +7,11 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 // clearing: the session is being discarded before work arrives.
@@ -77,7 +77,7 @@ var escalated = flow.State{
 		{verb.Resolve, flow.Stay, "check your branch still merges"},
 		{verb.Revoke, flow.Stay, "withdraw a pull request you have out"},
 		{verb.Scratch, flow.Stay, "check work out into a disposable workspace"},
-		{verb.Chat, flow.Stay, "say something in the meeting room"},
+		{verb.Meeting, flow.Stay, "say something in the meeting room"},
 	},
 }
 

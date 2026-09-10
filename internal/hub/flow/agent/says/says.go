@@ -1,4 +1,4 @@
-// package: hub/flow/says / says
+// package: hub/flow/agent/says / says
 // type:    logic (what an agent is told where it stands, as identities)
 // job:     name what each state answers when the agent asks where it is. The identity here, the
 // words in the workflow — so a flow file declares what is said without carrying a paragraph of it.

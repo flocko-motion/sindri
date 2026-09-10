@@ -7,7 +7,7 @@ package task
 
 import (
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // TaskHome is the project whose backlog a caller reads. A pooled reviewer's own project holds no

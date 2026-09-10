@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // DiscardPR scraps a PR on its own, for work the user simply does not want, and releases its

@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	flowtask "github.com/flo-at/sindri/internal/hub/flow/task"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // Beat is how often the engine looks for agents whose own cadence has come due. Short against every

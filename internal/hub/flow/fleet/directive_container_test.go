@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // containerWorker seeds a worker holding feature td-EPIC and working subtask td-1, the state a

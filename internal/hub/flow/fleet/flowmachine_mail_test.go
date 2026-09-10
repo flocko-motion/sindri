@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // addUnreadMail seeds one unread message for an agent and returns its id.

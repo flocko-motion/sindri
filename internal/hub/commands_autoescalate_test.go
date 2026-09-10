@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAnInternalErrorEscalatesTheAgentItself is what vestri's blind review cost: told "try again
@@ -126,7 +126,7 @@ func TestInternalFailureDoesNotOverwriteALiveEscalation(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker"}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "my own question"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "my own question"); err != nil {
 		t.Fatalf("escalate: %v", err)
 	}
 	_, err := h.internalFailure(testProject, "dvalin", "`sindri escalate`", 1, errors.New("boom"))
@@ -151,10 +151,10 @@ func TestInternalFailureEscalatesFreshAfterAGenuineResume(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker"}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
-	if _, err := h.agentFlow().Escalate(testProject, "dvalin", "old question"); err != nil {
+	if _, err := h.AgentFlow().Escalate(testProject, "dvalin", "old question"); err != nil {
 		t.Fatalf("escalate: %v", err)
 	}
-	if err := h.agentFlow().Resume(testProject, "dvalin", "answered"); err != nil {
+	if err := h.AgentFlow().Resume(testProject, "dvalin", "answered"); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	_, err := h.internalFailure(testProject, "dvalin", "`sindri git`", 1, errors.New("boom"))

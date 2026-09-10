@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAgentTCPChannelAuth exercises the macOS agent channel end to end at the HTTP

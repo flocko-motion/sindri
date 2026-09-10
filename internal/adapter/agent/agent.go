@@ -64,7 +64,8 @@ type Agent interface {
 	// model carrying it, all from the backend's own transcript. The window comes from here because
 	// only the backend knows which model answers; a caller that assumed one retired workers with
 	// most of 1M unused. ok=false when nothing has been recorded yet.
-	ContextUsage(home string) (tokens, window int, model string, ok bool) // ModelWindow resolves a model id to its context window, ok=false when the backend does not
+	ContextUsage(home string) (tokens, window int, model string, ok bool)
+	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
 	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
 	ModelWindow(model string) (window int, ok bool)
 	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything

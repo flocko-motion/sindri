@@ -104,7 +104,7 @@ func newLintCmd() *cobra.Command {
 // lintNames are the linters, and what tells a name from a path in the arguments.
 var lintNames = map[string]bool{
 	"deadcode": true, "loc": true, "comments": true, "comment-length": true,
-	"gofmt": true, "js": true, "openspec": true, "test-home": true,
+	"gofmt": true, "js": true, "openspec": true, "test-home": true, "verb-help": true, "header-path": true,
 }
 
 // splitLintArgs reads an optional linter name then paths, so scoping needs no flag or placeholder.
@@ -182,6 +182,10 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 		return lint.Gofmt(orDot(o.paths), o.cap, o.ig, out)
 	case "test-home":
 		return lint.TestHome(orDot(o.paths), o.cap, o.ig, out)
+	case "verb-help":
+		return lint.VerbHelp(orDot(o.paths), o.cap, o.ig, out)
+	case "header-path":
+		return lint.HeaderPath(orDot(o.paths), o.cap, o.ig, out)
 	case "js":
 		return runJS(out, o)
 	case "openspec":
@@ -189,7 +193,7 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 	case "":
 		return runAll(out, o)
 	default:
-		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|gofmt|js|openspec|test-home)", which)
+		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|gofmt|js|openspec|test-home|verb-help|header-path)", which)
 	}
 }
 
@@ -234,6 +238,8 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 		}},
 		{"gofmt", func(w io.Writer) (bool, error) { return lint.Gofmt(orDot(o.paths), o.cap, o.ig, w) }},
 		{"test-home", func(w io.Writer) (bool, error) { return lint.TestHome(orDot(o.paths), o.cap, o.ig, w) }},
+		{"verb-help", func(w io.Writer) (bool, error) { return lint.VerbHelp(orDot(o.paths), o.cap, o.ig, w) }},
+		{"header-path", func(w io.Writer) (bool, error) { return lint.HeaderPath(orDot(o.paths), o.cap, o.ig, w) }},
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, o) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w, o.cap.Quiet()), nil }},
 	}

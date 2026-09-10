@@ -17,10 +17,10 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/owned"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/owned"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // Harness is the agent's BOX and nothing else: looking at it, saying something to it, resetting or

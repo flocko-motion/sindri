@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // mailListFleet seeds one project with a worker, a reviewer and a planner — the three roles `mail

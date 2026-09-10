@@ -46,7 +46,7 @@ func (s *stallwatch) sweep(context.Context) {
 			s.h.wf.Handles().Prodded.Moving(a.Project + "/" + a.Name) // moving again: the next stall is new
 			continue
 		}
-		s.h.agentFlow().NudgeStalled(a.Project, a.Name, obs, time.Since(since))
+		s.h.AgentFlow().NudgeStalled(a.Project, a.Name, obs, time.Since(since))
 	}
 }
 

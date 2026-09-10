@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // forceReapplyConflict puts wt into the exact shape a milestone reset's clashing reapply leaves

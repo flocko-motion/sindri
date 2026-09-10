@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/workspace"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 )
@@ -52,7 +52,7 @@ func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 		prompts.ReplyResolveDirty("working", true),
 		prompts.ReplyResolveDirty("submitted", false),
 		prompts.SystemPrompt("eitri", "worker", "", ""),
-		verbs.GitHelp,
+		workspace.GitHelp,
 		// The gate now records the workspace itself, so its replies are exactly where "just commit it"
 		// would creep back in — they are the ones that know a commit happened.
 		prompts.ReplyLintQueued("run-1", "abc1234", 2),

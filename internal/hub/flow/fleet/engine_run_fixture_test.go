@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // runEngine seeds a worker with a workspace, for the tests that queue a run through the machine.

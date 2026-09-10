@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestCloseTaskStampsUpdatedAt: CloseTask updates the cached row directly rather than through

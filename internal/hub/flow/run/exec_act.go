@@ -24,7 +24,7 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 

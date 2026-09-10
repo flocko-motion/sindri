@@ -15,7 +15,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	flowtask "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // statusOf is the status a state claims, and stateOf its inverse. The task's stored state IS its

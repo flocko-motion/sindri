@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/container"
-	hubagent "github.com/flo-at/sindri/internal/hub/agent"
+	hubagent "github.com/flo-at/sindri/internal/hub/harness"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // greetable seeds one idle agent in role, observed as up, with a fake runtime recording everything

@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // stillWatchdog stops the sweeping observer and leaves a still one behind, so what a test records is
@@ -38,7 +38,7 @@ func TestTheBoardReportsTheObserversFill(t *testing.T) {
 	w := stillWatchdog(t, h)
 	a := observedAgent(t, h, "dvalin", "claude-sonnet-5")
 
-	w.record(a, true, 0, agent.Observation{Runtime: "idle", Digest: "d1"})
+	w.record(a, true, 0, harness.Observation{Runtime: "idle", Digest: "d1"})
 	w.recordFill(a, fill{tokens: 120_000, window: 200_000, model: "claude-opus-5"})
 
 	view := onlyAgent(t, h)
@@ -98,7 +98,7 @@ func TestADownAgentShowsTheModelItWasStartedOn(t *testing.T) {
 
 	w.recordFill(a, fill{tokens: 1_000, window: 200_000, model: "claude-opus-5"})
 	for i := 0; i <= downStrikes; i++ {
-		w.record(a, false, 0, agent.Observation{})
+		w.record(a, false, 0, harness.Observation{})
 	}
 
 	if view := onlyAgent(t, h); view.Model != "claude-sonnet-5" {
@@ -113,7 +113,7 @@ func TestTheBoardStatusIgnoresFullness(t *testing.T) {
 	h := newHub(t)
 	w := stillWatchdog(t, h)
 	a := observedAgent(t, h, "dvalin", "")
-	w.record(a, true, 0, agent.Observation{Runtime: "idle", Digest: "d1"})
+	w.record(a, true, 0, harness.Observation{Runtime: "idle", Digest: "d1"})
 
 	w.recordFill(a, fill{tokens: 120_000, window: 200_000})
 	if view := onlyAgent(t, h); view.Status != "idle" {
@@ -136,9 +136,9 @@ func TestAFillSurvivesALivenessReading(t *testing.T) {
 	w := stillWatchdog(t, h)
 	a := observedAgent(t, h, "dvalin", "")
 
-	w.record(a, true, 0, agent.Observation{Runtime: "idle", Digest: "d1"})
+	w.record(a, true, 0, harness.Observation{Runtime: "idle", Digest: "d1"})
 	w.recordFill(a, fill{tokens: 90_000, window: 200_000, model: "claude-opus-5"})
-	w.record(a, true, 1, agent.Observation{Runtime: "working", Digest: "d2"})
+	w.record(a, true, 1, harness.Observation{Runtime: "working", Digest: "d2"})
 
 	l, _ := w.get(testProject, "dvalin")
 	if l.tokens != 90_000 || l.model != "claude-opus-5" {

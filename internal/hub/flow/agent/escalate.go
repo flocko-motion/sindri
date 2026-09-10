@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // HeldByEscalation wraps a verb's own gate with the escalation hold, asked FIRST. THE LINE IS WHAT

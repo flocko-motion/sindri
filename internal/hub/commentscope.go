@@ -9,7 +9,7 @@ package hub
 import (
 	"fmt"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // reviewerTasks is what a reviewer may comment on, newest first: the task of the review it HOLDS,
@@ -34,7 +34,7 @@ func (h *Hub) reviewerTasks(c registry.Caller) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range prs {
-		p, ok, gerr := h.store.For(h.prFlow().PRProject(c.Project, id)).GetPR(id)
+		p, ok, gerr := h.store.For(h.PRFlow().PRProject(c.Project, id)).GetPR(id)
 		if gerr != nil {
 			return nil, gerr
 		}

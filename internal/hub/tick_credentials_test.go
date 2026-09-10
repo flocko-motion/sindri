@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/observe"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
 )
 
 // seedReading seeds the watchdog's standing reading for an agent, the way a sweep would.

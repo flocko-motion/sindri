@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // joinedRoom is roomWith plus the members actually in the room, which is the state a close acts on.

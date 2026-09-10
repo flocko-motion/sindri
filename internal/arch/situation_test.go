@@ -31,18 +31,18 @@ var ownedRules = map[string]string{
 // may happen to an agent does not, and the surface is where that rule goes.
 var ruleDerivers = map[string]string{
 	// The surface itself, and the gathering that feeds it.
-	"internal/hub/situation/surface.go":   "the surface — the one home for these rules",
-	"internal/hub/situation/situation.go": "the gathering that feeds it",
+	"internal/hub/world/situation/surface.go":   "the surface — the one home for these rules",
+	"internal/hub/world/situation/situation.go": "the gathering that feeds it",
 	// The store: these are its columns.
-	"internal/hub/store/store.go":    "the roster row's own definition",
-	"internal/hub/store/agent.go":    "reads and writes those columns",
-	"internal/hub/store/reviewer.go": "the reviewer pool's own query, filtering on the column in SQL",
+	"internal/hub/world/store/store.go":    "the roster row's own definition",
+	"internal/hub/world/store/agent.go":    "reads and writes those columns",
+	"internal/hub/world/store/reviewer.go": "the reviewer pool's own query, filtering on the column in SQL",
 	// The writers: setting a flag is not deriving a rule from it.
-	"internal/hub/agent/clearcontext.go": "sets and clears the arming — its writer",
-	"internal/hub/agent/retire.go":       "sets and clears retirement — its writer",
-	"internal/hub/flowtest/reviews.go":   "the test fixture that SETS the flag, standing in for that writer",
-	"internal/hub/server.go":             "the retire endpoint's own request field, not a roster row",
-	"internal/hub/hub.go":                "SetRetired reads the prior value to spot a return to service",
+	"internal/hub/harness/clearcontext.go": "sets and clears the arming — its writer",
+	"internal/hub/harness/retire.go":       "sets and clears retirement — its writer",
+	"internal/hub/flowtest/reviews.go":     "the test fixture that SETS the flag, standing in for that writer",
+	"internal/hub/api/frontend/routes.go":  "the retire endpoint's own request field, not a roster row",
+	"internal/hub/hub.go":                  "SetRetired reads the prior value to spot a return to service",
 	// Rendering: the board carries these as fields for a front-end to show.
 	"internal/hub/state.go":    "projects the roster onto the board, flags included",
 	"internal/hub/commands.go": "renders the retirement note beside what the agent holds",
@@ -153,7 +153,7 @@ func allowedDeriver(rel string) bool {
 // spawns, dials or reads a transcript, whatever an agent's state. The situation sits on the board's
 // own path, so a query added here is paid per agent per render, times the connected clients.
 func TestASituationCostsNoRuntimeCall(t *testing.T) {
-	dir := filepath.Join(moduleRoot(t), "internal", "hub", "situation")
+	dir := filepath.Join(moduleRoot(t), "internal", "hub", "world", "situation")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)

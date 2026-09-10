@@ -11,8 +11,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/situation"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 )
 
 // StallDwell and RetryDwell are the surface's, re-exported under the names this package's callers

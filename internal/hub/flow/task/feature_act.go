@@ -11,16 +11,16 @@ package task
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/task"
-	hubtask "github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
+	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ClaimContainer assigns one package, starting its first open subtask — or, with none left,

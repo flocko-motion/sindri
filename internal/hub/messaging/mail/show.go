@@ -12,7 +12,7 @@ import (
 	"io"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // CmdShowMail prints one message by id, from any project's mailbox, to whoever asks — a wider

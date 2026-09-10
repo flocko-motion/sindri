@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // The budget, exported because these four numbers are the thing to argue about. Work-based rather

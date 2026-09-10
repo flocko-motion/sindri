@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // plannerWithTask seeds a planner and one task the user wrote, and returns the engine, the store,

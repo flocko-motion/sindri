@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // featureWorker seeds dain holding td-EPIC, with td-1 under it open or closed as the caller asks.

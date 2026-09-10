@@ -9,7 +9,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/agent/agentchan"
+	"github.com/flo-at/sindri/internal/hub/api/agents/channel"
 )
 
 // testTimeout bounds the waits for the hub to come up and for an event to arrive.
@@ -101,7 +101,7 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	// This exercises the Linux per-agent unix socket (on macOS agents use the TCP
 	// channel — see TestAgentTCPChannelAuth). AF_UNIX paths are capped ~104 chars,
 	// which a deep temp dir can exceed; skip rather than fail on that platform limit.
-	if len(agentchan.SocketPath(proj, "brokkr")) > 100 {
+	if len(channel.SocketPath(proj, "brokkr")) > 100 {
 		t.Skip("agent socket path exceeds the AF_UNIX length limit under this temp dir")
 	}
 
@@ -118,8 +118,8 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker := DialSocket(agentchan.SocketPath(proj, "brokkr"))
-	rune := DialSocket(agentchan.SocketPath(proj, "rune"))
+	worker := DialSocket(channel.SocketPath(proj, "brokkr"))
+	rune := DialSocket(channel.SocketPath(proj, "rune"))
 
 	// An idle worker's surface draws two different lines, and the difference is the point. A verb of
 	// ANOTHER role is absent outright — role isolation, so a worker learns nothing of the reviewer's

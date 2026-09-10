@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / landing
+// package: hub/flow/agent/roles/worker / landing
 // type:    logic (what a landing does to the worker that filed it, declared)
 // job:     the two states a worker passes through when a merge lands underneath it — the task it
 // held having grown into a feature, and its standing branch needing to catch up with the base its
@@ -8,10 +8,10 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (

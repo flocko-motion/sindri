@@ -2,8 +2,8 @@ package fleet
 
 import (
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/task"
-	hubtask "github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
+	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"io"
 	"os"
 	"os/exec"
@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 func TestCCType(t *testing.T) {
@@ -215,7 +215,7 @@ func TestMergeCommitIsConventional(t *testing.T) {
 
 	e := newEngine(t, st, &stubDeps{Root: root})
 	caller := registry.Caller{Project: "repo", Agent: agent, Role: "worker", HasTask: true, Phase: "working"}
-	if code, err := e.verbAct().CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
+	if code, err := e.prAct().CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)
 	}
 	runQueuedGate(t, e)

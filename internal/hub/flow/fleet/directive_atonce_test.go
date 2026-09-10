@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // answersAtOnce runs check in a goroutine and fails the test if it does not return within a couple

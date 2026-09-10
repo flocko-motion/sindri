@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/flowtest"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // idleWorkerWithOpenTask seeds a repo with one open, approved, prioritized leaf task and an idle

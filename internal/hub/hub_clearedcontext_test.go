@@ -12,8 +12,8 @@ import (
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/container"
-	hubagent "github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/store"
+	hubagent "github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // clearableRuntime fakes the tmux/podman runtime, just enough for a clear's calls to succeed with no

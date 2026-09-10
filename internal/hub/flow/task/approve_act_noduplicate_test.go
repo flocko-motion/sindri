@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // approvalWithPlanner seeds one pending task and a running planner to notify — notifyPlanners has

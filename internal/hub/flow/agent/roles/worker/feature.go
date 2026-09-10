@@ -1,4 +1,4 @@
-// package: hub/flow/roles/worker / feature
+// package: hub/flow/agent/roles/worker / feature
 // type:    logic (the worker's subtask loop, declared)
 // job:     the three states a worker holding a whole feature passes through between its children —
 // one to hand over, none left but gated, and none left at all.
@@ -7,11 +7,11 @@
 package worker
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 // The feature-holder's states.

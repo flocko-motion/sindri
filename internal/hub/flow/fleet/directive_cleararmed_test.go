@@ -8,7 +8,7 @@ package fleet
 
 import (
 	"context"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 	"testing"
 )
 

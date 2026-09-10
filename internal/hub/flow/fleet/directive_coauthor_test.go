@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // coauthorEngine seeds a coauthor beside a PR nobody has claimed, which is the shape the queue

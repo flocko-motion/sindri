@@ -19,10 +19,10 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // RunOutputCap bounds stored output the way a diff is capped (-> gitcmd.capLines) — the tail,
@@ -53,9 +53,18 @@ func newRunID() (string, error) {
 	return "run-" + hex.EncodeToString(b[:]), nil
 }
 
-// ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
-// is a separate step, triggered by the fleet's run watcher once this run reaches the front.
+// errNoCommand is what both scheduling paths answer an empty command with. The two are separate
+// operations — an agent's run snapshots the workspace and task it holds, a user's names its target
+// and runs against a copy — so what they share is this check and nothing else.
+var errNoCommand = fmt.Errorf("say what to run")
+
+// ScheduleRun queues an AGENT's command for later execution — the store row only; execution
+// (-> ExecuteRun) is a separate step, triggered by the fleet's run watcher once this run reaches
+// the front.
 func (a *Act) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
+	if command = strings.TrimSpace(command); command == "" {
+		return api.Run{}, errNoCommand
+	}
 	return a.PutQueuedRun(project, store.Run{Agent: agent, Command: command, Priority: priority, Timeout: timeout})
 }
 
@@ -64,7 +73,7 @@ func (a *Act) ScheduleRun(project, agent, command, priority, timeout string) (ap
 func (a *Act) ScheduleUserRun(project, agent, command, priority, timeout string) (api.Run, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return api.Run{}, fmt.Errorf("say what to run")
+		return api.Run{}, errNoCommand
 	}
 	workspace := "." // the repo's own checkout, when no agent is named
 	if agent = strings.TrimSpace(agent); agent != "" {

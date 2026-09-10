@@ -544,7 +544,7 @@ func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 // Log fetches an agent's recent activity-log entries (the timeline).
 func (c *HTTP) Log(name string) ([]api.Event, error) {
 	var out []api.Event
-	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
+	return out, c.get("/activity?agent="+url.QueryEscape(name), &out)
 }
 
 // StateLog fetches an agent's debug state log — every stored state write's reason, and every

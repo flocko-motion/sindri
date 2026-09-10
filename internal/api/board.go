@@ -1,7 +1,7 @@
 // package: api / board
 // type:    logic (the whole-board wire type + its badge counts)
 // job:     the board every UI renders (BoardState), the views it carries, and its
-// pure count methods — these make it satisfy hub/commands' Board interface
+// pure count methods — these make it satisfy hub/sections' Board interface
 // without either side importing the other.
 // limits:  data and pure counts only; assembling a BoardState is the hub's.
 package api

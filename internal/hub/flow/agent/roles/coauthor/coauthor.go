@@ -1,4 +1,4 @@
-// package: hub/flow/roles/coauthor / coauthor
+// package: hub/flow/agent/roles/coauthor / coauthor
 // type:    logic (the coauthor's flow, declared)
 // job:     the map of how a coauthor works, which is barely a map at all: its session IS the user's
 // seat, so what happens next is whatever they type.
@@ -6,10 +6,10 @@
 package coauthor
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (
@@ -36,7 +36,7 @@ var collab = flow.State{
 		{verb.Run, flow.Stay, "queue a slow build or test"},
 		{verb.Log, flow.Stay, "record a note"},
 		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Chat, flow.Stay, "say something in the meeting room"},
+		{verb.Meeting, flow.Stay, "say something in the meeting room"},
 		{verb.Approve, flow.Stay, "approve a pull request"},
 		{verb.Reject, flow.Stay, "send a pull request back"},
 		{verb.Escalate, Escalated, "stop on a question"},
@@ -64,7 +64,7 @@ var escalated = flow.State{
 		{verb.Git, flow.Stay, "read the changes"},
 		{verb.Run, flow.Stay, "queue a slow build or test"},
 		{verb.Log, flow.Stay, "record a note"},
-		{verb.Chat, flow.Stay, "say something in the meeting room"},
+		{verb.Meeting, flow.Stay, "say something in the meeting room"},
 	},
 }
 

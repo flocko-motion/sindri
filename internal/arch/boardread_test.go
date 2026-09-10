@@ -62,9 +62,9 @@ var boardHandles = map[string]string{
 	"h.startedAt": "the hub's start time, a value it has held since New",
 	// Pure packages: values and formatting, no I/O of any kind.
 	"api":      "wire types and the status vocabulary",
-	"commands": "resolves the board's own tabs from the board",
+	"sections": "resolves the board's own tabs from the board",
 	"store":    "row types and their helpers",
-	"agent":    "the agent package's pure helpers (see boardCalls for its service)",
+	"harness":  "the harness package's pure helpers (see boardCalls for its service)",
 	"workflow": "the workflow package's pure rules (see boardCalls for its engine)",
 	"fmt":      "formatting",
 	"strings":  "text",

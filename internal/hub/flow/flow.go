@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // State, Events and the rest are the engine's shapes bound to an agent's world, so a flow file names

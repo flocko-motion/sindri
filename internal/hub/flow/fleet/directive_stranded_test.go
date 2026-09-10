@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestAStrandedContainerIsClaimedToFinishIt is the fix for the hole a task with no live claim

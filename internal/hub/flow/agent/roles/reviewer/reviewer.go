@@ -1,4 +1,4 @@
-// package: hub/flow/roles/reviewer / reviewer
+// package: hub/flow/agent/roles/reviewer / reviewer
 // type:    logic (the reviewer's flow, declared)
 // job:     the map of how a reviewer works. It has ONE workspace, so it holds exactly one pull
 // request at a time and a second assignment is not a queue.
@@ -6,11 +6,11 @@
 package reviewer
 
 import (
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 )
 
 const (
@@ -140,7 +140,7 @@ var escalated = flow.State{
 		{verb.Fyi, flow.Stay, "one note to the user"},
 		{verb.Run, flow.Stay, "queue a slow build or test"},
 		{verb.Git, flow.Stay, "read the diff"},
-		{verb.Chat, flow.Stay, "say something in the meeting room"},
+		{verb.Meeting, flow.Stay, "say something in the meeting room"},
 	},
 }
 

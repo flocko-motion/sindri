@@ -9,7 +9,7 @@ package task
 import (
 	"fmt"
 
-	"github.com/flo-at/sindri/internal/hub/task"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // ReopenTask restores a closed sindri-owned task to "open". Refused for a gh-/os- id, whose status

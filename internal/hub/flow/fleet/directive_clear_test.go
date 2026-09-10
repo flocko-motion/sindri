@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // reviewerWithUnclaimedReview seeds a repo with one open, unclaimed review and a free reviewer —

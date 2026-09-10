@@ -1,7 +1,7 @@
 // package: api / section
 // type:    logic (a wire type)
 // job:     one dashboard section as resolved for a client: a key, a title, and its
-// badge count already computed against a board. hub/commands keeps the
+// badge count already computed against a board. hub/sections keeps the
 // registry that computes Count (a func can't cross the wire); this is what
 // crosses once the hub has run it.
 // limits:  data only.
