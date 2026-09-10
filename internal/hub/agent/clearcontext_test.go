@@ -27,6 +27,7 @@ func (clearTestDeps) ProjectRoot(string) string                   { return "" }
 func (clearTestDeps) ProjectConfig(string) (config.Config, error) { return config.Config{}, nil }
 func (clearTestDeps) ArchitectureDoc(string) string               { return "" }
 func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
+func (clearTestDeps) SetTaskStatus(_, _, _ string) error          { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
 func (clearTestDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (clearTestDeps) ForgetFill(_, _ string)                      {}

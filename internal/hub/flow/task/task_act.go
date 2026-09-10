@@ -313,7 +313,7 @@ func (a *Act) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, error)
 }
 
 // ClaimNext hands a worker the best-rated unit in a project (-> nextUp): the claim comes FIRST, so
-// holding the work protects it while preparation (a model switch, a clear, or compaction) runs.
+// holding the work protects it while preparation (a model switch, else a clear) runs.
 func (a *Act) ClaimNext(ctx context.Context, project, agent string) (string, bool, error) {
 	// Retired by a human: wound down deliberately, and the gate is here rather than at the task
 	// queries so it holds however the work would have arrived.

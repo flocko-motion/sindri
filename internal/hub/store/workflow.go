@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS agent_state (
   branch    TEXT NOT NULL DEFAULT '',
   phase     TEXT NOT NULL DEFAULT 'idle',  -- one of the declared phases (-> hub/flow)
   -- When the phase was last written, UTC RFC3339 ('' = never). A long-running action IS a phase
-  -- (assigning, clearing, compacting, retiering), and one with no exit condition anybody observes is
+  -- (assigning, clearing, retiering), and one with no exit condition anybody observes is
   -- a stuck agent — this is what the watcher measures against (-> hub/flow's busy states).
   phase_since TEXT NOT NULL DEFAULT '',
   container TEXT NOT NULL DEFAULT '',      -- container task held in the collaborative workflow ('' = structured)

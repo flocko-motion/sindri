@@ -12,7 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
@@ -42,7 +43,7 @@ func (h *Hub) registry() *registry.Registry {
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Blocked: heldByEscalation("next", func(c registry.Caller) string {
+			Blocked: agentflow.HeldByEscalation("next", func(c registry.Caller) string {
 				if c.HasTask {
 					return "You already hold work — run `sindri` to be told what to do with it."
 				}
@@ -54,10 +55,10 @@ func (h *Hub) registry() *registry.Registry {
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("submit", landingBlocked("submit")), Run: h.prFlow().CmdSubmit},
+			Blocked: agentflow.HeldByEscalation("submit", landingBlocked("submit")), Run: h.prFlow().CmdSubmit},
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("contribute", landingBlocked("contribute")), Run: h.agentFlow().CmdContribute},
+			Blocked: agentflow.HeldByEscalation("contribute", landingBlocked("contribute")), Run: h.agentVerbs().CmdContribute},
 		// The author's own reject: it withdraws its PR to keep working. Available exactly while one is
 		// out, which is the state where realising something is missing had no way out but somebody
 		// else's verdict.
@@ -76,15 +77,15 @@ func (h *Hub) registry() *registry.Registry {
 		// The agents have no git of their own — that isolation is the point. So the hub runs a
 		// curated read/restore subset for them (-> fleet.CmdGit): without it, an agent cannot
 		// see what it changed or put a file back, and reconstructs both from memory.
-		registry.Command{Name: "git", Help: roles.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.agentFlow().CmdGit},
+		registry.Command{Name: "git", Help: verbs.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.agentVerbs().CmdGit},
 		// The coauthor's second workspace: /workspace is the user's checkout, which is no place to
 		// check out somebody else's branch, so the hub puts it in a tree of the coauthor's own.
-		registry.Command{Name: "scratch", Help: roles.ScratchHelp, Roles: []string{"coauthor"}, Run: h.agentFlow().CmdScratch},
+		registry.Command{Name: "scratch", Help: verbs.ScratchHelp, Roles: []string{"coauthor"}, Run: h.agentVerbs().CmdScratch},
 		// Not for a planner: its workspace is read-only, so there is nothing here for it to run.
 		registry.Command{Name: "run", Help: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
 			Roles: []string{"worker", "reviewer", "coauthor"}, Run: h.runFlow().CmdScheduleRun},
 		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("checkpoint", func(c registry.Caller) string {
+			Blocked: agentflow.HeldByEscalation("checkpoint", func(c registry.Caller) string {
 				if c.Container == "" {
 					return "Checkpoint records one subtask of a feature, and you hold a task of your own — " +
 						"`sindri submit \"<summary>\"` puts it up for review when it's done."
@@ -105,7 +106,7 @@ func (h *Hub) registry() *registry.Registry {
 		// escalation hold has to reach it. Held open, an escalated planner could ship a PR built on the
 		// guess it had just said it would not make.
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"},
-			Blocked: heldByEscalation("openspec", nil), Run: h.prFlow().CmdOpenspec},
+			Blocked: agentflow.HeldByEscalation("openspec", nil), Run: h.prFlow().CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.taskFlow().CmdState},
 		// A planner plans for people, so it may see who they are — in ITS repo. Visibility is local
 		// while addressing is global: mail takes any name, but only ones the user has given it.
@@ -134,21 +135,21 @@ func (h *Hub) registry() *registry.Registry {
 		// One verb, three acts (-> CmdApprove): a reviewer's opens the merge gate, a planner's is an
 		// optional badge beside it, a coauthor's is a full verdict on a PR it can already diff and lint.
 		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
-			Roles: []string{"reviewer", "planner", "coauthor"}, Blocked: heldByEscalation("approve", nil), Run: h.prFlow().CmdApprove},
+			Roles: []string{"reviewer", "planner", "coauthor"}, Blocked: agentflow.HeldByEscalation("approve", nil), Run: h.prFlow().CmdApprove},
 		// The verb, never the queue: nothing assigns a coauthor a review (-> ReviewerAssignable).
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer", "coauthor"},
-			Blocked: heldByEscalation("reject", nil), Run: h.prFlow().CmdReject},
+			Blocked: agentflow.HeldByEscalation("reject", nil), Run: h.prFlow().CmdReject},
 		// Either side of a stop only the user can end, open to every role — any agent can meet a
 		// decision that is not its to make. Escalate stays open while escalated: a badly-put
 		// question has to be re-puttable.
-		registry.Command{Name: "escalate", Help: escalateHelp, Run: h.cmdEscalate},
-		registry.Command{Name: "resume", Help: resumeHelp,
+		registry.Command{Name: "escalate", Help: agentflow.EscalateHelp, Run: h.agentFlow().CmdEscalate},
+		registry.Command{Name: "resume", Help: agentflow.ResumeHelp,
 			Blocked: func(c registry.Caller) string {
 				if c.Escalation == "" {
 					return "You have no escalation to clear — `sindri` tells you where you are."
 				}
 				return ""
-			}, Run: h.cmdResume},
+			}, Run: h.agentFlow().CmdResume},
 		// One short note to the user, against a budget the help states up front: known scarcity selects
 		// better than a cap discovered by hitting it. Not the coauthor — it is in the room already.
 		registry.Command{Name: "fyi", Help: prompts.FyiHelp(prompts.NotesPerClaim),
@@ -350,7 +351,7 @@ func (h *Hub) internalFailure(project, name, what string, exit int, err error) (
 	}
 	live, _ := h.store.For(project).GetState(name)
 	if live.Escalation == "" {
-		if _, eerr := h.Escalate(project, name, reason); eerr != nil {
+		if _, eerr := h.agentFlow().Escalate(project, name, reason); eerr != nil {
 			fmt.Fprintf(os.Stderr, "hub: escalating %q after %s failed: %v\n", name, what, eerr)
 			// Escalate writes state FIRST (escalate.go): a later step failing still leaves it set, so
 			// a re-read — not the in-memory reason — is what actually reflects the truth.

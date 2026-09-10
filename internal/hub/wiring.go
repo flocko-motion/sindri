@@ -70,10 +70,6 @@ func (x harness) Clear(ctx context.Context, project, name string) error {
 	return x.h.agents.Clear(ctx, project, name)
 }
 
-func (x harness) Compact(ctx context.Context, project, name string) error {
-	return x.h.agents.Compact(ctx, project, name)
-}
-
 func (x harness) SetModel(ctx context.Context, project, name, model string) error {
 	return x.h.agents.SetModel(ctx, project, name, model)
 }
@@ -93,10 +89,6 @@ func (x harness) ModelMatches(want, detected string) bool {
 	return x.h.agents.ModelMatches(want, detected)
 }
 
-func (x harness) CompactionThreshold(window int) int {
-	return x.h.agents.CompactionThreshold(window)
-}
-
 // agentDeps adapts the hub to agent.Deps.
 type agentDeps struct{ h *Hub }
 
@@ -106,6 +98,10 @@ func (d agentDeps) ProjectRoot(project string) string         { return d.h.proje
 func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.architectureDoc(project) }
 func (d agentDeps) RefreshTask(project, id string) error {
 	return d.h.taskFlow().RefreshTask(project, id)
+}
+
+func (d agentDeps) SetTaskStatus(project, id, want string) error {
+	return d.h.prFlow().SetStatus(project, id, want)
 }
 func (d agentDeps) Rehydrate(project, name string) { d.h.rehydrate(project, name) }
 
@@ -254,7 +250,7 @@ func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
 }
 
 func (d workflowDeps) Escalate(project, name, question string) (string, error) {
-	return d.h.Escalate(project, name, question)
+	return d.h.agentFlow().Escalate(project, name, question)
 }
 
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).

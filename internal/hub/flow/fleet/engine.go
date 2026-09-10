@@ -9,8 +9,9 @@ package fleet
 
 import (
 	"context"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 
@@ -62,10 +63,11 @@ func (e *Engine) Handles() *core.Core { return e.Core }
 
 // prAct, roleAct and taskAct are the acting halves of the flows a still-unmoved verb reaches into.
 // Built per call: they hold nothing of their own beyond the handles below them.
-func (e *Engine) prAct() *prflow.Act     { return prflow.New(e.Core) }
-func (e *Engine) roleAct() *roles.Act    { return roles.New(e.Core) }
-func (e *Engine) taskAct() *taskflow.Act { return taskflow.New(e.Core) }
-func (e *Engine) runAct() *runflow.Act   { return runflow.New(e.Core) }
+func (e *Engine) prAct() *prflow.Act      { return prflow.New(e.Core) }
+func (e *Engine) roleAct() *agentflow.Act { return agentflow.New(e.Core) }
+func (e *Engine) verbAct() *verbs.Act     { return verbs.New(e.Core) }
+func (e *Engine) taskAct() *taskflow.Act  { return taskflow.New(e.Core) }
+func (e *Engine) runAct() *runflow.Act    { return runflow.New(e.Core) }
 
 // Gated installs the submit path's quality gates on the engine's handles, chainable alongside New.
 // An engine with none runs no gate.

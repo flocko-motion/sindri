@@ -7,8 +7,8 @@ package task
 
 import (
 	"github.com/flo-at/sindri/internal/hub/core"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
 	"github.com/flo-at/sindri/internal/hub/flow/pr"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
 )
 
 // Act performs what a task's flow decides. Named for what it does, and separate from the map so the
@@ -23,4 +23,4 @@ func (a *Act) pr() *pr.Act { return pr.New(a.Core) }
 
 // roles is the acting half of an agent's own flow: handing work over prepares the session it
 // lands in, and that preparation is the agent's business rather than the task's.
-func (a *Act) roles() *roles.Act { return roles.New(a.Core) }
+func (a *Act) roles() *agentflow.Act { return agentflow.New(a.Core) }

@@ -1,7 +1,7 @@
 package hub
 
 import (
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
 	"testing"
 	"time"
 
@@ -47,7 +47,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	// Backdate the spell past the dwell: now it is a stall.
 	h.watch.mu.Lock()
 	l := h.watch.obs[agentKey{"proj", "dvalin"}]
-	l.stillSince = time.Now().Add(-roles.StallDwell - time.Minute)
+	l.stillSince = time.Now().Add(-agentflow.StallDwell - time.Minute)
 	h.watch.obs[agentKey{"proj", "dvalin"}] = l
 	h.watch.mu.Unlock()
 
@@ -55,7 +55,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	if !stalled {
 		t.Errorf("a worker whose screen stood still for %v past the dwell should be stalled", stillFor)
 	}
-	if stillFor < roles.StallDwell {
+	if stillFor < agentflow.StallDwell {
 		t.Errorf("stillFor should report the whole spell, got %v", stillFor)
 	}
 	// The same observation, on a phase that exists to wait, is not a stall.
@@ -120,7 +120,7 @@ func standStill(t *testing.T, w *watchdog, project, name string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	l := w.obs[agentKey{project, name}]
-	l.stillSince = time.Now().Add(-roles.StallDwell - time.Minute)
+	l.stillSince = time.Now().Add(-agentflow.StallDwell - time.Minute)
 	w.obs[agentKey{project, name}] = l
 }
 

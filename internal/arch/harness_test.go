@@ -50,7 +50,7 @@ func TestOnlyTheRunQueueNamesTheRuntime(t *testing.T) {
 	const runtime = `"github.com/flo-at/sindri/internal/container"`
 	seen := 0
 	for _, dir := range []string{"internal/hub/flow/fleet", "internal/hub/situation",
-		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/roles"} {
+		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)
@@ -161,7 +161,7 @@ func TestNoPaneWordIsMatchedInTheHub(t *testing.T) {
 	}
 	files, hits := 0, 0
 	for _, dir := range []string{"internal/hub", "internal/hub/flow/fleet", "internal/hub/situation",
-		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/roles", "internal/hub/core"} {
+		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent", "internal/hub/core"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)

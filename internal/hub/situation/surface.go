@@ -1,6 +1,6 @@
 // package: hub/situation / surface
 // job:     derive, from one situation, everything the hub may do to that agent — hand it work,
-// nudge it toward some, compact or clear its session, reclaim its pod, wake it — each carrying the
+// nudge it toward some, clear its session, reclaim its pod, wake it — each carrying the
 // reason it is refused. The one home for these rules, so no two callers can answer differently.
 // type:    logic (what is allowed, decided once)
 // limits:  the derivation only; performing any of it belongs to whoever asked.
@@ -26,7 +26,6 @@ const RetryDwell = time.Minute
 type Surface struct {
 	Assign  string // hand it work it does not have
 	Nudge   string // push it toward work it could claim
-	Compact string // summarise its session away
 	Clear   string // discard its session
 	Reclaim string // take its pod back
 	Wake    string // push it anything at all
@@ -49,7 +48,6 @@ func (s Situation) Allowed() Surface {
 	return Surface{
 		Assign:    s.assignRefusal(wake),
 		Nudge:     s.nudgeRefusal(wake),
-		Compact:   s.resetRefusal(),
 		Clear:     s.resetRefusal(),
 		Reclaim:   s.reclaimRefusal(),
 		Wake:      wake,
@@ -138,7 +136,7 @@ func (s Situation) AtLeafBoundary() bool { return Allows(s.resetRefusal()) }
 // ALONE, unlike Reclaim: a retired agent holding nothing is still empty-handed.
 func (s Situation) HoldsNothing() bool { return Allows(s.holdsRefusal()) }
 
-// resetRefusal is why a clear or a compaction would cut into something. A caller inside an
+// resetRefusal is why a clear would cut into something. A caller inside an
 // assignment it has just claimed does not ask: it knows what it put there.
 func (s Situation) resetRefusal() string {
 	if s.Task != "" {

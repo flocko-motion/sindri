@@ -8,7 +8,6 @@ package agent
 
 import (
 	"io"
-	"math"
 )
 
 // State is what the agent tool is doing now, not sindri's workflow phase.
@@ -65,12 +64,7 @@ type Agent interface {
 	// model carrying it, all from the backend's own transcript. The window comes from here because
 	// only the backend knows which model answers; a caller that assumed one retired workers with
 	// most of 1M unused. ok=false when nothing has been recorded yet.
-	ContextUsage(home string) (tokens, window int, model string, ok bool)
-	// CompactionThreshold is the token count above which a session filling window tokens is worth
-	// compacting — from the same backend ContextUsage's window came from, since only it knows the
-	// shape of its own context-management economics.
-	CompactionThreshold(window int) int
-	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
+	ContextUsage(home string) (tokens, window int, model string, ok bool) // ModelWindow resolves a model id to its context window, ok=false when the backend does not
 	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
 	ModelWindow(model string) (window int, ok bool)
 	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything
@@ -124,9 +118,6 @@ func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
 // ContextUsage reports the wired backend's context size, window and model for the session under home.
 func ContextUsage(home string) (int, int, string, bool) { return active.ContextUsage(home) }
 
-// CompactionThreshold reports the wired backend's compaction threshold for a window this size.
-func CompactionThreshold(window int) int { return active.CompactionThreshold(window) }
-
 // ModelWindow resolves model to its window via the wired backend.
 func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
 
@@ -158,8 +149,6 @@ func (noop) RestageCredentials(string) (bool, error) { return false, nil }
 func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 
 func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }
-
-func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure
 
 func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised
 

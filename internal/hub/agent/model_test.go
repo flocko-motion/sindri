@@ -12,7 +12,7 @@ import (
 // TestSetModelRefusesAnUnknownModel: a model the backend's window table doesn't recognise is one
 // whose fullness (and compaction threshold) the hub cannot judge — refused outright, never stored.
 func TestSetModelRefusesAnUnknownModel(t *testing.T) {
-	s, _ := compactFixture(t)
+	s, _ := modelFixture(t)
 	if err := s.SetModel(t.Context(), "proj", "durin", "some-model-nobody-listed"); err == nil {
 		t.Fatal("SetModel accepted a model with no known window")
 	}
@@ -54,7 +54,7 @@ func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 // rather than through a first SetModel call, so this test isolates the repeat from the live
 // switch a genuine change would trigger.
 func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
-	s, f := compactFixture(t)
+	s, f := modelFixture(t)
 	a, _, err := s.store.For("proj").GetAgent("durin")
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 // switch runs against the very context it was meant to drop. The switch waits for the session to
 // report itself empty, which is the clear having happened rather than time having passed.
 func TestSetModelClearsBeforeItSwitches(t *testing.T) {
-	s, f := compactFixture(t)
+	s, f := modelFixture(t)
 	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 	// The clear takes the way a real one does — the transcript it leaves reports nothing — at the one
 	// moment that proves the switch waited for it: while /clear is the only thing sent.
@@ -121,7 +121,7 @@ func TestSetModelClearsBeforeItSwitches(t *testing.T) {
 // TestSetModelSkipsClearingAFreshSession: no recorded usage means nothing has been said yet, so
 // there is nothing for /clear to do — the switch goes straight in.
 func TestSetModelSkipsClearingAFreshSession(t *testing.T) {
-	s, f := compactFixture(t)
+	s, f := modelFixture(t)
 
 	if err := s.SetModel(t.Context(), "proj", "durin", "claude-opus-5"); err != nil {
 		t.Fatalf("SetModel: %v", err)

@@ -356,7 +356,7 @@ const FinishNote = "\n\nWork this through to its end without stopping. Nothing o
 	"`sindri escalate \"<what needs deciding>\"` puts the question on the record and marks you as " +
 	"waiting on them. Those are the two endings; going quiet is not a third."
 
-// ToolingBlock rides the directive, never the durable brief: a clear or compaction erases the
+// ToolingBlock rides the directive, never the durable brief: a clear erases the
 // brief's mention outright, while a directive is re-served (-> fireClear) the moment work resumes.
 func ToolingBlock() string {
 	return "\n\nTooling you already have:\n- " + strings.Join(toolingLines, "\n- ")
@@ -566,7 +566,6 @@ var busyWords = map[string]string{
 	"worker/assigning":       "Work is being handed to you",
 	"worker/picking-subtask": "Your next subtask is being handed to you",
 	"worker/clearing":        "Your session is being cleared",
-	"worker/compacting":      "Your session is being compacted",
 	"worker/retiering":       "Your model is being switched for the work coming",
 	"worker/submitting":      "Your submission is going through the gate",
 	"worker/releasing":       "The feature you held has landed; letting go of it",

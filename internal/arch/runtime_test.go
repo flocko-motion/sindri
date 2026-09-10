@@ -72,10 +72,10 @@ var declaredAgentProbers = map[string]string{
 	"internal/hub/agent/runtime.go": "the probe mechanism itself — these methods call each other here",
 	"internal/hub/agent/lifecycle.go": "the launch-wait loop — a bounded one-shot poll for a pod it " +
 		"just started, not a tick",
-	// Compact and SetModel act on the one agent making (or receiving) the request — the assignment
+	// SetModel acts on the one agent making (or receiving) the request — the assignment
 	// gate and an explicit human model change, neither a sweep over the roster.
-	"internal/hub/agent/compact.go#Compact": "checked immediately before compacting — the caller's own assignment gate",
-	"internal/hub/agent/model.go#SetModel":  "checked immediately before an explicit model change",
+
+	"internal/hub/agent/model.go#SetModel": "checked immediately before an explicit model change",
 	// The fleet.Deps/agent.Deps seam itself: AgentAlive here IS the pass-through
 	// fleet.Deps.AgentAlive is documented to be, not a caller of it.
 	"internal/hub/wiring.go": "the fleet.Deps/agent.Deps seam — AgentAlive here is the wiring, not a caller",

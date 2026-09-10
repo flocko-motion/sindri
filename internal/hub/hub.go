@@ -11,8 +11,9 @@ package hub
 import (
 	"context"
 	"fmt"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/prompts"
@@ -222,13 +223,17 @@ func (h *Hub) Close() error {
 }
 
 // agentFlow is the acting half of an agent's flow, over the hub's own handles.
-func (h *Hub) agentFlow() *roles.Act { return roles.New(h.wf.Handles()) }
+func (h *Hub) agentFlow() *agentflow.Act { return agentflow.New(h.wf.Handles()) }
 
 // prFlow is the acting half of a pull request's flow, over the hub's own handles.
 func (h *Hub) prFlow() *prflow.Act { return prflow.New(h.wf.Handles()) }
 
 // runFlow is the acting half of a queued run's flow, over the hub's own handles.
 func (h *Hub) runFlow() *runflow.Act { return runflow.New(h.wf.Handles()) }
+
+// agentVerbs is the surface an agent TYPES at, over the hub's own handles — separate from the
+// actions its map runs on its behalf (-> agentFlow).
+func (h *Hub) agentVerbs() *verbs.Act { return verbs.New(h.wf.Handles()) }
 
 // taskFlow is the acting half of a task's flow, over the hub's own handles. Built per call: it holds
 // nothing of its own, and a field would be a second place for the handles to live.

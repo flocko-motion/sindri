@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/flow"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
-	"github.com/flo-at/sindri/internal/hub/flow/says"
 )
 
 // speak renders one state's Says into the agent's own words. A speech with no words here is a loud

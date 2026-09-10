@@ -8,6 +8,7 @@ package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/server"
 	"net/http"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -31,7 +32,7 @@ var globalRoutes = map[string]bool{
 func requireProject(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !globalRoutes[r.URL.Path] && r.Header.Get("X-Sindri-Project") == "" {
-			writeJSON(w, nil, fmt.Errorf("missing repo context (X-Sindri-Project) — run this inside a repo"))
+			server.WriteJSON(w, nil, fmt.Errorf("missing repo context (X-Sindri-Project) — run this inside a repo"))
 			return
 		}
 		next.ServeHTTP(w, r)

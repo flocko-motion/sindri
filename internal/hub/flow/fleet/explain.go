@@ -8,7 +8,7 @@ package fleet
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/flow/says"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
 	"github.com/flo-at/sindri/internal/hub/task"
 
 	"github.com/flo-at/sindri/internal/api"

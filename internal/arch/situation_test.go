@@ -40,6 +40,7 @@ var ruleDerivers = map[string]string{
 	// The writers: setting a flag is not deriving a rule from it.
 	"internal/hub/agent/clearcontext.go": "sets and clears the arming — its writer",
 	"internal/hub/agent/retire.go":       "sets and clears retirement — its writer",
+	"internal/hub/flowtest/reviews.go":   "the test fixture that SETS the flag, standing in for that writer",
 	"internal/hub/server.go":             "the retire endpoint's own request field, not a roster row",
 	"internal/hub/hub.go":                "SetRetired reads the prior value to spot a return to service",
 	// Rendering: the board carries these as fields for a front-end to show.
@@ -48,7 +49,7 @@ var ruleDerivers = map[string]string{
 	// Read off the SITUATION, which is the sanctioned carrier — the fact, for a caller that needs the
 	// fact rather than a rule: which armed clear to fire, and which directive a retired agent gets.
 	"internal/hub/core/core.go":              "reads both off the situation and hands the FACT on — the one place either is read",
-	"internal/hub/flow/roles/session_act.go": "reads ClearArmed off the situation, to fire the clear it names",
+	"internal/hub/flow/agent/session_act.go": "reads ClearArmed off the situation, to fire the clear it names",
 	"internal/hub/flow/task/task_act.go":     "reads Retired off the situation, to serve DirRetired",
 	"internal/hub/flow/pr/reviewer_act.go":   "reads Retired off the situation, to skip a parked reviewer",
 	"internal/hub/flow/fleet/flowdo.go":      "takes the arming BACK once the clear has answered it — its writer, not a second decider",
@@ -60,7 +61,7 @@ var ruleDerivers = map[string]string{
 	// where it leads is the map's. The surface's own wakeRefusal mirrors these maps, and now that
 	// they are declared data that mirroring is checkable rather than remembered (-> hub/flow).
 	"internal/hub/flow/cond":  "the facts themselves, as conditions a map watches",
-	"internal/hub/flow/roles": "the maps that say where each fact leads",
+	"internal/hub/flow/agent": "the maps that say where each fact leads",
 	// The front-ends render them; a rule they applied themselves is what AgentView.NeedsUser exists
 	// to prevent, and importguard_test.go keeps them from reaching the surface anyway.
 	"internal/ui":  "front-ends render the flags they are given",

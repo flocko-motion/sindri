@@ -36,10 +36,10 @@ type Harness interface {
 	// Say puts a message to the agent the way d asks: mail keeps it until read, a push types it in
 	// now (-> delivery.go). It carries out what it is given and reports what happened.
 	Say(project, name, text string, d mail.Delivery) error
-	// Clear, Compact and SetModel reset or steer the session, each blocking until it takes effect or
-	// times out (-> agent-runtime's blocking-command contract).
+	// Clear and SetModel reset or steer the session, each blocking until it takes effect or times
+	// out (-> agent-runtime's blocking-command contract). There is no compacting: a session worth
+	// resetting is cleared, and one that is not is left alone.
 	Clear(ctx context.Context, project, name string) error
-	Compact(ctx context.Context, project, name string) error
 	SetModel(ctx context.Context, project, name, model string) error
 	// Interrupt aborts whatever the session is doing (ESC), so a notice lands on an idle prompt
 	// rather than queuing behind work.
@@ -48,12 +48,10 @@ type Harness interface {
 	Start(project, name string) error
 	// Container names an agent's box.
 	Container(project, name string) string
-	// ModelMatches and CompactionThreshold are the BACKEND's own knowledge of its models: whether two
-	// ids name one model, and what fill is worth compacting for a window. Here rather than on Deps
-	// because only the thing running the session knows either — the hub's POLICY about models, which
-	// model a difficulty tier deserves, sits on Deps instead (-> tasks.md 3.2).
+	// ModelMatches is the BACKEND's own knowledge of its models: whether two ids name one. Here
+	// rather than on Deps because only the thing running the session knows it — the hub's POLICY
+	// about models, which model a difficulty tier deserves, sits on Deps instead (-> tasks.md 3.2).
 	ModelMatches(want, detected string) bool
-	CompactionThreshold(window int) int
 }
 
 // Deps is the seam back into the rest of the hub: the project's facts, the board, the task thread.

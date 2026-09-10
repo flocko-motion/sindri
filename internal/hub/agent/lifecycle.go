@@ -13,7 +13,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verbs"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"log"
@@ -226,10 +226,11 @@ func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	// Release the task so it isn't stranded in_progress with no owner. Only a task sindri owns has
-	// a status to release; a gh-/os- item's is inferred from agent_state.
-	if st, _ := ps.GetState(name); ps.OwnsTask(st.Task) {
-		if err := ps.SetOwnedStatus(st.Task, "open"); err != nil {
+	// Release the task so it isn't stranded in_progress with no owner. WHERE that status lives is
+	// asked, never branched on here: this was the fourth site to grow its own "if OwnsTask", which
+	// is exactly the shape that left finished openspec work reading open.
+	if st, _ := ps.GetState(name); st.Task != "" {
+		if err := s.deps.SetTaskStatus(project, st.Task, "open"); err != nil {
 			log.Printf("hub: reopen %s on delete of %s: %v", st.Task, name, err)
 		}
 		_ = s.deps.RefreshTask(project, st.Task)
@@ -248,7 +249,7 @@ func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	case a.Workspace != ".":
 		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
 	default:
-		_ = git.WorktreeRemove(root, filepath.Join(root, roles.ScratchWorktree(name)))
+		_ = git.WorktreeRemove(root, filepath.Join(root, verbs.ScratchWorktree(name)))
 	}
 	if err := ps.DeleteAgent(name); err != nil {
 		return err
@@ -388,7 +389,7 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 	if a.Role == "coauthor" {
 		// A coauthor's /workspace IS the user's checkout (wt == repo root), so there is no isolated
 		// worktree to add — only its scratch tree (-> CmdScratch), kept as it was on a relaunch.
-		if err := git.WorktreeAdd(root, filepath.Join(root, roles.ScratchWorktree(name)), "HEAD"); err != nil {
+		if err := git.WorktreeAdd(root, filepath.Join(root, verbs.ScratchWorktree(name)), "HEAD"); err != nil {
 			return err
 		}
 		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
@@ -525,7 +526,7 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 			return err
 		}
 	}
-	mounts := append(workspaceMounts(a.Role, wt, paths.HiddenDir(), filepath.Join(root, roles.ScratchWorktree(name))),
+	mounts := append(workspaceMounts(a.Role, wt, paths.HiddenDir(), filepath.Join(root, verbs.ScratchWorktree(name))),
 		// The agent's own socket — its sole channel to the hub, its identity. Mount the
 		// socket DIRECTORY (not the file) so the agent survives a hub restart, which
 		// recreates the socket file with a new inode.

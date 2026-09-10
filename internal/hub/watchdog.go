@@ -469,7 +469,7 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 }
 
 // forgetFill drops one agent's fill: a window of 0 is the unknown every reader already handles, and
-// the next sweep measures again. For the moment a clear or a compact makes the last reading false.
+// the next sweep measures again. For the moment a clear makes the last reading false.
 func (w *watchdog) forgetFill(project, name string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

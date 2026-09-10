@@ -16,7 +16,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/flow"
-	"github.com/flo-at/sindri/internal/hub/flow/act"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -29,7 +29,6 @@ func (e *Engine) doers() map[string]machine.Doer[flow.World] {
 		act.PickWork.Name:    e.doPickWork,
 		act.PickSubtask.Name: e.doPickSubtask,
 		act.Clear.Name:       e.doClear,
-		act.Compact.Name:     e.doCompact,
 		act.Retier.Name:      e.doRetier,
 		act.Yield.Name:       e.doYield,
 		act.Release.Name:     e.doRelease,
@@ -103,15 +102,6 @@ func (e *Engine) doClear(ctx context.Context, w flow.World) (flow.Outcome, error
 		return act.Failed, nil
 	}
 	return act.Done, e.Harness.Say(w.Project, w.Name, prompts.MsgKickoff, mail.PushOnly)
-}
-
-// doCompact condenses the session rather than dropping it.
-func (e *Engine) doCompact(ctx context.Context, w flow.World) (flow.Outcome, error) {
-	if err := e.Harness.Compact(ctx, w.Project, w.Name); err != nil {
-		_ = e.Store.For(w.Project).Log(w.Name, "compact-failed", err.Error())
-		return act.Failed, nil
-	}
-	return act.Done, nil
 }
 
 // doRetier switches the model under the agent for the tier of the work coming. The switch clears the

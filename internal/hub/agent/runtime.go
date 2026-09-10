@@ -135,10 +135,6 @@ func (s *Service) SampleContext(project, name string) (tokens, window int, model
 	return t, w, m, found
 }
 
-// CompactionThreshold reports the token count above which a session filling window tokens is worth
-// compacting, from the wired backend's own formula for the model that window belongs to.
-func (s *Service) CompactionThreshold(window int) int { return agentport.CompactionThreshold(window) }
-
 // ModelWindow resolves model to its context window via the wired backend, ok=false when it is not
 // recognised — the check a chosen model must pass before an agent is started on it.
 func (s *Service) ModelWindow(model string) (int, bool) { return agentport.ModelWindow(model) }
@@ -187,7 +183,7 @@ func (s *Service) recordedModel(project, name string) string {
 
 // ForgetContext drops every standing reading of name's context — this package's memo and the hub's
 // own sample. For the one caller that KNOWS the previous measurement is now wrong because it just
-// invalidated it: clearing or compacting a session (-> ClearContext, Compact).
+// invalidated it: clearing a session (-> ClearContext).
 //
 // Both stores, not a shorter TTL: the reading survived the very act that made it false once before,
 // telling a just-cleared agent it was still full. The board reads the sample, the gate reads the

@@ -7,6 +7,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/server"
 	"net/http"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -17,36 +18,36 @@ import (
 func (h *Hub) runRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /runs", func(w http.ResponseWriter, r *http.Request) {
 		runs, err := h.runFlow().FleetRuns() // fleet-wide, matching the TUI board — not cwd-scoped
-		writeJSON(w, runs, err)
+		server.WriteJSON(w, runs, err)
 	})
 	mux.HandleFunc("GET /run", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		d, err := h.runFlow().RunInfo(h.runFlow().RunProject(h.reqProject(r), id), id)
-		writeJSON(w, d, err)
+		server.WriteJSON(w, d, err)
 	})
 	// The user queueing a run, into the same single slot an agent's goes into — a human wanting a
 	// suite run otherwise has to ask an agent or run it outside the queue, which is the
 	// uncoordinated concurrency the queue exists to prevent.
 	mux.HandleFunc("POST /run/new", func(w http.ResponseWriter, r *http.Request) {
 		var req api.ScheduleRunReq
-		if !decode(w, r, &req) {
+		if !server.Decode(w, r, &req) {
 			return
 		}
 		run, err := h.runFlow().ScheduleUserRun(h.reqProject(r), req.Agent, req.Command, req.Priority, req.Timeout)
-		writeJSON(w, run, err)
+		server.WriteJSON(w, run, err)
 	})
 	mux.HandleFunc("POST /run/cancel", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the run id.
-		if !decode(w, r, &req) {
+		if !server.Decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"cancelled"}, h.runFlow().CancelRun(detached(r), h.runFlow().RunProject(h.reqProject(r), req.Name), req.Name))
+		server.WriteJSON(w, server.OKMsg{"cancelled"}, h.runFlow().CancelRun(server.Detached(r), h.runFlow().RunProject(h.reqProject(r), req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /run/priority", func(w http.ResponseWriter, r *http.Request) {
 		var req RunPriorityReq
-		if !decode(w, r, &req) {
+		if !server.Decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.runFlow().ReprioritiseRun(h.runFlow().RunProject(h.reqProject(r), req.ID), req.ID, req.Priority))
+		server.WriteJSON(w, server.OKMsg{"ok"}, h.runFlow().ReprioritiseRun(h.runFlow().RunProject(h.reqProject(r), req.ID), req.ID, req.Priority))
 	})
 }

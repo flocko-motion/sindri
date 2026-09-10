@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/flow"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verb"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
-	"github.com/flo-at/sindri/internal/hub/flow/roles"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
-	"github.com/flo-at/sindri/internal/hub/flow/says"
 	flowtask "github.com/flo-at/sindri/internal/hub/flow/task"
-	"github.com/flo-at/sindri/internal/hub/flow/verb"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -82,8 +82,8 @@ func (e *Engine) WakeRuns(t machine.Topic) {
 // the loop on (-> Reconciling).
 func (e *Engine) newFlow(lifetime context.Context, beat time.Duration) (machine.Machine[flow.World], error) {
 	return machine.New(lifetime, machine.Config[flow.World]{
-		States:   roles.All,
-		Start:    roles.StartFor("worker"),
+		States:   agentflow.All,
+		Start:    agentflow.StartFor("worker"),
 		Gather:   e.gatherSubject,
 		Stored:   e.storedState,
 		Move:     e.moveState,
@@ -119,7 +119,7 @@ func (e *Engine) storedState(s string) (string, time.Time, error) {
 		return s, since, nil // a phase written before states were named; the agent has not moved
 	}
 	// Nothing stored, or a state belonging to a role this agent no longer has.
-	return roles.StartFor(a.Role), since, nil
+	return agentflow.StartFor(a.Role), since, nil
 }
 
 // legacy maps a phase word written before states carried their role onto the state it means, "" when
@@ -134,7 +134,7 @@ func legacy(role, phase string) string {
 	if named == "" {
 		return ""
 	}
-	for _, s := range roles.Of(role) {
+	for _, s := range agentflow.Of(role) {
 		if s.Name == role+"/"+named {
 			return s.Name
 		}
@@ -220,7 +220,7 @@ func (e *Engine) WakeAll(topic machine.Topic) {
 }
 
 // FlowOf renders one role's map — what the hub answers when asked how that kind of agent works.
-func FlowOf(role string) string { return machine.Table(roles.Of(role)) }
+func FlowOf(role string) string { return machine.Table(agentflow.Of(role)) }
 
 // passRecorder keeps the machine's account of itself on the agent's own durable record, under the
 // correlation id that pass carries — so "what happened to this agent" is one query.

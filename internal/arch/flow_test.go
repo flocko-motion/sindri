@@ -30,21 +30,21 @@ var flowMayImport = map[string]string{
 	"sync":        "the engine's own bookkeeping",
 	"sync/atomic": "the engine's correlation ids",
 
-	"github.com/flo-at/sindri/internal/hub/flow":         "the world and the shapes a map is written in",
-	"github.com/flo-at/sindri/internal/hub/flow/machine": "the engine the maps are declared in",
-	"github.com/flo-at/sindri/internal/hub/flow/act":     "the actions a map names",
-	"github.com/flo-at/sindri/internal/hub/flow/cond":    "the conditions a map watches",
-	"github.com/flo-at/sindri/internal/hub/flow/says":    "what a map has the agent told",
-	"github.com/flo-at/sindri/internal/hub/flow/topic":   "the events a condition wakes on",
-	"github.com/flo-at/sindri/internal/hub/flow/verb":    "the verbs a map offers",
+	"github.com/flo-at/sindri/internal/hub/flow":            "the world and the shapes a map is written in",
+	"github.com/flo-at/sindri/internal/hub/flow/machine":    "the engine the maps are declared in",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/act":  "the actions a map names",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/cond": "the conditions a map watches",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/says": "what a map has the agent told",
+	"github.com/flo-at/sindri/internal/hub/flow/topic":      "the events a condition wakes on",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/verb": "the verbs a map offers",
 
-	"github.com/flo-at/sindri/internal/hub/flow/roles/worker":   "collected into one registry",
-	"github.com/flo-at/sindri/internal/hub/flow/pr":             "a merge intent's own map",
-	"github.com/flo-at/sindri/internal/hub/flow/task":           "a task's own map",
-	"github.com/flo-at/sindri/internal/hub/flow/run":            "a queued run's own map",
-	"github.com/flo-at/sindri/internal/hub/flow/roles/planner":  "collected into one registry",
-	"github.com/flo-at/sindri/internal/hub/flow/roles/reviewer": "collected into one registry",
-	"github.com/flo-at/sindri/internal/hub/flow/roles/coauthor": "collected into one registry",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker":   "collected into one registry",
+	"github.com/flo-at/sindri/internal/hub/flow/pr":                   "a merge intent's own map",
+	"github.com/flo-at/sindri/internal/hub/flow/task":                 "a task's own map",
+	"github.com/flo-at/sindri/internal/hub/flow/run":                  "a queued run's own map",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/planner":  "collected into one registry",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer": "collected into one registry",
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/coauthor": "collected into one registry",
 
 	"github.com/flo-at/sindri/internal/hub/situation": "the gathered world, already assembled",
 	"github.com/flo-at/sindri/internal/hub/store":     "the task and state SHAPES, never the store itself",
@@ -136,7 +136,7 @@ func TestNoTwoSubjectsShareAStateName(t *testing.T) {
 		subject string
 		names   []string
 	}{
-		{"agent", stateNames(t, "roles")},
+		{"agent", stateNames(t, "agent", "roles")},
 		{"pr", stateNames(t, "pr")},
 		{"task", stateNames(t, "task")},
 		{"run", stateNames(t, "run")},
@@ -155,9 +155,9 @@ func TestNoTwoSubjectsShareAStateName(t *testing.T) {
 
 // stateNames reads the state-name constants a subject's package declares, from the source rather
 // than by importing it: internal/arch stays a guard over the tree, never a consumer of it.
-func stateNames(t *testing.T, subject string) []string {
+func stateNames(t *testing.T, subject ...string) []string {
 	t.Helper()
-	root := filepath.Join(moduleRoot(t), "internal", "hub", "flow", subject)
+	root := filepath.Join(append([]string{moduleRoot(t), "internal", "hub", "flow"}, subject...)...)
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -186,8 +186,9 @@ var statePattern = regexp.MustCompile(`=\s*"([a-z]+/[a-z-]+)"`)
 //
 //   - *_act.go, for a subject that keeps its map and its acting half in ONE directory (flow/pr,
 //     flow/task, flow/run). There the suffix is the whole distinction.
-//   - flow/roles/*.go at the top level: the maps live one package DOWN, one per role, so every file
-//     here already acts and a suffix would say nothing.
+//   - flow/agent/*.go and flow/agent/verbs/*.go: the agent's maps live further DOWN
+//     (flow/agent/roles/<role>/), and its vocabulary sits beside them in its own packages, so every
+//     file at these two levels already acts and a suffix would say nothing.
 //   - flow/machine and flow/fleet: the engine, and the assembly that runs one machine per subject.
 func isActing(path string) bool {
 	p := filepath.ToSlash(path)
@@ -197,7 +198,8 @@ func isActing(path string) bool {
 	if strings.Contains(p, "/flow/machine/") || strings.Contains(p, "/flow/fleet/") {
 		return true
 	}
-	// Top level only: a role's own map sits in flow/roles/<role>/ and stays a declaration.
+	// These two levels only: a role's own map sits in flow/agent/roles/<role>/, and act, cond, says
+	// and verb are its vocabulary — all of them stay declarations.
 	dir, _ := filepath.Split(p)
-	return strings.HasSuffix(dir, "/flow/roles/")
+	return strings.HasSuffix(dir, "/flow/agent/") || strings.HasSuffix(dir, "/flow/agent/verbs/")
 }

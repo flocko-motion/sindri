@@ -29,6 +29,10 @@ type Deps interface {
 	ProjectConfig(project string) (config.Config, error)
 	ArchitectureDoc(project string) string
 	RefreshTask(project, id string) error
+	// SetTaskStatus moves a task to want without the caller knowing WHERE that status lives — the
+	// owned table for a task sindri owns, the source for a mirrored one. Asked rather than branched
+	// on: every site that grew its own "if OwnsTask" is a site that will one day forget.
+	SetTaskStatus(project, id, want string) error
 	Rehydrate(project, name string)
 	// Kickoff is what a session coming up fresh is told, resolved from the agent's role by the hub
 	// (-> fleet.Engine.Kickoff) — the same division as Rehydrate: here the WHEN, there the WHAT.
