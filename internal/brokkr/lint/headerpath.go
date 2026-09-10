@@ -27,7 +27,7 @@ func HeaderPath(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error)
 		roots = []string{"."}
 	}
 	var bad []string
-	seen := 0
+	goFiles := 0
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -42,6 +42,7 @@ func HeaderPath(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error)
 			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || ig.Match(path) {
 				return nil
 			}
+			goFiles++
 			declared, ok, rerr := headerOf(path)
 			if rerr != nil {
 				return rerr
@@ -49,7 +50,6 @@ func HeaderPath(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error)
 			if !ok {
 				return nil // a missing header is the comments linter's finding, not this one's
 			}
-			seen++
 			// An entrypoint names itself `main (<binary>)` rather than its directory: there is one
 			// package main per binary and the binary is what a reader is looking for.
 			if strings.HasPrefix(declared, "main (") {
@@ -67,8 +67,10 @@ func HeaderPath(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error)
 			return false, err
 		}
 	}
-	if seen < 50 {
-		return false, fmt.Errorf("only %d headers read — the scan is not reading the tree", seen)
+	// Reading no Go file at all is a root pointed at the wrong place; reading few is a
+	// small repository, which is not this linter's business to have an opinion about.
+	if goFiles == 0 {
+		return false, fmt.Errorf("no Go files under %s — the scan is not reading the tree", strings.Join(roots, ", "))
 	}
 	for _, msg := range bad {
 		if !cap.Allow() {

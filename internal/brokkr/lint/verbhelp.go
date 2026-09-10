@@ -8,11 +8,13 @@
 package lint
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,6 +46,11 @@ func VerbHelp(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 		return false, err
 	}
 	cat, err := catalogueNames(filepath.Join(root, catalogueFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		// A repository holding no catalogue offers no verbs, so there is nothing here to be
+		// named inconsistently — brokkr runs over other trees than this one.
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

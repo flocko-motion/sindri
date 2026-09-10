@@ -66,7 +66,7 @@ func TestWritePersistsEveryConfigKey(t *testing.T) {
 	full := Config{
 		Architecture: "ARCH.md", Containerfile: "Containerfile", ReviewPrompt: "prompt.md",
 		Verify: "verify.sh", Reference: "trunk", Reading: []string{"ARCH.md"},
-		Lint:   api.Lint{MaxLines: &maxLines, MaxCommentAvg: &maxAvg},
+		Lint:   api.Lint{MaxLines: &maxLines, MaxCommentAvg: &maxAvg, Enable: []string{"test-home"}},
 		GitHub: api.GitHub{Issues: &on},
 	}
 	if err := Write(root, full); err != nil {

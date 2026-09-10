@@ -77,6 +77,9 @@ var configKeys = []configKey{
 			c.Lint.MaxCommentAvg = f
 			return err
 		}},
+	{"lint.enable", "comma-separated opt-in linters (test-home, header-path, verb-help; empty = none)",
+		func(c config.Config) string { return strings.Join(c.Lint.Enable, ",") },
+		func(c *config.Config, v string) error { c.Lint.Enable = splitList(v); return nil }},
 }
 
 // splitList parses a comma-separated list, dropping blanks so "a,,b" and "a, b" both mean two docs.

@@ -140,6 +140,9 @@ func lintOut(l Lint) map[string]any {
 	if l.MaxCommentAvg != nil {
 		out["max_comment_avg"] = *l.MaxCommentAvg
 	}
+	if len(l.Enable) > 0 {
+		out["enable"] = l.Enable
+	}
 	return out
 }
 
@@ -199,13 +202,17 @@ func Abs(root, rel string) string {
 	return filepath.Join(root, rel)
 }
 
-// repoRel cleans rel against root; absolute paths and any escaping ".." are errors.
+// repoRel cleans rel against root; absolute paths and any escaping ".." are errors. Containment is
+// asked of filepath.Rel rather than a string prefix, which a RELATIVE root defeats: joining "." and
+// "ARCHITECTURE.md" gives "ARCHITECTURE.md", carrying no "./" to match, so every path in the repo
+// read as an escape and `config.Load(".")` refused a config that was fine.
 func repoRel(root, rel string) (string, error) {
 	if filepath.IsAbs(rel) {
 		return "", errors.New("absolute path")
 	}
 	abs := filepath.Clean(filepath.Join(root, rel))
-	if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
+	back, err := filepath.Rel(filepath.Clean(root), abs)
+	if err != nil || back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
 		return "", errors.New("escapes the project root")
 	}
 	return abs, nil

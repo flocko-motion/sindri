@@ -19,6 +19,12 @@ type Lint struct {
 
 	// MaxCommentAvg bounds the MEAN lines per comment block — a trend, not a per-comment cap.
 	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
+
+	// Enable names the opt-in linters this repo holds itself to: the ones that check a convention
+	// a project ADOPTS (a test named after its subject, a header naming its directory) rather than
+	// a property of Go. brokkr is a toolbelt pointed at any repo, so a convention only becomes a
+	// gate where it was asked for; the linters outside this list run everywhere.
+	Enable []string `yaml:"enable"`
 }
 
 // Config is a project's resolved .sindri/config.yaml (repo over global over default).

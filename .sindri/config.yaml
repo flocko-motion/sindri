@@ -2,3 +2,8 @@
 # and before the PR record exists, so a refused submit never creates one. Every project must declare
 # one — nothing stands in for it, and an undeclared gate refuses every submit.
 verify: make check
+
+# The linters that hold THIS repo's conventions. brokkr runs against any repo, so a convention
+# only becomes a gate where it was asked for; everything outside this list runs everywhere.
+lint:
+  enable: [test-home, header-path, verb-help]
