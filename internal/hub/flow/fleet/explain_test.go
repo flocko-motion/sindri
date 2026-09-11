@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,9 +93,7 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Retired: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Phase: "idle"})
 	e := newEngine(t, st, &stubDeps{Root: t.TempDir()})
 
 	x, err := e.ExplainNext("repo", "bombur", "")
@@ -142,9 +141,7 @@ func TestExplainNextRulesOutARetiredOrClearArmedAgent(t *testing.T) {
 			if err := ps.PutAgent(a); err != nil {
 				t.Fatal(err)
 			}
-			if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-				t.Fatal(err)
-			}
+			flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Phase: "idle"})
 			e := newEngine(t, st, &stubDeps{Root: t.TempDir()})
 
 			x, err := e.ExplainNext("repo", "bombur", "")

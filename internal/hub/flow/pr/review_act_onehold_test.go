@@ -35,70 +35,7 @@ func reviewFixture(t *testing.T) (*Act, *store.ProjectStore, *flowtest.Hub) {
 			t.Fatal(err)
 		}
 	}
-	return newActOn(t, st, &flowtest.Hub{Root: root, Alive: true}), ps, &flowtest.Hub{}
-}
-
-// TestAReviewerHoldsExactlyOnePR is the constraint the workspace imposes: one checkout, so one PR.
-// The directive used to scan the open PRs and serve whichever sorted first, which handed a reviewer
-// a second while the first was still on disk — and the diff it read then matched neither.
-func TestAReviewerHoldsExactlyOnePR(t *testing.T) {
-	a, ps, _ := reviewFixture(t)
-
-	first, ok, err := a.ReviewDirective(t.Context(), "repo", "fili")
-	if err != nil || !ok {
-		t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
-	}
-	held, _ := ps.ReviewingPR("fili")
-	if held == "" {
-		t.Fatal("taking a review must record the hold — that is what makes it exclusive")
-	}
-	if !strings.Contains(first, held) {
-		t.Errorf("directive %q does not name the PR it holds (%s)", first, held)
-	}
-	// Asked again and again, it gets the SAME PR — the one whose branch is checked out.
-	for i := 0; i < 3; i++ {
-		again, ok, err := a.ReviewDirective(t.Context(), "repo", "fili")
-		if err != nil || !ok {
-			t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
-		}
-		if again != first {
-			t.Fatalf("a held review must not change under the reviewer:\n first: %q\n now:   %q", first, again)
-		}
-	}
-	// And a request arriving meanwhile is not forced onto it.
-	if err := a.RequestReview("repo", "pr-b", "later"); err != nil {
-		t.Fatalf("RequestReview: %v", err)
-	}
-	if now, _ := ps.ReviewingPR("fili"); now != held {
-		t.Errorf("a busy reviewer was reassigned to %q — its workspace holds %q", now, held)
-	}
-}
-
-// TestASettledPRReleasesItsReviewer: a merge overtakes any review still out on it. The reviewer is
-// freed and told, rather than left holding a verdict that can no longer decide anything.
-func TestASettledPRReleasesItsReviewer(t *testing.T) {
-	a, ps, _ := reviewFixture(t)
-	if _, ok, err := a.ReviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
-		t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
-	}
-	held, _ := ps.ReviewingPR("fili")
-
-	pr, _, _ := ps.GetPR(held)
-	pr.Status = "merged"
-	if err := ps.PutPR(pr); err != nil {
-		t.Fatal(err)
-	}
-	// Its next ask releases the moot review and moves it to the other PR.
-	dir, ok, err := a.ReviewDirective(t.Context(), "repo", "fili")
-	if err != nil {
-		t.Fatalf("ReviewDirective: %v", err)
-	}
-	if now, _ := ps.ReviewingPR("fili"); now == held {
-		t.Error("a merged PR must not still be held for review")
-	}
-	if ok && strings.Contains(dir, held) {
-		t.Errorf("the settled PR was handed back: %q", dir)
-	}
+	return newActOn(t, st, &flowtest.Hub{Root: root}), ps, &flowtest.Hub{}
 }
 
 // TestAVerdictOnLandedWorkIsRefused is the write that undid a merge: a reviewer rejected an
@@ -145,50 +82,12 @@ func TestAnApprovedPRCanStillBeRejected(t *testing.T) {
 	if got.Feedback != "not going in like that" {
 		t.Errorf("feedback = %q, want the reason to reach the author", got.Feedback)
 	}
-	// And the author is put back to work on it, as with any rejection.
-	if st, _ := ps.GetState("bombur"); st.Phase != "working" {
-		t.Errorf("author phase = %q, want working", st.Phase)
+	// And the work comes back to the author, which is what its own map reads to put it on the next
+	// round (-> cond.Rejected). The verdict moves nobody itself.
+	if st, _ := ps.GetState("bombur"); st.Task != got.Task {
+		t.Errorf("author holds %q, want the rejected work %q back", st.Task, got.Task)
 	}
 	_ = deps
-}
-
-// TestAmendingAReviewGoesToTheAgentOnIt: asking again while a reviewer holds the PR adds to what it
-// was told, rather than opening a second review — it has the branch checked out, so the instructions
-// belong to it. A second reviewer would check that branch out from under the first.
-func TestAmendingAReviewGoesToTheAgentOnIt(t *testing.T) {
-	a, ps, _ := reviewFixture(t)
-	if _, ok, err := a.ReviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
-		t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
-	}
-	held, _ := ps.ReviewingPR("fili")
-	before, _ := ps.Reviews(held)
-
-	if err := a.RequestReview("repo", held, "also check the error paths"); err != nil {
-		t.Fatalf("RequestReview: %v", err)
-	}
-	after, _ := ps.Reviews(held)
-	if len(after) != len(before) {
-		t.Errorf("a second review was opened (%d -> %d) — the agent on it should just be told more",
-			len(before), len(after))
-	}
-	var open int
-	for _, r := range after {
-		if r.Verdict == "" {
-			open++
-			if r.Requirement != "also check the error paths" {
-				t.Errorf("requirement = %q, want the new instructions", r.Requirement)
-			}
-			if r.Author != "fili" {
-				t.Errorf("author = %q, want it to stay with fili", r.Author)
-			}
-		}
-	}
-	if open != 1 {
-		t.Errorf("%d open reviews, want exactly 1 — one reviewer, one review", open)
-	}
-	if now, _ := ps.ReviewingPR("fili"); now != held {
-		t.Errorf("the hold moved to %q; it must stay on %q", now, held)
-	}
 }
 
 // TestANewRequestUnmakesAnApproval: the verdict answered the previous question. Asking a new one
@@ -208,13 +107,16 @@ func TestANewRequestUnmakesAnApproval(t *testing.T) {
 	if got.Status != "open" {
 		t.Errorf("status = %q, want open — a fresh question cannot sit behind an old answer", got.Status)
 	}
-	// And it is now claimable again, with the new requirement.
-	dir, ok, err := a.ReviewDirective(t.Context(), "repo", "fili")
-	if err != nil || !ok {
-		t.Fatalf("ReviewDirective after reopening: ok=%v err=%v", ok, err)
+	// The new requirement is on the row a reviewer will be handed, which is what reopening is FOR.
+	revs, _ := ps.Reviews("pr-a")
+	var open int
+	for _, r := range revs {
+		if r.Verdict == "" && r.Requirement == "one more thing" {
+			open++
+		}
 	}
-	if !strings.Contains(dir, "pr-a") {
-		t.Errorf("directive = %q, want the reopened PR", dir)
+	if open != 1 {
+		t.Errorf("%d open rows carrying the new requirement, want exactly 1", open)
 	}
 }
 
@@ -235,28 +137,22 @@ func TestAMergedPRIsNotReopenedByAReviewRequest(t *testing.T) {
 	}
 }
 
-// TestTheHandedDirectiveCarriesTheAuthor is the wiring, as opposed to the wording: the directive
-// the reviewer is actually handed must carry the PR's own author, not a name the caller happened
-// to have. It is the fact that makes the follow-up possible — a question to the person who wrote
-// it, rather than a rejection written at nobody.
-func TestTheHandedDirectiveCarriesTheAuthor(t *testing.T) {
-	a, ps, _ := reviewFixture(t)
-	dir, ok, err := a.ReviewDirective(t.Context(), "repo", "fili")
-	if err != nil || !ok {
-		t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
+// hold puts one reviewer on one pull request through the ONE function that assigns a review — the
+// machine's own action half. A test in this package cannot run the machine, so it calls what the
+// machine calls rather than writing the row itself.
+func hold(t *testing.T, a *Act, ps *store.ProjectStore, prID, reviewer string) {
+	t.Helper()
+	if _, ok, _ := ps.GetAgent(reviewer); !ok {
+		if err := ps.PutAgent(store.Agent{Name: reviewer, Role: "reviewer", Workspace: ".worktrees/" + reviewer}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	held, _ := ps.ReviewingPR("fili")
-	pr, _, _ := ps.GetPR(held)
-	if pr.Agent == "" {
-		t.Fatal("precondition: the fixture's PRs have an author")
+	id, err := ps.AddReview(prID, "review it")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(dir, pr.Agent) {
-		t.Errorf("the directive for %s does not name its author %q:\n%s", held, pr.Agent, dir)
-	}
-	// And again on the re-ask path, which builds the directive from the HELD review rather than
-	// from a fresh claim — two call sites, one of which is easy to leave behind.
-	again, _, _ := a.ReviewDirective(t.Context(), "repo", "fili")
-	if !strings.Contains(again, pr.Agent) {
-		t.Errorf("the re-asked directive dropped the author:\n%s", again)
+	claimed, err := a.AssignReview(t.Context(), "repo", id, prID, reviewer, "review it")
+	if err != nil || !claimed {
+		t.Fatalf("AssignReview(%s -> %s): claimed=%v err=%v", prID, reviewer, claimed, err)
 	}
 }

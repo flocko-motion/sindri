@@ -7,6 +7,7 @@
 package situation
 
 import (
+	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -57,6 +58,10 @@ type Situation struct {
 	Retired    bool
 	ClearArmed bool
 	Stopped    bool
+	// StartAsked and StopAsked: a human asked for this pod, with no flag able to say it — the agent
+	// may already be in the state a flag would claim. Taken back by whoever carries the ask out.
+	StartAsked bool
+	StopAsked  bool
 
 	// The workflow state — what the hub has given it. InPhase is how long it has stood in that
 	// phase: a running action IS a phase, and one nobody measures the age of is a stuck agent.
@@ -167,6 +172,7 @@ func (g *Gatherer) in(project, name string, pool Pool) (Situation, error) {
 	s := Situation{
 		Project: project, Name: name, Observation: obs, StillFor: obs.StillFor(g.now()),
 		Role: a.Role, Retired: a.Retired, ClearArmed: a.ClearArmed, Stopped: a.Stopped,
+		StartAsked: a.StartAsked, StopAsked: a.StopAsked,
 		Phase: st.Phase, InPhase: since(st.PhaseSince, g.now()), Task: st.Task,
 		Container: st.Container, Branch: st.Branch,
 		Escalation: st.Escalation, LastNudge: st.LastNudge, Pool: pool,
@@ -237,4 +243,24 @@ func since(stamp string, now time.Time) time.Duration {
 		return d
 	}
 	return 0
+}
+
+// Standing reports where an agent stands being one of these, named by the WORD a state declares
+// rather than by its whole name: a state is "worker/working" or "planner/submitted", and a caller
+// asking whether an agent is working means the word, whichever role is doing it.
+//
+// Here rather than with the flow that declares the names, because the flow reads this package and
+// not the other way round — and asked rather than compared, so nothing outside the machine has to
+// know how a state name is spelled.
+func Standing(phase string, words ...string) bool {
+	_, word, named := strings.Cut(phase, "/")
+	if !named {
+		word = phase
+	}
+	for _, w := range words {
+		if word == w {
+			return true
+		}
+	}
+	return false
 }

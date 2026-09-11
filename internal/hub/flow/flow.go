@@ -51,6 +51,18 @@ const (
 // obliges a poll at all.
 const DefaultEvery = Eventually
 
+// The two dwells the pod's own states are bounded by, both named here beside the staleness constants
+// because they belong to the same vocabulary: how long a thing may stand before it stops being that
+// thing.
+const (
+	// IdleStopThreshold is how long an agent may hold nothing before the hub reclaims its pod. A stop
+	// preserves the session, so being wrong costs only the next start's latency.
+	IdleStopThreshold = 30 * time.Minute
+	// LaunchBound is how long a launch may stand before it stops reading as one still on its way. Wide
+	// enough for a cold pod boot plus the entrypoint starting tmux.
+	LaunchBound = 2 * time.Minute
+)
+
 // World is everything an agent's conditions may read, gathered ONCE per pass. Conditions reaching
 // for what they need separately can decide from a world that never existed.
 type World struct {
@@ -89,6 +101,17 @@ type World struct {
 	// branch is behind the base that merge moved.
 	MilestoneLanded bool
 
+	// SubmitAsked: the author asked for a submit and the hub has not yet taken it. A request rather
+	// than a flag, since an author may ask again on a tree it has moved on since.
+	SubmitAsked bool
+	// InterviewQuestion is the submit question standing unanswered, "" when none is. Read here so
+	// the words an author is told where it stands are the question itself.
+	InterviewQuestion string
+
+	// GateRefused: the last gate this agent opened to land something answered without landing it.
+	// Nothing was filed, so there is no pull request carrying a verdict to read instead.
+	GateRefused bool
+
 	// ReviewWaiting: a pull request is filed with no reviewer on it. A reviewer's equivalent of the
 	// backlog having something, and the only reason a free one leaves idle.
 	ReviewWaiting bool
@@ -97,6 +120,21 @@ type World struct {
 	SplitTree bool
 	// TaskGone: the work it holds is no longer in the backlog at all.
 	TaskGone bool
+
+	// Wanted: its OWN kind of work is waiting unclaimed — a rated task for a worker, a filed review
+	// for a reviewer. One role's queue never wakes another's, which is why this is folded per role
+	// rather than left to each condition to work out.
+	Wanted bool
+	// PoolCovered: another agent of this role is up and empty-handed, so it would take the waiting
+	// work itself. Nothing asleep needs bringing back for work somebody awake will claim.
+	PoolCovered bool
+	// FirstAsleep: of the stopped agents of this role that could take the waiting work, this is the
+	// one to bring back. A fleet-wide choice made per agent, so one wake starts one pod.
+	FirstAsleep bool
+	// TierMismatch: the work waiting for this agent is rated for a model other than the one running
+	// under it. Read here rather than asked by a condition, because which model a tier deserves is
+	// the hub's policy and whether two ids name one model is the backend's own knowledge.
+	TierMismatch bool
 }
 
 // Verdict is a rejection standing against one piece of work: what the reviewer said, and how many

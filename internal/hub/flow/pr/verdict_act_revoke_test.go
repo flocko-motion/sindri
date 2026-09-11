@@ -32,12 +32,10 @@ func revokeFixture(t *testing.T, prStatus string) (*Act, *store.ProjectStore, re
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "nidi", Task: "gh-285", Branch: "gh-285", Phase: "submitted",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	return newActOn(t, st, &flowtest.Hub{Root: root, Alive: true}),
+	})
+	return newActOn(t, st, &flowtest.Hub{Root: root}),
 		ps, registry.Caller{Project: "repo", Agent: "nidi", Role: "worker", Phase: "submitted"}
 }
 
@@ -52,10 +50,11 @@ func TestRevokeHandsTheTaskBack(t *testing.T) {
 		t.Fatalf("CmdRevoke: code=%d err=%v out=%s", code, err, out.String())
 	}
 
-	// Back at work on the same task AND the same branch: the point is to keep what is already on it.
+	// The same task AND the same branch: the point is to keep what is already on it. Where that
+	// leaves it is its own map's, off the pull request having settled (-> cond.PRSettled).
 	st, _ := ps.GetState("nidi")
-	if st.Phase != "working" || st.Task != "gh-285" || st.Branch != "gh-285" {
-		t.Errorf("state = {phase:%q task:%q branch:%q}, want working on gh-285", st.Phase, st.Task, st.Branch)
+	if st.Task != "gh-285" || st.Branch != "gh-285" {
+		t.Errorf("state = {task:%q branch:%q}, want it holding gh-285 again", st.Task, st.Branch)
 	}
 	// TERMINAL, and its history kept with who withdrew it and why. "rejected" would leave it live
 	// (-> api.PROpen), and every reader that treats an unsettled PR as held work would hand the author
@@ -79,7 +78,7 @@ func TestRevokeReleasesTheReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(id, "fili"); err != nil {
+	if _, err := ps.AssignReview(id, "fili"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.CmdRevoke(c, nil, &strings.Builder{}); err != nil {

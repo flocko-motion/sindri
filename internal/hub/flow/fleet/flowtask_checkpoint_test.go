@@ -23,10 +23,7 @@ func TestCheckpointDoesNotHandBackTheSubtaskItJustFinished(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "os-1", Title: "a change (0/10)", Status: "open", Priority: "P0", ParentID: "td-EPIC"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: "os-1", Container: "td-EPIC", Branch: "td-EPIC", Phase: "working"},
-		store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: c.Agent, Task: "os-1", Container: "td-EPIC", Branch: "td-EPIC", Phase: "working"})
 
 	var out bytes.Buffer
 	if code, err := e.taskAct().CmdCheckpoint(c, []string{"done"}, &out); code != 0 || err != nil {

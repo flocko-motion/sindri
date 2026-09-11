@@ -32,6 +32,6 @@ func retireFixture(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller)
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "work", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	return newEngine(t, st, &stubDeps{Root: root, Alive: true}), ps,
+	return newEngine(t, st, &stubDeps{Root: root}), ps,
 		registry.Caller{Project: "proj", Agent: "dvalin", Role: "worker", Phase: "idle"}
 }

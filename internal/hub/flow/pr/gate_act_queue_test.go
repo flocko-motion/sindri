@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
@@ -71,9 +72,7 @@ func TestASelfCheckMeasuresTheCommitNotTheMovingTree(t *testing.T) {
 // at once with a position, and the gate itself waits its turn in the fleet's one slot.
 func TestASelfCheckIsQueuedNotRunInTheHub(t *testing.T) {
 	a, ps, root := gateRepo(t, "bombur", "sd-1")
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	flowtest.WriteFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 
 	out, code := lintVerb(t, a, "bombur")
@@ -94,7 +93,7 @@ func TestASelfCheckIsQueuedNotRunInTheHub(t *testing.T) {
 		t.Error("a queued gate must name the commit it will check")
 	}
 	// A self-check parks nothing: the agent asked for it and carries on working while it waits.
-	if st, _ := ps.GetState("bombur"); st.Phase != "working" {
+	if st, _ := ps.GetState("bombur"); st.Phase != worker.Working {
 		t.Errorf("phase = %q, want the agent left working — only a landing verb parks one", st.Phase)
 	}
 }
@@ -131,16 +130,14 @@ func TestASelfCheckOnAnUnchangedWorkspaceAnswersFromTheStore(t *testing.T) {
 // moved on to while the gate waited.
 func TestAFailedSelfCheckLeavesTheAgentWorking(t *testing.T) {
 	a, ps, root := gateRepo(t, "bombur", "sd-1")
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	flowtest.WriteFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 	r := openGate(t, a, "bombur", runflow.GateLint, "")
 
 	if err := a.CompleteGate("repo", r, "failed", "lint: line too long"); err != nil {
 		t.Fatalf("completeGate: %v", err)
 	}
-	if st, _ := ps.GetState("bombur"); st.Phase != "working" || st.Task != "sd-1" {
+	if st, _ := ps.GetState("bombur"); st.Phase != worker.Working || st.Task != "sd-1" {
 		t.Errorf("state = %+v, want the agent left working on sd-1", st)
 	}
 	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {

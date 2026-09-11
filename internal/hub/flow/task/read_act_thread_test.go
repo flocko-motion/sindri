@@ -28,9 +28,7 @@ func TestAgentSeesCommentsOnTaskInfo(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-9", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"})
 	deps := &flowtest.Hub{Root: root, Comments: map[string][]store.Comment{"td-9": {
 		{Source: "sindri", SourceRef: "abc", Author: "eitri", Body: "found a blocker", CreatedAt: "2026-01-01T00:00:00Z"},
 	}}}
@@ -64,9 +62,7 @@ func TestAgentSeesNoCommentsSectionWhenThereAreNone(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-9", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"})
 	a := newActWith(t, st, &flowtest.Hub{Root: root})
 	c := registry.Caller{Project: proj, Agent: "eitri", Role: "worker"}
 

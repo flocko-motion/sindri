@@ -8,7 +8,6 @@ package task
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
@@ -133,31 +132,14 @@ func (a *Act) ReconcileTask(project, id string) error {
 	return nil
 }
 
-// ReconcileTasks settles EVERY active task in a project — the task-list and TUI-startup sweep —
-// and clears up what the task map does not own: a live pull request against a task that has closed,
-// and a tree two agents ended up inside.
+// ReconcileTasks settles EVERY active task in a project — the task-list and TUI-startup sweep — and
+// the pull requests beside them, since a PR against a task that just closed is scrapped by its own
+// map. A tree two agents ended up inside is neither's to fix here: the container holder's own map
+// observes the split and yields, at the moment it becomes true (-> cond.TreeSplit).
 func (a *Act) ReconcileTasks(project string) error {
 	a.Flow.LookTasks(project)
 	a.Flow.LookPRs(project) // a PR against a task that just closed is scrapped by its own map
-	if a.HealSplitHierarchies(project) {
-		a.Deps.Notify()
-	}
 	return nil
-}
-
-// HealSplitHierarchies frees every container holder whose tree somebody else is already working —
-// the claim guard cannot cover a tree SPLIT after the fact by reparenting (-> HealSplit).
-func (a *Act) HealSplitHierarchies(project string) (moved bool) {
-	roster, err := a.Store.For(project).Roster()
-	if err != nil {
-		return false
-	}
-	for _, ag := range roster {
-		if a.HealSplit(project, ag.Name) {
-			moved = true
-		}
-	}
-	return moved
 }
 
 // HealSplit frees ONE container holder whose tree another agent is inside, so the hub can ask
@@ -174,11 +156,10 @@ func (a *Act) HealSplit(project, name string) bool {
 	if herr != nil || held == "" || held == name {
 		return false
 	}
-	ag, _, _ := ps.GetAgent(name)
-	if serr := ps.SetState(store.AgentState{Agent: name, Phase: core.RestPhase(ag.Role)},
-		store.ReasonFreed, "yielded "+st.Container+" to "+held); serr != nil {
+	if serr := ps.SetHolding(name, "", "", "", store.ReasonFreed, "yielded "+st.Container+" to "+held); serr != nil {
 		return false
 	}
+	a.announceHolding(project, name)
 	// The PR goes with the feature. Left standing it binds the agent to a tree it no longer holds:
 	// AwaitingPR treats an unsettled PR as held work, so the directive kept sending sudri back to
 	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.

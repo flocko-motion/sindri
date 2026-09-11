@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"os"
 	"time"
 )
 
@@ -20,8 +19,8 @@ import (
 const clearSamplePeriod = 2 * time.Second
 
 // SetClearArmed arms a context clear, or takes it back. Arming is the whole decision a human makes:
-// WHEN it lands is the agent's to say, so one at a leaf boundary is cleared now and one holding work
-// keeps the arming until it reaches one (-> FireArmedClears). Disarming is just the flag.
+// WHEN it lands is the agent's own map to say, so one holding work keeps the arming until it reaches
+// a boundary and the clearing state fires it there (-> cond.ClearArmed). Disarming is just the flag.
 func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed bool) error {
 	ps := s.store.For(project)
 	a, ok, err := ps.GetAgent(name)
@@ -67,30 +66,6 @@ func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed
 func (s *Service) ClearArmed(project, name string) bool {
 	a, ok, err := s.store.For(project).GetAgent(name)
 	return err == nil && ok && a.ClearArmed
-}
-
-// FireArmedClears fires every armed clear in a project whose agent has reached a leaf boundary. Off
-// the hub's tick rather than the agent's request: the clear itself never interrupts (that's the
-// agent's ESC), and the kickoff lands afterwards.
-func (s *Service) FireArmedClears(ctx context.Context, project string) {
-	agents, err := s.store.For(project).Roster()
-	if err != nil {
-		return
-	}
-	for _, a := range agents {
-		if !a.ClearArmed {
-			continue
-		}
-		at, err := s.AtLeafBoundary(project, a.Name)
-		if err != nil || !at {
-			continue
-		}
-		if err := s.Clear(ctx, project, a.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
-			continue
-		}
-		_ = s.deps.Deliver(project, a.Name, s.deps.Kickoff(project, a.Name), mail.PushOnly)
-	}
 }
 
 // Clear sends /clear into name's live session and blocks until it takes effect or times out. Whether

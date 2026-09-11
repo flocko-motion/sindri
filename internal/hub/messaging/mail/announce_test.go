@@ -168,9 +168,7 @@ func TestAnAgentTheHubParkedIsLeftAlone(t *testing.T) {
 func TestAnAgentHoldingWorkIsWoken(t *testing.T) {
 	deps := &stubDeps{up: true}
 	b, ps := idleAgentWithMail(t, deps)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	place(t, ps, "dvalin", "sd-1")
 	if !b.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("an agent holding work was left unaware of mail about that very work")
 	}

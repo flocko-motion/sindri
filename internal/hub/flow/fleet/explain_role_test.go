@@ -77,7 +77,7 @@ func TestEveryReasonAPRGoesUnreviewed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(claimed, "dvalin"); err != nil {
+	if _, err := ps.AssignReview(claimed, "dvalin"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,7 +183,7 @@ func TestAReviewerHoldingOneTakesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(held, "dvalin"); err != nil {
+	if _, err := ps.AssignReview(held, "dvalin"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.PutPR(store.PR{ID: "pr-2", Task: "sd-2", Status: "open"}); err != nil {
@@ -281,7 +281,7 @@ func TestAStaleHoldIsNotAHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(stale, "dvalin"); err != nil {
+	if _, err := ps.AssignReview(stale, "dvalin"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.PutPR(store.PR{ID: "pr-2", Task: "sd-2", Status: "open"}); err != nil {

@@ -1,7 +1,6 @@
 package pr
 
 import (
-	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"io"
 	"strings"
 	"testing"
@@ -16,8 +15,8 @@ import (
 // claims a single scalar that locks the second out.
 func TestApprovalsAccumulateAcrossReviewers(t *testing.T) {
 	a, ps, _ := reviewFixture(t)
-	flowtest.AssignReviewer(t, ps, "pr-a", "fili")
-	flowtest.AssignReviewer(t, ps, "pr-a", "kili")
+	hold(t, a, ps, "pr-a", "fili")
+	hold(t, a, ps, "pr-a", "kili")
 
 	var out strings.Builder
 	if code, err := a.CmdApprove(registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}, []string{"pr-a"}, &out); err != nil || code != 0 {
@@ -61,8 +60,8 @@ func TestApprovalsAccumulateAcrossReviewers(t *testing.T) {
 // rejection, and a fresh approval attempt cannot clear it either — only a renewed submission can.
 func TestRejectionDominatesRegardlessOfApprovalCount(t *testing.T) {
 	a, ps, _ := reviewFixture(t)
-	flowtest.AssignReviewer(t, ps, "pr-a", "fili")
-	flowtest.AssignReviewer(t, ps, "pr-a", "kili")
+	hold(t, a, ps, "pr-a", "fili")
+	hold(t, a, ps, "pr-a", "kili")
 	for _, agent := range []string{"fili", "kili"} {
 		if code, err := a.CmdApprove(registry.Caller{Project: "repo", Agent: agent, Role: "reviewer"}, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 			t.Fatalf("%s approve: code=%d err=%v", agent, code, err)
@@ -143,9 +142,7 @@ func TestPlannerBadgeIsAdvisoryAndNeverSatisfiesMergeAlone(t *testing.T) {
 
 	// A real reviewer's approval alongside it is what actually opens the gate — additional, not
 	// a replacement: both badges stand once it lands.
-	if _, ok, err := a.ReviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
-		t.Fatalf("ReviewDirective: ok=%v err=%v", ok, err)
-	}
+	hold(t, a, ps, "pr-a", "fili")
 	if code, err := a.CmdApprove(registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("reviewer approve: code=%d err=%v", code, err)
 	}

@@ -24,7 +24,7 @@ func addUnreadMail(t *testing.T, ps *store.ProjectStore, agent string) int64 {
 // NOT DONE, and only a done agent is prepared for new work, so the state a clear fires from is
 // simply unreachable while the mailbox has something in it.
 func TestUnreadMailStopsAnAgentBeingPrepared(t *testing.T) {
-	deps := &stubDeps{Alive: true, CtxTokens: 900_000, CtxWindow: 1_000_000, CtxOK: true}
+	deps := &stubDeps{CtxTokens: 900_000, CtxWindow: 1_000_000, CtxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	addUnreadMail(t, ps, "dvalin")
 
@@ -45,7 +45,7 @@ func TestUnreadMailStopsAnAgentBeingPrepared(t *testing.T) {
 // TestReadingTheMailReleasesTheAgent is the other half: the mailbox emptying is the exit, and the
 // ordinary flow resumes at once rather than at some later beat.
 func TestReadingTheMailReleasesTheAgent(t *testing.T) {
-	deps := &stubDeps{Alive: true}
+	deps := &stubDeps{}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	id := addUnreadMail(t, ps, "dvalin")
 	e.Look("repo", "dvalin")
@@ -63,7 +63,7 @@ func TestReadingTheMailReleasesTheAgent(t *testing.T) {
 // TestTheAskServesTheMailItIsHeldFor: the agent is told it has mail AND handed the mail in the same
 // answer — a state that says "you have mail" without carrying it would be a round trip for nothing.
 func TestTheAskServesTheMailItIsHeldFor(t *testing.T) {
-	deps := &stubDeps{Alive: true}
+	deps := &stubDeps{}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	addUnreadMail(t, ps, "dvalin")
 

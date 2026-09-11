@@ -137,7 +137,6 @@ func TestEditKeepsTheVerdictItReplaces(t *testing.T) {
 func TestEditTellsTheHolder(t *testing.T) {
 	for _, held := range []string{"task", "container"} {
 		a, c, ps, id, deps := plannerOwnedTask(t, "approved")
-		deps.Alive = true
 		if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 			t.Fatal(err)
 		}
@@ -147,9 +146,7 @@ func TestEditTellsTheHolder(t *testing.T) {
 		} else {
 			st.Container = id
 		}
-		if err := ps.SetState(st, store.ReasonClaimed, "test setup"); err != nil {
-			t.Fatal(err)
-		}
+		flowtest.Place(t, ps, st)
 		var out bytes.Buffer
 		if code, err := a.CmdEditTask(c, []string{id, "--body", "the premise was wrong"}, &out); code != 0 || err != nil {
 			t.Fatalf("%s: edit: code=%d err=%v out=%s", held, code, err, out.String())
@@ -175,13 +172,11 @@ func TestEditTellsTheHolder(t *testing.T) {
 // carries no record, since it is then the only one who can put that right.
 func TestAFailedRecordStillTellsTheHolder(t *testing.T) {
 	a, c, ps, id, deps := plannerOwnedTask(t, "approved")
-	deps.Alive, deps.PostFails = true, true
+	deps.PostFails = true
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
 	var out bytes.Buffer
 	code, err := a.CmdEditTask(c, []string{id, "--body", "corrected"}, &out)
 	if err != nil {
@@ -440,9 +435,7 @@ func workerEngineComments(t *testing.T, tasks []store.Task, container, current s
 			t.Fatalf("upsert %s: %v", task.ID, err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"})
 	return newActWith2(t, st, &flowtest.Hub{Root: root, Comments: comments}), registry.Caller{Project: proj, Agent: "eitri", Role: "worker"}
 }
 

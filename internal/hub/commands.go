@@ -18,6 +18,7 @@ import (
 	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"io"
 	"os"
 	"slices"
@@ -55,7 +56,7 @@ func (h *Hub) bindings() map[string]binding {
 		"show": {usage: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", run: h.wf.CmdShow},
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
-		"next": {usage: "pick up the next task", run: h.TaskFlow().CmdNext,
+		"next": {usage: "pick up the next task", run: h.wf.CmdNext,
 			blocked: agentflow.HeldByEscalation("next", func(c registry.Caller) string {
 				if c.HasTask {
 					return "You already hold work — run `sindri` to be told what to do with it."
@@ -78,7 +79,7 @@ func (h *Hub) bindings() map[string]binding {
 		// else's verdict.
 		"revoke": {usage: "withdraw your pull request and keep working on it: revoke [why]", run: h.PRFlow().CmdRevoke,
 			blocked: func(c registry.Caller) string {
-				if c.Phase != "submitted" {
+				if !situation.Standing(c.Phase, "submitted") {
 					return "You have no pull request out to withdraw — `sindri` tells you where you are."
 				}
 				return ""
@@ -123,7 +124,6 @@ func (h *Hub) bindings() map[string]binding {
 		// guess it had just said it would not make.
 		"openspec": {usage: "ship your openspec changes as a PR: openspec submit [message]",
 			run: h.PRFlow().CmdOpenspec, blocked: agentflow.HeldByEscalation("openspec", nil)},
-		"state": {usage: "set your resting state: state planning | state idle", run: h.TaskFlow().CmdState},
 		// A planner plans for people, so it may see who they are — in ITS repo. Visibility is local
 		// while addressing is global: mail takes any name, but only ones the user has given it.
 		"staff": {usage: "list this repo's agents — name, role, and what each is working on", run: h.AgentFlow().CmdStaff},
@@ -211,10 +211,10 @@ func landingBlocked(verb string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Container != "" {
 			switch {
-			case verb == "contribute" && c.Phase == "submitted":
+			case verb == "contribute" && situation.Standing(c.Phase, "submitted"):
 				return fmt.Sprintf("Feature %s is already up for the user to merge — wait for that, or "+
 					"`sindri revoke` to take it back and keep working.", c.Container)
-			case (verb == "contribute" || verb == "submit") && c.Phase == "gating":
+			case (verb == "contribute" || verb == "submit") && situation.Standing(c.Phase, "gating"):
 				return "Your quality gate is queued — wait for the result before trying again."
 			case verb == "submit" && c.SubtasksOpen:
 				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
@@ -224,7 +224,7 @@ func landingBlocked(verb string) func(registry.Caller) string {
 			}
 			return ""
 		}
-		if c.Phase != "working" {
+		if !situation.Standing(c.Phase, "working") {
 			return prompts.ReplyNotWorking(verb, c.Phase, c.Task)
 		}
 		return ""
@@ -281,7 +281,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Standing: h.wf.Standing(project, name),
 		// Holding a task or a collaborative container hides "next" and shows "submit" (a container
 		// swaps in "checkpoint"); an idle worker gets the reverse.
-		HasTask:      s.Phase != "idle" || s.Container != "",
+		HasTask:      !situation.Standing(s.Phase, "idle") || s.Container != "",
 		Container:    s.Container,
 		SubtasksOpen: subtasksOpen,
 		Task:         s.Task,

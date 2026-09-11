@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"io"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func (a *Act) RebaseNotice(project, name string) string {
 	}
 	st, _ := ps.GetState(name)
 	verb := "rebase"
-	if st.Phase == "resolving" { // mid-merge for its own PR — resolve is the verb that renews it
+	if situation.Standing(st.Phase, "resolving") { // mid-merge for its own PR — resolve renews it
 		verb = "resolve"
 	}
 	return prompts.DirBranchStuck(verb)
@@ -153,27 +154,33 @@ func (a *Act) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			return 1, nil
 		}
 	}
+	// A milestone PR is keyed by the CONTAINER, not the subtask st.Task holds while resolving
+	// (-> merge_act.go's own reset step keeps that distinct for ResumeContainer's sake).
+	prKey := st.Task
+	if st.Container != "" {
+		prKey = st.Container
+	}
+	prID := "pr-" + prKey
+	// Two readings of one question, because a conflict reaches an author by two routes: recorded
+	// against the pull request by whoever hit it (-> cond.MergeConflicted), or shown by the machine
+	// having stood the author in its resolving state, which a reapply clash does with no pull request
+	// involved at all. Both are somebody else's account — neither is this verb's own copy of it.
+	standing := situation.Standing(st.Phase, "resolving") || ConflictStanding(ps, prID)
 	conflicts, done, err := git.RebaseStep(wt, st.Branch, base)
 	if err != nil {
 		return 1, err // internal git failure — AgentExec sanitizes it for the agent
 	}
 	if !done {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
-			store.ReasonAdvanced, "rebase conflicts: "+strings.Join(conflicts, ", "))
+		a.RecordConflict(ps, prID, base, conflicts)
 		_ = ps.Log(c.Agent, "resolve", "conflicts: "+strings.Join(conflicts, ", "))
+		a.announceVerdict(c.Project)
 		fmt.Fprintln(out, prompts.ReplyResolveConflicts(base, conflicts))
 		return 0, nil
 	}
 	// Only a completed CONFLICT resolution changed the branch and needs re-review; a proactive
-	// check on an already-current one leaves the phase alone.
-	if st.Phase == "resolving" {
-		// A milestone PR is keyed by the CONTAINER, not the subtask st.Task holds while resolving
-		// (-> merge_act.go's own reset step keeps that distinct for ResumeContainer's sake).
-		prKey := st.Task
-		if st.Container != "" {
-			prKey = st.Container
-		}
-		pr, ok, _ := ps.GetPR("pr-" + prKey)
+	// check on an already-current one renews nothing.
+	if standing {
+		pr, ok, _ := ps.GetPR(prID)
 		// A MERGED pr is the signal, not its absence: a standing branch's own uncommitted work
 		// failed to reapply after its PR already merged (-> merge_act.go), so resolving it
 		// resumes exactly as a clean reset would have — never renew or re-review a merged PR.
@@ -196,10 +203,9 @@ func (a *Act) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 				_ = a.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 			}
 		}
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
-			store.ReasonAdvanced, "resolved clean onto "+base)
+		_ = ps.Log(c.Agent, "resolve", "clean onto "+base)
 		fmt.Fprintln(out, reply)
-		a.Deps.Notify()
+		a.announceVerdict(c.Project)
 		return 0, nil
 	}
 	fmt.Fprintln(out, prompts.ReplyAlreadyCurrent(base))

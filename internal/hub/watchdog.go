@@ -16,6 +16,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/harness"
 	"github.com/flo-at/sindri/internal/hub/world/observe"
 	"github.com/flo-at/sindri/internal/hub/world/store"
@@ -52,22 +53,6 @@ const (
 	// cadence because it costs its own process spawn and the figure moves when an agent starts, not
 	// second to second.
 	capacityInterval = 10 * time.Second
-
-	// launchGrace holds off judging a fresh "launching" intent: podman may not have created the
-	// container yet, and absence this soon is not evidence of one that already exited.
-	launchGrace = 5 * time.Second
-
-	// launchSessionBound bounds "container up, session never answered" — over Launch's own wait
-	// (agent.launchReadyTimeout), so this backstop never races the ordinary path.
-	launchSessionBound = 90 * time.Second
-
-	// launchOverallBound is the ceiling on a launch from the keystroke, wide enough for a cold image
-	// build (the CLI's own "first run … may take a few minutes" warning).
-	launchOverallBound = 5 * time.Minute
-
-	// launchReleaseBound bounds tearing a failed launch's container down. Wider than probeTimeout:
-	// `rm -f` stops before it removes, and podman's own stop grace is 10s.
-	launchReleaseBound = 30 * time.Second
 )
 
 // fill is what an agent's transcript last said: how much of its window is used, and the model
@@ -306,17 +291,6 @@ func (w *watchdog) sweep(withProbes bool) {
 		if gone {
 			w.record(a, false, 0, harness.Observation{})
 		}
-		// Fanned out, not inline: it inspects the container of any launch in flight, and the serial
-		// part of a beat holds every other agent's reading behind whatever it waits for.
-		if listErr == nil {
-			wg.Add(1)
-			go func(a store.Agent, exists bool) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				w.checkStuckLaunch(a, exists)
-			}(a, !gone)
-		}
 		// A pod that EXISTS says nothing yet about the session inside it, which only the probe
 		// answers — so on a listing-only beat its last observation stands untouched. Death is still
 		// caught at full speed: absence above is conclusive on every beat.
@@ -345,54 +319,6 @@ func (w *watchdog) sweep(withProbes bool) {
 	w.h.status.sweep()
 }
 
-// checkStuckLaunch bounds one agent's "launching" intent against reality, so a launch that will
-// never complete stops reading like one still on its way (-> sd-c6c4aa). In the sweep, never on a
-// board read, which must not probe (-> sd-8e11ab); the bounds themselves are launchFailure's.
-func (w *watchdog) checkStuckLaunch(a store.Agent, containerExists bool) {
-	since, launching := w.h.agents.LaunchIntent(a.Project, a.Name)
-	if !launching {
-		return
-	}
-	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
-	running := containerExists && container.RunningContext(ctx, w.h.container(a.Project, a.Name))
-	// A probe out of time answers false, and false here would read as "exited" — of the runtime whose
-	// silence hangs launches in the first place. No answer, no claim; the time bounds still fire.
-	exited := containerExists && !running && ctx.Err() == nil
-	cancel()
-	sessionUp := false
-	if l, ok := w.get(a.Project, a.Name); ok {
-		sessionUp = l.up
-	}
-	reason := launchFailure(time.Since(since), containerExists, exited, sessionUp)
-	if reason == "" {
-		return
-	}
-	// Off the beat: FailLaunch removes the container, and the fleet's whole sweep queues behind this.
-	// Its own root, since the beat's context ends first.
-	go func() {
-		rmCtx, rmCancel := context.WithTimeout(w.base, launchReleaseBound)
-		defer rmCancel()
-		w.h.agents.FailLaunch(rmCtx, a.Project, a.Name, reason)
-	}()
-}
-
-// launchFailure decides, from elapsed time and what the sweep observed, whether a launch has failed
-// and why — "" means not (yet). containerExited is a DEFINITE observation, never an unanswered probe.
-func launchFailure(elapsed time.Duration, containerExists, containerExited, sessionUp bool) string {
-	switch {
-	case elapsed < launchGrace:
-		return "" // podman may not have even created the container yet
-	case containerExited:
-		return "the container exited during launch"
-	case containerExists && !sessionUp && elapsed > launchSessionBound:
-		return "the container started but the agent session never came up"
-	case elapsed > launchOverallBound:
-		return fmt.Sprintf("did not come up within %s", launchOverallBound)
-	default:
-		return ""
-	}
-}
-
 // probe reads one agent's tmux session and, when up, Claude's state; a failure is a strike only.
 func (w *watchdog) probe(a store.Agent) {
 	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
@@ -410,6 +336,24 @@ func (w *watchdog) probe(a store.Agent) {
 // its counts until downStrikes. No single reading settles anything, whatever its source — a missing
 // pod and a failed probe are both one observation, and a listing can be a moment out of date.
 func (w *watchdog) record(a store.Agent, up bool, clients int, obs harness.Observation) {
+	if w.fold(a, up, clients, obs) {
+		w.announce(a.Project, a.Name)
+	}
+}
+
+// announce says this agent's session reads differently now. The observer is the ONE publisher of
+// this topic: a fresh look at a pane is the whole of what it names, and per agent, so a state
+// watching for it is woken by its OWN session moving rather than by anything happening anywhere.
+func (w *watchdog) announce(project, name string) {
+	if w.h.wf != nil {
+		w.h.wf.Wake(project, name, topic.SessionRead)
+	}
+}
+
+// fold takes one reading into the record and reports whether the session now reads differently —
+// alive, doing something else, or showing something else. Apart from record so the topic is
+// published with the lock released.
+func (w *watchdog) fold(a store.Agent, up bool, clients int, obs harness.Observation) (moved bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
@@ -466,18 +410,24 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs harness.Obser
 	if next.stateSince = prev.stateSince; next.state != prev.state || next.stateSince.IsZero() {
 		next.stateSince = next.seen
 	}
+	_, seen := w.obs[key]
 	w.obs[key] = next
+	return !seen || next.up != prev.up || next.state != prev.state || next.digest != prev.digest
 }
 
 // forgetFill drops one agent's fill: a window of 0 is the unknown every reader already handles, and
 // the next sweep measures again. For the moment a clear makes the last reading false.
 func (w *watchdog) forgetFill(project, name string) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	key := agentKey{project, name}
-	if l, seen := w.obs[key]; seen {
+	l, seen := w.obs[key]
+	if seen {
 		l.fill = fill{}
 		w.obs[key] = l
+	}
+	w.mu.Unlock()
+	if seen {
+		w.announce(project, name)
 	}
 }
 
@@ -485,12 +435,17 @@ func (w *watchdog) forgetFill(project, name string) {
 // share: a sample that read nothing is not evidence of an empty context, so the caller does not call.
 func (w *watchdog) recordFill(a store.Agent, f fill) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
 	l, seen := w.obs[key]
-	if !seen {
-		return // nothing has observed this agent yet, and a fill alone is not an observation of it
+	moved := seen && l.fill != f
+	if seen {
+		l.fill = f
+		w.obs[key] = l
 	}
-	l.fill = f
-	w.obs[key] = l
+	w.mu.Unlock()
+	// Nothing observed yet means a fill alone is not an observation, and an unchanged one is not a
+	// look that found anything — a session's usage is what decides whether it is in the way.
+	if moved {
+		w.announce(a.Project, a.Name)
+	}
 }

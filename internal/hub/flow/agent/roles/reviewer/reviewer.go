@@ -14,14 +14,10 @@ import (
 )
 
 const (
-	Mail      = "reviewer/mail"
 	Idle      = "reviewer/idle"
 	Taking    = "reviewer/taking"
 	Reviewing = "reviewer/reviewing"
 	Dropping  = "reviewer/dropping"
-	Clearing  = "reviewer/clearing"
-	Escalated = "reviewer/escalated"
-	Retired   = "reviewer/retired"
 )
 
 var idle = flow.State{
@@ -40,14 +36,21 @@ var idle = flow.State{
 		// the branch arrives rather than by whoever hands it over. Every route passes the same way,
 		// which is what stops two of them clearing the session twice.
 		{cond.ReviewWaiting, Clearing, "a pull request is waiting, and a review is read on a fresh session"},
+		// The pod comes LAST, after everything it could be answering for. A review waiting on a pool
+		// whose every pod was reclaimed is what the wake is FOR: the row stays unclaimed until one is
+		// up, so the evidence a reviewer was needed outlives the start.
+		{cond.StartAsked, Launching, "a human asked for this pod"},
+		{cond.NeededWhileAsleep, Launching, "a review is waiting, this pod was reclaimed, and nobody awake would take it"},
+		{cond.StopAsked, Stopping, "a human asked for this pod back"},
+		{cond.Reclaimable, Stopping, "it has held nothing long enough that its pod is worth taking back"},
 	},
 	Verbs: flow.Offers{
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Comment, flow.Stay, "comment on what it has ruled on"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Task, "read the backlog"},
+		{verb.Comment, "comment on what it has ruled on"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -64,7 +67,7 @@ var taking = flow.State{
 		{act.Failed, Idle, "the hand-over failed; it will be offered again"},
 		{flow.Orphaned{}, Idle, "the hub restarted mid-hand-over"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 var reviewing = flow.State{
@@ -76,18 +79,20 @@ var reviewing = flow.State{
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.ReviewOvertaken, Dropping, "the pull request settled before a verdict"},
+		{cond.ReviewDone, Idle, "it ruled on the one it held, and a verdict is where a review ends"},
+		{cond.AsleepHolding, Launching, "it holds this review and its pod is gone — a claim must not outlive the pod it was made for"},
 	},
 	Verbs: flow.Offers{
-		{verb.Approve, Idle, "approve what you have read"},
-		{verb.Reject, Idle, "send it back with feedback"},
-		{verb.Git, flow.Stay, "read the diff"},
-		{verb.Task, flow.Stay, "read the task it answers"},
-		{verb.Comment, flow.Stay, "comment on the task"},
-		{verb.Run, flow.Stay, "queue a slow build or test"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Approve, "approve what you have read"},
+		{verb.Reject, "send it back with feedback"},
+		{verb.Git, "read the diff"},
+		{verb.Task, "read the task it answers"},
+		{verb.Comment, "comment on the task"},
+		{verb.Run, "queue a slow build or test"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -103,79 +108,13 @@ var dropping = flow.State{
 		{act.Done, Idle, "the hold is released"},
 		{flow.Orphaned{}, Idle, "the hub restarted mid-release"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
-}
-
-var clearing = flow.State{
-	Name:   Clearing,
-	Title:  "Having its session cleared",
-	Action: act.Clear,
-	About:  "The session is discarded before the next pull request, so each review is read whole.",
-	Says:   says.Preparing,
-	Events: flow.Events{
-		{act.Done, Taking, "the session is empty; a review can be handed over"},
-		{act.Failed, Taking, "the clear never landed — a crowded reviewer beats a PR nobody was told about"},
-		{flow.Orphaned{}, Idle, "the hub restarted mid-clear"},
-	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
-}
-
-var escalated = flow.State{
-	Name:  Escalated,
-	Title: "Escalated",
-	About: "The reviewer stopped on a question only the user can answer; it is repeated on every ask.",
-	Says:  says.Escalated,
-	Events: flow.Events{
-		{cond.Resolved, Reviewing, "the user answered and it cleared the escalation"},
-	},
-	// Only the LANDING verbs are held — the verdict itself. A reviewer stopped on a question still
-	// reads the diff and the task, and still says what it has found.
-	Verbs: flow.Offers{
-		{verb.Resume, Reviewing, "clear the escalation once you have the answer"},
-		{verb.Escalate, flow.Stay, "replace the question with a sharper one"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Comment, flow.Stay, "comment on the task"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Run, flow.Stay, "queue a slow build or test"},
-		{verb.Git, flow.Stay, "read the diff"},
-		{verb.Meeting, flow.Stay, "say something in the meeting room"},
-	},
-}
-
-var retired = flow.State{
-	Name:  Retired,
-	Title: "Retired",
-	About: "A human wound this reviewer down: no further review is handed to it. Retirement means " +
-		"no new claim for a reviewer exactly as it does for a worker.",
-	Says: says.Retired,
-	Events: flow.Events{
-		{cond.BackInService, Idle, "a human brought it back"},
-	},
-	Verbs: flow.Offers{{verb.Mail, flow.Stay, "read your mailbox"}},
-}
-
-// mail: unread mail means it is not done, and an agent that is not done is not cleared for a PR.
-var mail = flow.State{
-	Name:  Mail,
-	Title: "Mail to read",
-	About: "The reviewer has unread mail. It is not done until it has read it, and a reviewer that " +
-		"is not done is not prepared for the next pull request — which is what stops a clear landing " +
-		"on top of a message nobody has seen.",
-	Says: says.Mail,
-	Events: flow.Events{
-		{cond.MailRead, Idle, "the mailbox is empty again"},
-	},
-	Verbs: flow.Offers{
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Escalate, Escalated, "stop on a question"},
-	},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // Flow is the reviewer's whole map.
-var Flow = []flow.State{idle, mail, taking, reviewing, dropping, clearing, escalated, retired}
+var Flow = []flow.State{
+	idle, mail, taking, reviewing, dropping, launching, stopping, clearing, escalated, retired,
+}
 
 // Start is where a reviewer with no state stored begins.
 const Start = Idle

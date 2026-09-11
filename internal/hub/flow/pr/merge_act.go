@@ -1,44 +1,34 @@
 // package: hub/flow/pr / merge_act
 // type:    logic (merge workflow)
-// job:     the human-gated merge of an approved PR into its base — rebase-first,
-// conflict routing to the worker, and the transient "merging" status plus
-// startup reconciliation to "merge-failed" for a merge orphaned by a crash.
-// limits:  merge only; review and submit live beside this (review_act.go, pr_act.go).
+// job:     the human-gated merge of an approved PR into its base — the intent a human records, and
+// the rebase-and-commit the merging state runs behind it, with conflicts routed to the author.
+// limits:  merge only; review and submit live beside this (review_act.go, pr_act.go). Where the
+// merge intent STANDS is the map's (-> pr.go), and this writes none of it.
 package pr
 
 import (
+	"context"
 	"fmt"
-	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/hub/core"
-	"github.com/flo-at/sindri/internal/hub/messaging/mail"
-	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/world/task"
 	"log"
 	"path/filepath"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub/flow/topic"
+	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
+
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
 
-// ReconcileMergingPRs settles anything a previous hub died holding — the map's own Orphaned exit
-// now, asked at boot rather than on the next beat (-> hub/flow/pr).
-func (a *Act) ReconcileMergingPRs() {
-	projects, err := a.Store.Projects()
-	if err != nil {
-		log.Printf("hub: reconcile merging PRs: %v", err)
-		return
-	}
-	for _, p := range projects {
-		a.Flow.LookPRs(p.Tag)
-	}
-}
-
-// Merge merges a project's approved PR into the base branch (host/human-only — the
-// single hard gate), closes the task, frees the worker, and notifies it.
+// Merge records a human's intent to merge an approved PR and settles the merge intent, so the caller
+// is answered after the merge has run rather than before. The merge itself happens in pr/merging —
+// a merge is not atomic, and an intent that survives a restart is what makes a hub dying half way
+// through recoverable rather than silent.
 func (a *Act) Merge(project, prID string) (store.PR, error) {
 	ps := a.Store.For(project)
-	root := a.Deps.ProjectRoot(project)
 	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return store.PR{}, err
@@ -49,25 +39,61 @@ func (a *Act) Merge(project, prID string) (store.PR, error) {
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
 	}
-	// An explicit in-flight status keeps the board honest and makes a crash recoverable: startup
-	// reconciles a leftover "merging" to "merge-failed", since half a merge needs a human.
-	pr.Status = "merging"
-	if err := ps.PutPR(pr); err != nil {
+	if err := ps.SetMergeAsked(prID, true); err != nil {
 		return store.PR{}, err
 	}
+	_ = ps.LogPR(prID, "merge-asked", "a human asked for the merge")
 	a.Deps.Notify()
-	// On a synchronous failure below, revert to approved so the PR stays retryable and the error
-	// says what to fix. A conflict goes its own way to "open"; a crash is caught at startup.
-	revert := func(err error) (store.PR, error) {
-		pr.Status = "approved"
-		_ = ps.PutPR(pr)
-		a.Deps.Notify()
+	a.Flow.LookPR(project, prID)
+	merged, _, err := ps.GetPR(prID)
+	if err != nil {
 		return store.PR{}, err
 	}
-	// Mechanics live in repo; here we route the outcome. The rebase runs in the WORKER's worktree,
-	// and a conflict goes into its resolution loop rather than a dead-end "resubmit".
+	switch merged.Status {
+	case "merged":
+		return merged, nil
+	case "merge-failed":
+		return store.PR{}, fmt.Errorf("%s is half merged — a hub died mid-merge, so whether %s carries it needs a human's eye",
+			prID, merged.Base)
+	case "open":
+		// A conflict sends it back to its author, which is what "open" means here. The reason is on
+		// the record, which is where every other reader of this merge looks too.
+		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean",
+			prID, merged.Base, merged.Agent)
+	}
+	return store.PR{}, fmt.Errorf("%s did not merge: %s", prID, a.lastMergeFailure(ps, prID))
+}
+
+// lastMergeFailure is the reason the merge did not run, off the PR's own record — the words the
+// action wrote when it refused, rather than a second account carried back through a return value.
+func (a *Act) lastMergeFailure(ps *store.ProjectStore, prID string) string {
+	events, err := ps.PREvents(prID)
+	if err != nil {
+		return "the reason is on its record"
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == "merge-refused" {
+			return events[i].Payload
+		}
+	}
+	return "the reason is on its record"
+}
+
+// RunMerge is what pr/merging does: rebase the branch onto its base and commit it there, then route
+// the outcome. It takes the request back first — one left standing would bring the pull request
+// straight back here on the next beat, whatever this merge then did.
+func (a *Act) RunMerge(_ context.Context, w World) (Outcome, error) {
+	ps := a.Store.For(w.Project)
+	_ = ps.SetMergeAsked(w.ID, false)
+	root := a.Deps.ProjectRoot(w.Project)
+	pr, ok, err := ps.GetPR(w.ID)
+	if err != nil || !ok {
+		return Refused, err
+	}
+	// Mechanics live in the adapter; here we route the outcome. The rebase runs in the AUTHOR's
+	// worktree, and a conflict goes into its resolution loop rather than a dead-end "resubmit".
 	wt, workspace := "", ""
-	if ag, ok, _ := ps.GetAgent(pr.Agent); ok {
+	if ag, found, _ := ps.GetAgent(pr.Agent); found {
 		workspace, wt = ag.Workspace, filepath.Join(root, ag.Workspace)
 	}
 	tk, _, _ := ps.GetTask(pr.Task)
@@ -78,41 +104,55 @@ func (a *Act) Merge(project, prID string) (store.PR, error) {
 	mergeMsg := task.ConventionalCommit(tk.Type, pr.Task, desc)
 	switch res := git.MergeBranch(root, wt, pr.Branch, pr.Base, mergeMsg); res.Status {
 	case git.MergeConflict:
-		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
-		_ = ps.PutPR(pr)
 		// Recorded on the PR, not written onto its author: a conflict is a fact about this merge
 		// intent, and what it means for whoever filed it is their map's (-> cond.MergeConflicted).
+		pr.Feedback = "" // no longer mergeable; back to review once the author has resolved it
+		_ = ps.PutPR(pr)
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
-		a.Flow.WakeProject(project, topic.PRVerdict)
-		_ = a.Harness.Say(project, pr.Agent, prompts.MsgResolveNeeded(pr.Base, res.Files), mail.MailAndPush)
+		a.Flow.WakeProject(w.Project, topic.PRVerdict)
+		_ = a.Harness.Say(w.Project, pr.Agent, prompts.MsgResolveNeeded(pr.Base, res.Files), mail.MailAndPush)
 		a.Deps.Notify()
-		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
+		return Conflicted, nil
 	case git.MergeRebaseErr:
-		// Name the worktree: it is the AGENT's, and "unstaged changes" otherwise sends you
-		// hunting through your own checkout for edits the agent left in its.
-		return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, ag.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
+		// Name the worktree: it is the AGENT's, and "unstaged changes" otherwise sends you hunting
+		// through your own checkout for edits the agent left in its.
+		return a.refuse(ps, pr.ID, fmt.Sprintf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %v",
 			pr.Branch, pr.Base, pr.Agent, workspace, pr.Agent, res.Err))
 	case git.MergeBlocked:
 		// "commit or stash" alone dead-ends an untracked collision: you cannot stash an untracked file.
-		return revert(fmt.Errorf("merge blocked by your working checkout: %s. Commit or stash them (or move/remove them, if untracked), then merge again — the PR is fine and stays approved", prompts.FileList(res.Files)))
+		return a.refuse(ps, pr.ID, "merge blocked by your working checkout: "+prompts.FileList(res.Files)+
+			". Commit or stash them (or move/remove them, if untracked), then merge again — the PR is fine and stays approved")
 	case git.MergeErr:
-		return revert(res.Err)
+		return a.refuse(ps, pr.ID, res.Err.Error())
 	}
-	pr.Status = "merged"
-	if err := ps.PutPR(pr); err != nil {
-		return store.PR{}, err
-	}
+	return a.landed(w.Project, pr)
+}
+
+// refuse records why a merge could not run and leaves the pull request approved, so it stays
+// retryable and the words say what to fix.
+func (a *Act) refuse(ps *store.ProjectStore, prID, why string) (Outcome, error) {
+	_ = ps.LogPR(prID, "merge-refused", why)
+	a.Deps.Notify()
+	return Refused, nil
+}
+
+// landed is everything a merge that went in sets off. The PR's own status is NOT written here — the
+// state it lands in claims it (-> fleet's movePRState) — and every other subject is woken rather
+// than reached into.
+func (a *Act) landed(project string, pr store.PR) (Outcome, error) {
+	ps := a.Store.For(project)
+	root := a.Deps.ProjectRoot(project)
 	// Any review still out on it is moot, and its reviewer is released and told so — the same thing
 	// ScrapPR does. Left open, the reviewer kept being handed a merged PR, read an empty diff, and
 	// its rejection overwrote the merge in the record.
-	a.ReleaseReviewers(project, prID, "overtaken: merged before a verdict")
+	a.ReleaseReviewers(project, pr.ID, "overtaken: merged before a verdict")
 	// WHETHER this merge finishes the work is the only thing the merge itself decides. A task that
 	// gained a child while its PR was out reads as finished here, and closing it is THE incident.
 	partial := pr.Kind == "interim"
 	if !partial {
 		open, oerr := ps.OpenChildIDs(pr.Task)
 		if oerr != nil {
-			return store.PR{}, oerr
+			return Landed, oerr
 		}
 		partial = len(open) > 0
 		// Recorded, not just acted on: a leaf PR that lands over work its task gained IS a milestone,
@@ -121,37 +161,36 @@ func (a *Act) Merge(project, prID string) (store.PR, error) {
 		if partial {
 			pr.Kind = "interim"
 			if err := ps.PutPR(pr); err != nil {
-				return store.PR{}, err
+				return Landed, err
 			}
-			_ = ps.LogPR(prID, "milestone", "the task gained children while this was out")
+			_ = ps.LogPR(pr.ID, "milestone", "the task gained children while this was out")
 		}
 	}
 	if partial {
 		// What a milestone MEANS for its author is that agent's map to decide, woken by this landing
 		// (-> cond.GainedChildren, cond.MilestoneLanded).
-		return a.finishPartialMerge(project, pr, false)
+		a.finishPartialMerge(project, pr, false)
+		return Landed, nil
 	}
 	// Every task source is told THIS PR MERGED, so each runs its own consequence on its own ids.
 	// After the local merge, so a failure warns rather than fails it.
-	note := "merged via " + prID
+	note := "merged via " + pr.ID
 	for _, src := range a.TaskSources(project) {
 		if err := src.OnMerged(root, pr.Task, note); err != nil {
-			log.Printf("hub: %s merged locally but a task-source close failed: %v", prID, err)
-			_ = ps.LogPR(prID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())
+			log.Printf("hub: %s merged locally but a task-source close failed: %v", pr.ID, err)
+			_ = ps.LogPR(pr.ID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())
 		}
 	}
 	// Whether the task is FINISHED is not decided here. Its own map reads a landed final PR with
-	// nothing open beneath it and closes itself (-> flow/task's landed) — the same rule the repair
-	// sweep applied, in the one place it now lives.
+	// nothing open beneath it and closes itself (-> flow/task's landed).
 	a.Flow.LookTask(project, pr.Task)
-	_ = ps.Log(pr.Agent, "merged", prID)
-	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
+	_ = ps.Log(pr.Agent, "merged", pr.ID)
 	// The AUTHOR is not touched: a merge writes the PR's outcome and wakes. Releasing it from here
 	// was one function writing four subjects (-> cond.PRSettled).
 	a.Flow.WakeProject(project, topic.PRMerged)
 	a.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	a.Deps.Notify()
-	return pr, nil
+	return Landed, nil
 }
 
 // finishPartialMerge resumes a merged, partial PR's agent — the tail both a clean reset and a
@@ -166,12 +205,12 @@ func (a *Act) finishPartialMerge(project string, pr store.PR, onFeature bool) (s
 		// already says — nothing here needs to survive being read late.
 		_ = a.Harness.Say(project, pr.Agent, prompts.MsgMilestoneMerged(pr.ID), mail.PushOnly)
 	} else {
-		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
-		// a container while its interim PR was out.
-		_ = ps.SetPhase(pr.Agent, "working", store.ReasonLanded, "interim merged: "+pr.ID)
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
-		// Push only, same reason: it resumes the same task, which its directive already says.
+		// The author's own map puts it back on the work it never let go of (-> cond.MilestoneLanded);
+		// this only wakes it. Push only, same reason: it resumes the same task, which its directive
+		// already says.
+		a.Flow.Wake(project, pr.Agent, topic.PRMerged)
 		_ = a.Harness.Say(project, pr.Agent, prompts.MsgContributionMerged(pr.ID, pr.Task), mail.PushOnly)
 	}
 	a.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current

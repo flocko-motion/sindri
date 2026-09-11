@@ -11,6 +11,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
@@ -55,11 +56,21 @@ func (e *Engine) newPRFlow(lifetime context.Context, beat time.Duration) (machin
 		Gather:   e.gatherPR,
 		Stored:   e.storedPRState,
 		Move:     e.movePRState,
+		Do:       e.prDoers(),
 		Subjects: e.prSubjects,
 		Default:  time.Minute,
 		Tick:     beat,
 		Record:   prRecorder{e},
 	})
+}
+
+// prDoers is the implementation of every action a merge intent's states run. A declared action with
+// no entry here fails at startup rather than at the merge somebody asked for.
+func (e *Engine) prDoers() map[string]machine.Doer[flowpr.World] {
+	return map[string]machine.Doer[flowpr.World]{
+		flowpr.AskForReview.Name: e.prAct().OpenReviewRow,
+		flowpr.DoMerge.Name:      e.prAct().RunMerge,
+	}
 }
 
 // storedPRState is where the machine has this merge intent, falling back to what its status claims.
@@ -156,6 +167,17 @@ func (e *Engine) gatherPR(s string) (flowpr.World, error) {
 	}
 	w.Task, w.Interim = pr.Task, pr.Kind == "interim"
 	w.Landed = pr.Status == "merged"
+	w.MergeAsked, _ = ps.MergeAsked(id)
+	w.Conflicted = flowpr.ConflictStanding(ps, id)
+	if live, lerr := ps.LiveReviewPRs(); lerr == nil {
+		w.ReviewFiled = live[id]
+	}
+	// The one git question a merge intent asks, and only while one is running: a merge whose result
+	// was lost still settles, because a base already carrying the branch IS merged whatever the
+	// action returned. Off the beat for every other PR, which is what keeps this affordable.
+	if pr.Status == "merging" && !w.Landed {
+		w.Landed = e.baseCarries(project, pr.Branch, pr.Base)
+	}
 	w.TaskOpen = true
 	if t, found, terr := ps.GetTask(pr.Task); terr == nil && found {
 		w.TaskOpen = api.Open(t)
@@ -173,6 +195,18 @@ func (e *Engine) gatherPR(s string) (flowpr.World, error) {
 		w.Verdict = "rejected"
 	}
 	return w, nil
+}
+
+// baseCarries reports the branch already sitting on its base — the observation that settles a merge
+// nobody heard the end of. A squashed merge leaves no ancestry, so this answers "the branch has
+// nothing the base lacks", which a squash satisfies exactly as a fast-forward does.
+func (e *Engine) baseCarries(project, branch, base string) bool {
+	root := e.Deps.ProjectRoot(project)
+	tip, err := git.BranchTip(root, branch)
+	if err != nil {
+		return false // unreadable: never claim a merge landed on a guess
+	}
+	return git.IsAncestor(root, tip, base)
 }
 
 // unsettled reports a merge intent still worth watching. NOT a status allowlist: "rejected" reads

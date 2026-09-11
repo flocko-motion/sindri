@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -22,9 +23,7 @@ func surfaceFor(t *testing.T, phase string) (*Hub, []string) {
 	if phase == "idle" {
 		task = ""
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: task, Branch: task, Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: task, Branch: task, Phase: phase})
 	cmds, err := h.AgentCommands(testProject, "eitri")
 	if err != nil {
 		t.Fatalf("agent commands: %v", err)
@@ -50,9 +49,7 @@ func blockedReason(t *testing.T, phase, verb string) string {
 	if phase == "idle" {
 		task = ""
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: task, Branch: task, Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: task, Branch: task, Phase: phase})
 	cmds, err := h.AgentCommands(testProject, "eitri")
 	if err != nil {
 		t.Fatalf("agent commands: %v", err)

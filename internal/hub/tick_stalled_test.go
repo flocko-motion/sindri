@@ -2,6 +2,7 @@ package hub
 
 import (
 	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"testing"
 	"time"
 
@@ -23,10 +24,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	// the surface's, and it reads the same row every other rule does.
 	holding := func(phase, container string) {
 		t.Helper()
-		if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: phase, Container: container},
-			store.ReasonClaimed, "test setup"); err != nil {
-			t.Fatal(err)
-		}
+		flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: phase, Container: container})
 	}
 
 	// A screen that just changed: not stalled, whatever the phase says.
@@ -94,12 +92,10 @@ func TestAStalledReviewerReadsAsStalledOnTheBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(id, "ori"); err != nil {
+	if _, err := ps.AssignReview(id, "ori"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "ori", Phase: "reviewing"})
 	a := store.Agent{Project: testProject, Name: "ori"}
 	w.record(a, true, 0, seen("idle", "d1"))
 	standStill(t, w, testProject, "ori")
@@ -133,10 +129,7 @@ func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
 	if err := h.store.For("proj").PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.store.For("proj").SetState(store.AgentState{Agent: "dvalin", Phase: "working"},
-		store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, h.store.For("proj"), store.AgentState{Agent: "dvalin", Phase: "working"})
 	h.watch.record(a, true, 0, seen("idle", "d1"))
 	standStill(t, h.watch, "proj", "dvalin")
 

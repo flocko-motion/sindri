@@ -69,12 +69,12 @@ func reviewerOf(t *testing.T, ps *store.ProjectStore, prID string) string {
 
 // TestAnUnclaimedReviewReachesAnIdleReviewer is the fix for what left fili idle beside a PR waiting
 // on it: the row was written unassigned because every reviewer was busy, and the only thing that
-// ever claimed one was a reviewer choosing to ask. The hub now hands it over itself.
+// ever claimed one was a reviewer choosing to ask. The reviewer's own map takes it now.
 func TestAnUnclaimedReviewReachesAnIdleReviewer(t *testing.T) {
 	st, ps := pendingReview(t, "fili")
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir()})
 
-	e.prAct().AssignPendingReviews("repo")
+	e.LookProject("repo")
 
 	if got := reviewerOf(t, ps, "pr-waiting"); got != "fili" {
 		t.Errorf("review of pr-waiting held by %q, want fili", got)
@@ -86,14 +86,13 @@ func TestAnUnclaimedReviewReachesAnIdleReviewer(t *testing.T) {
 	}
 }
 
-// TestAReviewerMidTurnIsLeftAlone is the whole reason the sweep asks the watchdog first. Injecting
-// into a running turn is what failed before: the text lands in the input box and dies there when the
-// turn ends, so the assignment would be recorded and the reviewer would never hear of it.
+// TestAReviewerMidTurnIsLeftAlone is why the claim asks the observation first. A review is read on a
+// CLEARED session, and clearing one mid-turn discards whatever that turn was doing.
 func TestAReviewerMidTurnIsLeftAlone(t *testing.T) {
 	st, ps := pendingReview(t, "fili")
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true, Busy: map[string]bool{"fili": true}})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Busy: map[string]bool{"fili": true}})
 
-	e.prAct().AssignPendingReviews("repo")
+	e.LookProject("repo")
 
 	if got := reviewerOf(t, ps, "pr-waiting"); got != "" {
 		t.Errorf("review Assigned to %q mid-turn — it must wait for an idle prompt", got)
@@ -112,12 +111,12 @@ func TestAReviewerAlreadyHoldingOneIsNotGivenASecond(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(rid, "fili"); err != nil {
+	if _, err := ps.AssignReview(rid, "fili"); err != nil {
 		t.Fatal(err)
 	}
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir()})
 
-	e.prAct().AssignPendingReviews("repo")
+	e.LookProject("repo")
 
 	if got := reviewerOf(t, ps, "pr-waiting"); got != "" {
 		t.Errorf("pr-waiting handed to %q, which is already reading another PR", got)
@@ -131,18 +130,19 @@ func TestRetirementHoldsAcrossTheReviewQueueToo(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", Retired: true}); err != nil {
 		t.Fatal(err)
 	}
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir()})
 
-	e.prAct().AssignPendingReviews("repo")
+	e.LookProject("repo")
 
 	if got := reviewerOf(t, ps, "pr-waiting"); got != "" {
 		t.Errorf("a retired reviewer was handed %q", got)
 	}
 }
 
-// TestRepairReviewRowsFindsAGap covers the backstop: an open final PR with no live review row —
-// however it got that way — gets one, while an interim PR and one already covered are left alone.
-func TestRepairReviewRowsFindsAGap(t *testing.T) {
+// TestAFiledPRWithNoRowOpensOne is the repair, which is also the ordinary path: an open final PR
+// with no live review row — however it got that way — stands in pr/requesting and gains one, while
+// an interim PR and one already covered are left alone.
+func TestAFiledPRWithNoRowOpensOne(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +162,8 @@ func TestRepairReviewRowsFindsAGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
-	e.prAct().RepairReviewRows("repo")
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir()})
+	e.LookPRs("repo")
 
 	gapRevs, _ := ps.Reviews("pr-gap")
 	if len(gapRevs) == 0 {

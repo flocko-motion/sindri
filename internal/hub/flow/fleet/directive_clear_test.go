@@ -91,9 +91,7 @@ func TestBetweenSubtasksClearsThenDeliversTheDirective(t *testing.T) {
 		t.Fatalf("set parent: %v", err)
 	}
 	// Between subtasks: the feature is held, but nothing is currently Assigned within it.
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 
 	deps := &stubDeps{Root: root, CtxTokens: 80_000, CtxWindow: 200_000, CtxOK: true}
 	e := newEngine(t, st, deps)

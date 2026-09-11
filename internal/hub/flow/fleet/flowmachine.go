@@ -26,6 +26,10 @@ import (
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
+// deaf suppresses every announcement, so a topic can be proved to be a hint by dropping it. Set by
+// the one test that runs the real loop, and by SINDRI_DEAF for a whole suite run against the claim.
+var deaf = os.Getenv("SINDRI_DEAF") != ""
+
 // Beat is how often the engine looks for agents whose own cadence has come due. Short against every
 // declared tolerance, so what is felt is the cadence a condition asked for rather than this.
 const Beat = 2 * time.Second
@@ -72,7 +76,7 @@ func (e *Engine) Close() {
 // WakeRuns tells every unsettled run that something happened — the fleet's one slot freeing, above
 // all. Without it a queue waits out its poll to notice the slot it could have taken at once.
 func (e *Engine) WakeRuns(t machine.Topic) {
-	if e.runs == nil {
+	if deaf || e.runs == nil {
 		return
 	}
 	for _, s := range e.runAct().OpenRuns() {
@@ -118,31 +122,10 @@ func (e *Engine) storedState(s string) (string, time.Time, error) {
 	if strings.HasPrefix(st.Phase, a.Role+"/") {
 		return st.Phase, since, nil
 	}
-	if s := legacy(a.Role, st.Phase); s != "" {
-		return s, since, nil // a phase written before states were named; the agent has not moved
-	}
-	// Nothing stored, or a state belonging to a role this agent no longer has.
+	// Nothing stored, or a state belonging to a role this agent no longer has. A bare word used to
+	// be translated here, because verbs wrote where an agent stood in words of their own; with one
+	// writer there is nothing left to translate (-> writeState).
 	return agentflow.StartFor(a.Role), since, nil
-}
-
-// legacy maps a phase word written before states carried their role onto the state it means, "" when
-// there is none. A hub upgrading in place has rows saying "working", and an agent must not be swept
-// back to the start of its flow just because the vocabulary grew a prefix.
-func legacy(role, phase string) string {
-	named := map[string]string{
-		"idle": "idle", "working": "working", "submitted": "submitted",
-		"gating": "gating", "resolving": "resolving", "reviewing": "reviewing",
-		"planning": "planning", "collab": "collab",
-	}[phase]
-	if named == "" {
-		return ""
-	}
-	for _, s := range agentflow.Of(role) {
-		if s.Name == role+"/"+named {
-			return s.Name
-		}
-	}
-	return ""
 }
 
 // moveState writes an agent's new state, with the words the transition carried, and tells the
@@ -159,23 +142,19 @@ func (e *Engine) moveState(s, from, to, why string) error {
 	return nil
 }
 
-// writeState records the landing state on the agent's row.
+// writeState records the landing state on the agent's row — the ONE writer of where an agent stands
+// (-> internal/arch/onewriter_test.go).
 func (e *Engine) writeState(project, agent, from, to, why string) error {
 	ps := e.Store.For(project)
-	// Entering a resting state RELEASES the work. SetPhase alone preserves the row, which left an
-	// agent idle with a task still on it — free on the board and refused by the assigner at once.
+	why = from + " -> " + to + ": " + why
+	// Entering a resting state RELEASES the work: an agent left resting with a task still on its row
+	// is one the board shows as free and the assigner refuses (-> flow.Releases).
 	if flow.Releases(to) {
-		err := ps.SetState(store.AgentState{Agent: agent, Phase: to}, store.ReasonFreed, from+" -> "+to+": "+why)
-		e.Deps.Notify()
-		return err
+		if err := ps.SetHolding(agent, "", "", "", store.ReasonFreed, why); err != nil {
+			return err
+		}
 	}
-	if perr := ps.SetPhase(agent, to, store.ReasonAdvanced, from+" -> "+to+": "+why); perr == nil {
-		e.Deps.Notify()
-		return nil
-	}
-	st, _ := ps.GetState(agent)
-	err := ps.SetState(store.AgentState{Agent: agent, Task: st.Task, Branch: st.Branch,
-		Container: st.Container, Phase: to}, store.ReasonAdvanced, from+" -> "+to+": "+why)
+	err := ps.SetPhase(agent, to, store.ReasonAdvanced, why)
 	e.Deps.Notify()
 	return err
 }
@@ -226,6 +205,9 @@ func (e *Engine) subjects() []string {
 // Wake tells the machine that topic happened, so any agent watching for it looks now rather than at
 // its own next beat. A HINT: a dropped one costs at most that state's cadence, never correctness.
 func (e *Engine) Wake(project, agent string, topic machine.Topic) {
+	if deaf {
+		return
+	}
 	if e.flow != nil {
 		e.flow.Wake(project+"/"+agent, topic)
 	}
@@ -234,7 +216,7 @@ func (e *Engine) Wake(project, agent string, topic machine.Topic) {
 // WakeProject tells every agent in a project. What a task event means: the task nobody named could
 // be the next one for any of them.
 func (e *Engine) WakeProject(project string, topic machine.Topic) {
-	if e.flow == nil {
+	if deaf || e.flow == nil {
 		return
 	}
 	roster, err := e.Store.For(project).Roster()
@@ -248,7 +230,7 @@ func (e *Engine) WakeProject(project string, topic machine.Topic) {
 
 // WakeAll tells every agent the hub knows. What the board is told, the decider is told.
 func (e *Engine) WakeAll(topic machine.Topic) {
-	if e.flow == nil {
+	if deaf || e.flow == nil {
 		return
 	}
 	for _, s := range e.subjects() {

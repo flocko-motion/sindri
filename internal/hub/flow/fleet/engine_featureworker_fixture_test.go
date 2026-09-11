@@ -45,11 +45,9 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 	if openChild {
 		phase = "working"
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: phase,
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	// Work on the branch for submit to record.
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
 		t.Fatal(err)

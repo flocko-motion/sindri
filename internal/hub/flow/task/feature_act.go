@@ -11,6 +11,7 @@ package task
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"github.com/flo-at/sindri/internal/hub/world/task"
 	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
 	"io"
@@ -45,7 +46,7 @@ func (a *Act) ClaimContainer(project, worker string, c store.Task) (string, bool
 		return "", false, err
 	}
 	if len(children) == 0 {
-		if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Phase: "idle"},
+		if err := ps.SetHolding(worker, "", c.ID, c.ID,
 			store.ReasonClaimed, "claimed container "+c.ID+" with nothing open under it"); err != nil {
 			return "", false, err
 		}
@@ -69,7 +70,7 @@ func (a *Act) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 	if err != nil {
 		return 1, err
 	}
-	if st.Container == "" || st.Phase != "working" || st.Task == "" {
+	if st.Container == "" || !situation.Standing(st.Phase, "working") || st.Task == "" {
 		fmt.Fprintln(out, prompts.ReplyNothingToCheckpoint)
 		return 1, nil
 	}
@@ -125,9 +126,9 @@ func (a *Act) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 	// A checkpoint IS a leaf boundary, so an armed clear takes precedence over the next subtask:
 	// the agent goes idle holding the feature, and the clear fires before anything else is served.
 	if a.ClearArmedFor(c.Project, c.Agent) {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"},
+		_ = ps.SetHolding(c.Agent, "", st.Container, st.Container,
 			store.ReasonFreed, "checkpointed "+done+" with a clear armed")
-		a.Deps.Notify()
+		a.announceHolding(c.Project, c.Agent)
 		fmt.Fprintln(out, prompts.ReplyCheckpointedClearing(done, st.Container))
 		return 0, nil
 	}
@@ -147,9 +148,9 @@ func (a *Act) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 	if err != nil {
 		return 1, err
 	}
-	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"},
+	_ = ps.SetHolding(c.Agent, "", st.Container, st.Container,
 		store.ReasonAdvanced, "checkpointed "+done+", nothing left to claim under "+st.Container)
-	a.Deps.Notify()
+	a.announceHolding(c.Project, c.Agent)
 	if len(gated) > 0 {
 		fmt.Fprintf(out, "Checkpointed %s. %s\n", done, prompts.ReplyFeatureGated(st.Container, hubtask.OpenIDs(gated)))
 		return 0, nil
@@ -214,11 +215,10 @@ func (a *Act) StartSubtask(project, agent, container string, child store.Task) e
 	if err := ps.GrantNotes(agent, prompts.NotesPerClaim); err != nil {
 		return err
 	}
-	if err := ps.SetState(store.AgentState{
-		Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working",
-	}, store.ReasonClaimed, "claimed subtask "+child.ID+" under "+container); err != nil {
+	if err := ps.SetHolding(agent, child.ID, container, container,
+		store.ReasonClaimed, "claimed subtask "+child.ID+" under "+container); err != nil {
 		return err
 	}
-	a.Deps.Notify()
+	a.announceHolding(project, agent)
 	return nil
 }

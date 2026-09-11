@@ -7,7 +7,6 @@ package fleet
 
 import (
 	"context"
-	"fmt"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"log"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
@@ -32,12 +32,16 @@ func (e *Engine) doers() map[string]machine.Doer[flow.World] {
 		act.Retier.Name:      e.doRetier,
 		act.Yield.Name:       e.doYield,
 		act.Release.Name:     e.doRelease,
+		act.Interview.Name:   e.doInterview,
 		act.Submit.Name:      e.doSubmit,
 		act.TakeReview.Name:  e.doTakeReview,
 		act.DropReview.Name:  e.doDropReview,
 		act.Prod.Name:        e.doProd,
 		act.Promote.Name:     e.doPromote,
 		act.Rebase.Name:      e.doRebase,
+		act.Launch.Name:      e.doLaunch,
+		act.Stop.Name:        e.doStop,
+		act.Disown.Name:      e.doDisown,
 	}
 }
 
@@ -45,7 +49,7 @@ func (e *Engine) doers() map[string]machine.Doer[flow.World] {
 // The claim comes FIRST, so holding the work protects it while the preparation behind it runs — and
 // so a pod that is down or mid-restart still HOLDS the work it was given: delivery reports whether
 // the brief landed, and the agent is told what it holds on its next ask either way.
-func (e *Engine) doPickWork(ctx context.Context, w flow.World) (flow.Outcome, error) {
+func (e *Engine) doPickWork(_ context.Context, w flow.World) (flow.Outcome, error) {
 	if !w.HasNext {
 		return act.Nothing, nil
 	}
@@ -59,21 +63,13 @@ func (e *Engine) doPickWork(ctx context.Context, w flow.World) (flow.Outcome, er
 	if err != nil {
 		return act.Held, err
 	}
-	// The preparation runs INSIDE the hand-over: a model switch, else a clear, and the brief goes out
-	// behind whichever landed. One state covers the whole of it, so an event arriving mid-way cancels
-	// the hand-over rather than catching it between two states.
-	fired, perr := e.roleAct().PrepareAssignment(ctx, w.Project, w.Name, api.TierOrDefault(w.Next.Tier), dir)
-	if perr != nil {
-		return act.Held, perr
-	}
-	if fired {
-		return act.Done, nil // delivered behind the preparation
-	}
+	// The session was prepared BEFORE this state was reached — a model switch, else a clear, each
+	// its own state — so all that is left is to say what the agent now holds.
 	return act.Done, e.Harness.Say(w.Project, w.Name, dir, mail.PushOnly)
 }
 
 // doPickSubtask moves a feature holder onto its feature's next open child.
-func (e *Engine) doPickSubtask(ctx context.Context, w flow.World) (flow.Outcome, error) {
+func (e *Engine) doPickSubtask(_ context.Context, w flow.World) (flow.Outcome, error) {
 	if len(w.Subtasks) == 0 {
 		return act.Nothing, nil
 	}
@@ -82,9 +78,6 @@ func (e *Engine) doPickSubtask(ctx context.Context, w flow.World) (flow.Outcome,
 		return act.Nothing, err
 	}
 	dir := prompts.DirContainerWorking(w.Container, child.ID, w.Aim, w.Ceiling)
-	if fired, perr := e.roleAct().PrepareAssignment(ctx, w.Project, w.Name, api.TierOrDefault(child.Tier), dir); perr != nil || fired {
-		return act.Done, perr
-	}
 	return act.Done, e.Harness.Say(w.Project, w.Name, dir, mail.PushOnly)
 }
 
@@ -129,15 +122,111 @@ func (e *Engine) doYield(_ context.Context, w flow.World) (flow.Outcome, error) 
 
 // doRelease drops a feature that has already landed and returns the agent to the backlog.
 func (e *Engine) doRelease(_ context.Context, w flow.World) (flow.Outcome, error) {
-	ps := e.Store.For(w.Project)
-	err := ps.SetState(store.AgentState{Agent: w.Name, Phase: w.Phase},
+	err := e.Store.For(w.Project).SetHolding(w.Name, "", "", "",
 		store.ReasonLanded, "feature already landed: "+w.Container)
 	return act.Done, err
 }
 
-// doSubmit takes what the agent has: the quality gate first, then a pull request.
-func (e *Engine) doSubmit(ctx context.Context, w flow.World) (flow.Outcome, error) {
-	return act.Queued, fmt.Errorf("submit is still routed through the verb surface")
+// doSubmit takes what the agent has, unattended: the author answered for this tree before it got
+// here, so nothing in it can ask a question. What it does is the PR subject's (-> pr.TakeSubmit);
+// this says where each answer leaves the agent.
+func (e *Engine) doSubmit(_ context.Context, w flow.World) (flow.Outcome, error) {
+	qr, reused, err := e.prAct().TakeSubmit(w.Project, w.Name)
+	if err != nil {
+		// Back to the work rather than an error: the agent still holds it, and a submit that could not
+		// be taken is something for it to try again rather than something to strand it over.
+		_ = e.Store.For(w.Project).Log(w.Name, "submit-failed", err.Error())
+		return act.Failed, nil
+	}
+	if reused {
+		// The stored pass landed the pull request inside TakeSubmit, so there is nothing left to wait for.
+		_ = e.Harness.Say(w.Project, w.Name, "[hub] "+prompts.ReplyGateReused(qr.ID, prompts.ShortSHA(qr.Commit)), mail.PushOnly)
+		return act.Done, nil
+	}
+	_ = e.Harness.Say(w.Project, w.Name, "[hub] "+prompts.ReplyGateQueued(qr.ID, e.prAct().QueuePosition(qr.ID)), mail.PushOnly)
+	return act.Queued, nil
+}
+
+// doLaunch brings a reclaimed pod back up, so the work waiting for this agent has somewhere to land.
+// The request a human made is answered the moment this runs, whatever the launch then does: left
+// standing, the condition that brought the agent here holds again the instant it leaves.
+func (e *Engine) doLaunch(ctx context.Context, w flow.World) (flow.Outcome, error) {
+	e.roleAct().AnswerPodRequest(w.Project, w.Name)
+	if w.Up {
+		return act.Done, nil // already running; whatever asked has been answered by somebody else
+	}
+	if err := e.Harness.Start(ctx, w.Project, w.Name); err != nil {
+		_ = e.Store.For(w.Project).Log(w.Name, "launch", "failed: "+err.Error())
+		return act.Failed, nil
+	}
+	// The flag goes with the launch, not with the observation: it means a pod somebody took down on
+	// purpose, and it is no longer true the moment one is asked for. Left standing until the observer
+	// caught up, the condition that brought the agent here would hold again on the very next pass.
+	e.unpark(w.Project, w.Name)
+	_ = e.Store.For(w.Project).Log(w.Name, "wake", "started for work its role answers for")
+	return act.Done, nil
+}
+
+// unpark takes back the flag that says a pod was torn down on purpose.
+func (e *Engine) unpark(project, name string) {
+	ps := e.Store.For(project)
+	a, ok, err := ps.GetAgent(name)
+	if err != nil || !ok || !a.Stopped {
+		return
+	}
+	a.Stopped = false
+	if perr := ps.PutAgent(a); perr != nil {
+		log.Printf("hub: clearing %s's stopped flag: %v", name, perr)
+	}
+}
+
+// doStop takes an idle pod back. The session is preserved, so being wrong costs the next start's
+// latency and nothing more — which is why idleness alone triggers this and memory pressure never does.
+func (e *Engine) doStop(ctx context.Context, w flow.World) (flow.Outcome, error) {
+	e.roleAct().AnswerPodRequest(w.Project, w.Name)
+	if !w.Up {
+		return act.Done, nil // nothing running to reclaim
+	}
+	if err := e.Harness.Stop(ctx, w.Project, w.Name); err != nil {
+		_ = e.Store.For(w.Project).Log(w.Name, "stop", "did not land: "+err.Error())
+		return act.Failed, nil
+	}
+	e.park(w.Project, w.Name)
+	return act.Done, nil
+}
+
+// doDisown puts back a backlog task that ended up on a row whose role holds none, and frees the row.
+func (e *Engine) doDisown(_ context.Context, w flow.World) (flow.Outcome, error) {
+	held := w.Container
+	if held == "" {
+		held = w.Task
+	}
+	ps := e.Store.For(w.Project)
+	if err := e.prAct().SetStatus(w.Project, held, "open"); err != nil {
+		_ = ps.Log(w.Name, "unassign", held+": could not be put back — "+err.Error())
+		return act.Failed, nil
+	}
+	if err := ps.SetHolding(w.Name, "", "", "",
+		store.ReasonFreed, "a "+w.Role+" holds no backlog task: "+held); err != nil {
+		return act.Failed, err
+	}
+	_ = ps.Log(w.Name, "unassign", held+" (a "+w.Role+" holds no backlog task)")
+	e.WakeProject(w.Project, topic.TaskAvailable)
+	return act.Done, nil
+}
+
+// park records a pod taken down on purpose, so "stopped" (resumable) reads distinct from "down"
+// (crashed) even across a hub restart that drops the observer's own memory of it.
+func (e *Engine) park(project, name string) {
+	ps := e.Store.For(project)
+	a, ok, err := ps.GetAgent(name)
+	if err != nil || !ok || a.Stopped {
+		return
+	}
+	a.Stopped = true
+	if perr := ps.PutAgent(a); perr != nil {
+		log.Printf("hub: recording %s as stopped: %v", name, perr)
+	}
 }
 
 // doProd wakes an agent that holds work and has stopped doing it. Not relieved of the work: a stall
@@ -206,8 +295,12 @@ func (e *Engine) doTakeReview(ctx context.Context, w flow.World) (flow.Outcome, 
 		return act.Nothing, nil
 	}
 	req, _ := e.prAct().ReviewPrompt(home)
-	if err := e.prAct().AssignReview(ctx, home, id, prID, w.Name, req); err != nil {
+	claimed, err := e.prAct().AssignReview(ctx, home, id, prID, w.Name, req)
+	if err != nil {
 		return act.Failed, err
+	}
+	if !claimed {
+		return act.Nothing, nil // another reviewer reached the row first
 	}
 	return act.Done, nil
 }
@@ -219,10 +312,9 @@ func (e *Engine) doDropReview(_ context.Context, w flow.World) (flow.Outcome, er
 	if err != nil {
 		return act.Done, err
 	}
-	hps := e.Store.For(heldProject)
-	if err := hps.CloseReviews(held, "overtaken: the PR settled before a verdict"); err != nil {
-		return act.Done, err
-	}
+	// Through the one release, which is the only place a review is closed: a second path closing one
+	// is how a reviewer came to be freed somewhere the machine could not see it.
+	e.prAct().ReleaseReviewers(heldProject, held, "overtaken: the PR settled before a verdict")
 	_ = e.Harness.Say(w.Project, w.Name, prompts.MsgReviewCancelled(held), mail.MailAndPush)
 	return act.Done, nil
 }

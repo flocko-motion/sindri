@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
@@ -42,24 +44,20 @@ func (a *Act) DiscardPR(project, prID string) error {
 	// Only release an author still waiting on THIS PR. One that has moved on (or never
 	// blocked) must not be interrupted for a verdict it isn't expecting.
 	st, _ := ps.GetState(author)
-	if st.Phase == "submitted" || st.Phase == "resolving" {
+	if situation.Standing(st.Phase, "submitted", "resolving") {
 		// The interrupt needs it up; the verdict reaches it either way, mail being the half that
 		// waits for one that is down.
 		if a.Harness.Observe(project, author).Up {
 			_ = a.Harness.Interrupt(project, author)
 		}
 		_ = a.Harness.Say(project, author, prompts.MsgPRScrapped(prID), mail.MailAndPush.From(api.SenderUser))
-		// A container holder rests back onto its FEATURE, not fully idle: an interim/milestone PR
-		// being discarded does not mean the feature itself is done (sd-5ef393 — the same shape as
-		// FinishTask's own fix).
-		next := store.AgentState{Agent: author, Phase: "idle"}
-		if st.Container != "" {
-			next = store.AgentState{Agent: author, Container: st.Container, Branch: st.Container, Phase: "idle"}
-		}
-		_ = ps.SetState(next, store.ReasonFreed, "PR discarded: "+prID)
+		// A container holder keeps its FEATURE: an interim or milestone PR being discarded does not
+		// mean the feature itself is done (sd-5ef393 — the same shape as FinishTask's own fix). The
+		// author's map reads the PR going away and stands it back up (-> cond.PRSettled).
+		_ = ps.SetHolding(author, "", st.Container, st.Container, store.ReasonFreed, "PR discarded: "+prID)
 	}
 	_ = ps.Log(author, "pr-scrapped", prID)
-	a.Deps.Notify()
+	a.announceHolding(project, author)
 	return nil
 }
 
@@ -86,9 +84,11 @@ func (a *Act) ScrapPR(project, prID string) error {
 			_ = a.Harness.Interrupt(project, r.Author)
 			_ = a.Harness.Say(project, r.Author, prompts.MsgReviewCancelled(prID), mail.MailAndPush)
 		}
+		// The verdict recorded IS the release: the reviewer's own map reads a review it no longer
+		// holds and stands it down (-> cond.ReviewOvertaken).
 		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
-		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"}, store.ReasonFreed, "review cancelled: "+prID+" scrapped with its task")
 		_ = ps.Log(r.Author, "review-cancelled", prID)
+		a.Flow.Wake(project, r.Author, topic.PRVerdict)
 	}
 
 	// Discard the work. Best-effort but LOUD: a failure is recorded on the PR rather than

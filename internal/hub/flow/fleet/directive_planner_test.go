@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
@@ -16,9 +17,7 @@ func plannerAt(t *testing.T, phase string) string {
 	if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: "planner"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: c.Agent, Phase: phase})
 	dir, err := e.AgentDirective(context.Background(), c.Project, c.Agent)
 	if err != nil {
 		t.Fatalf("AgentDirective(%s): %v", phase, err)

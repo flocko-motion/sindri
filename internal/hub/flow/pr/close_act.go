@@ -9,7 +9,6 @@ package pr
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
@@ -180,20 +179,15 @@ func (a *Act) FinishTask(project, id string, scrap bool) error {
 	roster, _ := ps.Roster()
 	for _, ag := range roster {
 		if st, _ := ps.GetState(ag.Name); st.Task == id {
-			// A container holder rests onto its FEATURE, not fully idle — dropping it here
-			// silently unhooked the worker from the rest of what it still held (sd-5ef393).
-			next := store.AgentState{Agent: ag.Name, Phase: core.RestPhase(ag.Role)}
-			if st.Container != "" {
-				// Phase "idle" here, not core.RestPhase(ag.Role): only a worker holds a container today, so
-				// the two agree — worth another look if a planner or coauthor ever comes to hold one.
-				next = store.AgentState{Agent: ag.Name, Container: st.Container, Branch: st.Container, Phase: "idle"}
-			}
+			// A container holder keeps its FEATURE: dropping it unhooked the worker from the rest of
+			// what it held (sd-5ef393). Where losing the leaf leaves it is its map's (-> cond.TaskGone).
 			verb := "closed"
 			if scrap {
 				verb = "scrapped"
 			}
-			_ = ps.SetState(next, store.ReasonFreed, "task "+verb+": "+id)
+			_ = ps.SetHolding(ag.Name, "", st.Container, st.Container, store.ReasonFreed, "task "+verb+": "+id)
 			_ = ps.Log(ag.Name, "task-cancelled", id)
+			a.announceHolding(project, ag.Name)
 			// ESC first, so the cancellation lands on an idle prompt rather than queuing behind
 			// the work it is cancelling. Only the interrupt needs the agent up; the delivery is
 			// made either way, since mail is precisely what reaches one that is down.

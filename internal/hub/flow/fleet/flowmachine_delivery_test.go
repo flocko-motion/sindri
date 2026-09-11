@@ -34,10 +34,8 @@ func TestARejectionIsMailedAndTheNudgeIsNot(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "td-1", Agent: "bombur", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &stubDeps{Root: t.TempDir(), Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: "submitted"})
+	deps := &stubDeps{Root: t.TempDir()}
 	e := newEngine(t, st, deps)
 
 	if err := e.prAct().RejectPR("proj", "pr-1", "needs another pass"); err != nil {
@@ -52,10 +50,16 @@ func TestARejectionIsMailedAndTheNudgeIsNot(t *testing.T) {
 		t.Error("a rejection should name its author as the sender")
 	}
 
+	// The rejection is a fact; the machine is what reads it and puts the author back on the round,
+	// which is what makes it visible to the stall watch at all (-> cond.Rejected).
+	e.Look("proj", "bombur")
 	if !e.roleAct().NudgeStalled("proj", "bombur", flowtest.Saying("idle"), agent.StallDwell+time.Minute) {
 		t.Fatal("a rejected worker gone quiet past the dwell should be nudged")
 	}
-	if len(deps.Delivered) != 2 || deps.Delivered[1].Mail || !deps.Delivered[1].Push {
+	// The LAST delivery, since landing on the next round tells the agent its brief on the way past
+	// (-> worker/reworking's Tells). A nudge is push-only whatever came before it.
+	last := deps.Delivered[len(deps.Delivered)-1]
+	if last.Mail || !last.Push {
 		t.Fatalf("a stall nudge must be push-only, got %+v", deps.Delivered)
 	}
 }

@@ -29,11 +29,7 @@ func Table[W any](states []State[W]) string {
 			fmt.Fprintf(&b, "    on %-20s -> %-26s %s\n", t.On.EventName(), t.To, t.Why)
 		}
 		for _, v := range s.Verbs {
-			to := v.To
-			if to == Stay {
-				to = "(stays)"
-			}
-			fmt.Fprintf(&b, "    verb %-18s -> %-26s %s\n", v.Verb.Name, to, v.Why)
+			fmt.Fprintf(&b, "    verb %-18s %s\n", v.Verb.Name, v.Why)
 		}
 	}
 	return b.String()

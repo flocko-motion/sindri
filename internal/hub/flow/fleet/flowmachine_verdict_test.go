@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"io"
 	"path/filepath"
@@ -28,13 +29,18 @@ func verdictFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: "bombur"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-a", Branch: "pr-a", Phase: "submitted"},
-		store.ReasonAdvanced, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &stubDeps{Root: t.TempDir(), Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "td-a", Branch: "pr-a", Phase: "submitted"})
+	deps := &stubDeps{Root: t.TempDir()}
 	e := newEngine(t, st, deps)
-	flowtest.AssignReviewer(t, ps, "pr-a", "fili")
+	flowtest.Reviewer(t, ps, "fili")
+	flowtest.FileReview(t, ps, "pr-a")
+	e.Look("repo", "fili") // its own map takes the waiting review, as the hub's beat would
+	if held, _ := ps.ReviewingPR("fili"); held != "pr-a" {
+		t.Fatalf("setup: fili should hold pr-a, got %q", held)
+	}
+	// The hand-over above said what it had to say. What these tests are about is what the VERDICT
+	// then does, so the recorder starts empty from here.
+	deps.Injected, deps.InjectedText, deps.Delivered, deps.Cleared = nil, nil, nil, nil
 	return e, ps, deps
 }
 
@@ -48,7 +54,10 @@ func TestApproveLeavesTheReviewerIdleAndQuiet(t *testing.T) {
 	if code, err := e.prAct().CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if st, err := ps.GetState("fili"); err != nil || st.Phase != "idle" {
+	// The verdict records itself and announces; the MACHINE is what reads a review nobody holds any
+	// more and stands the reviewer down, which is a beat away in production and a look here.
+	e.Look("repo", "fili")
+	if st, err := ps.GetState("fili"); err != nil || st.Phase != reviewer.Idle {
 		t.Fatalf("fili is on %q (err %v), want idle — that is what the machine picks up from", st.Phase, err)
 	}
 	for _, name := range deps.Injected {
@@ -112,7 +121,8 @@ func TestRejectLeavesTheReviewerIdleAndQuiet(t *testing.T) {
 	if code, err := e.prAct().CmdReject(c, []string{"pr-a", "not", "yet"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdReject: code=%d err=%v", code, err)
 	}
-	if st, err := ps.GetState("fili"); err != nil || st.Phase != "idle" {
+	e.Look("repo", "fili")
+	if st, err := ps.GetState("fili"); err != nil || st.Phase != reviewer.Idle {
 		t.Fatalf("fili is on %q (err %v), want idle", st.Phase, err)
 	}
 	for _, name := range deps.Injected {

@@ -36,8 +36,9 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.TaskFlow().HealPlannerTasks()              // a planner can't hold a backlog task — release any stale claim
-	h.PRFlow().ReconcileMergingPRs()             // a merge in flight when we last died → merge-failed (outcome unknown)
+	// A planner holding a backlog task and a merge left in flight are both repaired by the maps that
+	// own them now — the planner's own disowning state, and pr/merging's orphan exit — so nothing is
+	// asked for here that is only reachable at boot.
 	h.RunFlow().ReconcileRunningRuns(h.lifetime) // a run in flight when we last died → failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the

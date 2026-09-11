@@ -25,9 +25,7 @@ func splitTree(t *testing.T) (*Act, *store.ProjectStore) {
 	if err := ps.UpsertTask(store.Task{ID: "sd-LEAF", Status: "in_progress", ParentID: "sd-FEAT", Priority: "P2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Phase: "working"})
 	return a, ps
 }
 
@@ -48,9 +46,7 @@ func TestAContainerIsNotOfferedWhileSomebodyIsInside(t *testing.T) {
 	}
 
 	// Once its holder lets go, the tree is free again — the guard is about occupancy, not the shape.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})
 	containers, err = ps.OpenContainers()
 	if err != nil {
 		t.Fatal(err)
@@ -70,9 +66,7 @@ func TestAContainerIsNotOfferedWhileSomebodyIsInside(t *testing.T) {
 func TestASplitHierarchyHealsItself(t *testing.T) {
 	a, ps := splitTree(t)
 	// The split, as a reparenting leaves it: sudri holding the feature dvalin is inside.
-	if err := ps.SetState(store.AgentState{Agent: "sudri", Container: "sd-FEAT", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "sudri", Container: "sd-FEAT", Phase: "working"})
 
 	if !a.HealSplit(proj, "sudri") {
 		t.Fatal("the split was not noticed")
@@ -95,9 +89,7 @@ func TestASplitHierarchyHealsItself(t *testing.T) {
 func TestHealingLeavesAnUndividedFeatureAlone(t *testing.T) {
 	a, ps := splitTree(t)
 	// dvalin holds BOTH the feature and the subtask under it — the normal feature flow.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Container: "sd-FEAT", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Container: "sd-FEAT", Phase: "working"})
 
 	if a.HealSplit(proj, "dvalin") {
 		t.Error("an agent working inside its own feature was released from it")

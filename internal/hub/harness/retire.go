@@ -3,7 +3,7 @@
 // job:     set and clear an agent's retired flag — hand it no NEW work, while what it
 // already holds runs to completion.
 // limits:  the flag only; the assignment gate that reads it is the workflow's
-// (-> fleet.ClaimNext), and stopping the pod stays a separate act.
+// (-> the assigning state), and stopping the pod stays a separate act.
 package harness
 
 import "fmt"

@@ -58,16 +58,15 @@ func (a *Act) AssignPlan(project, agent, goal, taskID string) error {
 	if err := a.Harness.Say(project, agent, brief, mail.MailAndPush); err != nil {
 		return err
 	}
-	st, _ := ps.GetState(agent)
 	// A brief is a planner's claim: it reads the code and the backlog to work one out, which is the
 	// same vantage point a worker's task gives (-> store.GrantNotes).
 	if err := ps.GrantNotes(agent, prompts.NotesPerClaim); err != nil {
 		return err
 	}
-	st.Agent, st.Phase = agent, "planning"
-	_ = ps.SetState(st, store.ReasonClaimed, "Assigned to plan: "+subject)
+	// The brief is DELIVERED, which is the whole of the claim: a planner's work is the conversation
+	// it has just been given, and where that leaves it is read off the session (-> cond.InConversation).
 	_ = ps.Log(agent, "plan", subject)
-	a.Deps.Notify()
+	a.announceHolding(project, agent)
 	return nil
 }
 
@@ -125,25 +124,6 @@ func (a *Act) openPlannerPR(ps *store.ProjectStore, agent string) (store.PR, boo
 		}
 	}
 	return store.PR{}, false, nil
-}
-
-// CmdState lets a planner flip its own resting state between "planning" and "idle".
-func (a *Act) CmdState(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) != 1 || (args[0] != "planning" && args[0] != "idle") {
-		fmt.Fprintln(out, "usage: state <planning|idle>")
-		return 2, nil
-	}
-	ps := a.Store.For(c.Project)
-	st, _ := ps.GetState(c.Agent)
-	st.Agent, st.Phase = c.Agent, args[0]
-	// Both values are the planner's OWN resting labels (CmdState's own doc), never new work claimed —
-	// so this is a release either way, whichever of the two names it settles on.
-	if err := ps.SetState(st, store.ReasonFreed, "planner set its own state to "+args[0]); err != nil {
-		return 1, err
-	}
-	a.Deps.Notify()
-	fmt.Fprintf(out, "state: %s\n", args[0])
-	return 0, nil
 }
 
 // CmdCreateTask lets a planner propose a task, flagged pending the user's approval.

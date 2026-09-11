@@ -7,6 +7,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -144,9 +145,7 @@ func TestUnretiringAnEscalatedAgentStillWaitsOnTheEscalation(t *testing.T) {
 // sit silent forever instead of seeing DirRetired even once.
 func TestKickoffReachesARetiredAgent(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})
 	a, _, err := ps.GetAgent("dvalin")
 	if err != nil {
 		t.Fatal(err)

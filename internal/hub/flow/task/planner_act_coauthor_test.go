@@ -1,7 +1,7 @@
 package task
 
 import (
-	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/coauthor"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"path/filepath"
 	"strings"
@@ -35,9 +35,7 @@ func coauthorFixture(t *testing.T) (*Act, *store.ProjectStore, *flowtest.Hub) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "brokk", Phase: core.RestPhase("coauthor")}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "brokk", Phase: coauthor.Collab})
 	if err := ps.PutPR(store.PR{
 		ID: "pr-a", Task: "sd-1", Agent: "bombur", Branch: "sd-1", Base: "main", Status: "open",
 	}); err != nil {
@@ -46,7 +44,7 @@ func coauthorFixture(t *testing.T) (*Act, *store.ProjectStore, *flowtest.Hub) {
 	if _, err := ps.AddReview("pr-a", "review it"); err != nil {
 		t.Fatal(err)
 	}
-	deps := &flowtest.Hub{Root: root, Alive: true}
+	deps := &flowtest.Hub{Root: root}
 	return newActWith2(t, st, deps), ps, deps
 }
 
@@ -96,8 +94,8 @@ func TestACoauthorsApprovalCarriesItsName(t *testing.T) {
 	}
 	// It holds no review, so there is no queue to send it back to: a reviewer's verdict ends in
 	// "idle" and a nudge to ask for the next one, and both would be lies told to a coauthor.
-	if st, _ := ps.GetState("brokk"); st.Phase != "collab" {
-		t.Errorf("phase after approving = %q, want collab — its verdict must not move it", st.Phase)
+	if st, _ := ps.GetState("brokk"); st.Phase != coauthor.Collab {
+		t.Errorf("phase after approving = %q, want %s — its verdict must not move it", st.Phase, coauthor.Collab)
 	}
 	for i, name := range deps.Injected {
 		if name == "brokk" {
@@ -140,8 +138,8 @@ func TestACoauthorsRejectionSpeaksInItsOwnName(t *testing.T) {
 	if deps.Delivered[told].Sender != "brokk" {
 		t.Errorf("sender = %q, want brokk: provenance is stated, never read out of the wording", deps.Delivered[told].Sender)
 	}
-	if st, _ := ps.GetState("brokk"); st.Phase != "collab" {
-		t.Errorf("phase after rejecting = %q, want collab", st.Phase)
+	if st, _ := ps.GetState("brokk"); st.Phase != coauthor.Collab {
+		t.Errorf("phase after rejecting = %q, want %s", st.Phase, coauthor.Collab)
 	}
 }
 

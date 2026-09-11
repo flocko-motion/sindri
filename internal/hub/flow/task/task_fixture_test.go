@@ -1,7 +1,6 @@
 package task
 
 import (
-	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
 	"path/filepath"
 	"testing"
 
@@ -75,9 +74,7 @@ func workerActComments(t *testing.T, tasks []store.Task, container, current stri
 	}
 	if container != "" || current != "" {
 		st := store.AgentState{Agent: "dvalin", Container: container, Task: current, Phase: "working"}
-		if err := ps.SetState(st, store.ReasonClaimed, "test setup"); err != nil {
-			t.Fatalf("set state: %v", err)
-		}
+		flowtest.Place(t, ps, st)
 	}
 	return a, registry.Caller{Project: proj, Agent: "dvalin", Role: "worker"}
 }
@@ -100,10 +97,6 @@ func newActWith2(t *testing.T, st *store.Store, d *flowtest.Hub) *Act {
 	}
 	return New(flowtest.Over(st, d))
 }
-
-// agent is the acting half of an agent's own flow: preparing the session a claim lands in is the
-// agent's business, and a test about WITHHOLDING a claim has to reach both.
-func (a *Act) agent() *agentflow.Act { return agentflow.New(a.Core) }
 
 // poolFixture seeds one open PR with an unclaimed review row — the shape a pooled reviewer is
 // handed, and the scope a reviewer's task reads are judged against.

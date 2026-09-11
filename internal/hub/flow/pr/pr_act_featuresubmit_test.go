@@ -42,11 +42,9 @@ func featureWorker(t *testing.T, openChild bool) (*Act, *store.ProjectStore, reg
 	if openChild {
 		phase = "working"
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: phase,
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	// Work on the branch for submit to record.
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -73,8 +71,9 @@ func TestFinishedFeatureSubmitsItself(t *testing.T) {
 		t.Errorf("the PR should cover the feature branch, got task=%q branch=%q", pr.Task, pr.Branch)
 	}
 	// It stays the feature's worker while the PR is out, so a verdict comes back to the right loop.
-	if s, _ := ps.GetState("dain"); s.Phase != "submitted" || s.Container != "td-EPIC" {
-		t.Errorf("state after submit = {phase:%q container:%q}, want {submitted td-EPIC}", s.Phase, s.Container)
+	// Where it waits is its own map's, off the pull request it now has out (-> cond.OwnPROpen).
+	if s, _ := ps.GetState("dain"); s.Container != "td-EPIC" {
+		t.Errorf("container after submit = %q, want the feature still held", s.Container)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
@@ -99,9 +100,9 @@ func (a *Act) completeReview(prProject, home, prID, agent, verdict, findings str
 			}
 		}
 	}
-	_ = a.Store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonFreed, "verdict given on "+prID)
-	// A verdict is not where a reviewer's loop ends, and nothing here has to say so: idle is a state
-	// the machine watches, and the next pull request arrives as its own hand-over.
+	// The verdict recorded IS the release: its own map reads a review it no longer holds
+	// (-> cond.ReviewDone), and the next pull request arrives as its own hand-over.
+	a.Flow.Wake(home, agent, topic.PRVerdict)
 }
 
 // ApprovePR is the human approve path (TUI/CLI), and the agent's own is CmdApprove: both are the
@@ -173,13 +174,13 @@ func (a *Act) CmdRevoke(c registry.Caller, args []string, out io.Writer) (int, e
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	// Back on the branch, exactly where submitting took it from — the container too, so a feature
-	// worker returns to its own tree rather than falling out of the loop.
-	if err := ps.SetState(store.AgentState{
-		Agent: c.Agent, Task: st.Task, Branch: pr.Branch, Container: st.Container, Phase: "working",
-	}, store.ReasonAdvanced, "PR withdrawn, resuming work: "+pr.ID); err != nil {
+	// The branch submitting took it from, container and all, so a feature worker returns to its own
+	// tree. Where that leaves it is its map's (-> cond.PRSettled).
+	if err := ps.SetHolding(c.Agent, st.Task, pr.Branch, st.Container,
+		store.ReasonAdvanced, "PR withdrawn, resuming work: "+pr.ID); err != nil {
 		return 1, err
 	}
+	a.announceHolding(c.Project, c.Agent)
 	// Whoever was reading it is reading a branch about to change under them.
 	a.ReleaseReviewers(c.Project, pr.ID, "withdrawn by its author before a verdict")
 	_ = ps.LogPR(pr.ID, "withdrawn", "by "+c.Agent+": "+reason)
@@ -239,17 +240,12 @@ func (a *Act) reject(project, prID, feedback, voice string) error {
 			return err
 		}
 	}
-	phase := "working"
-	if ag, ok, _ := ps.GetAgent(pr.Agent); ok && ag.Role == "planner" {
-		phase = core.RestPhase(ag.Role)
-	}
-	// The held container is carried through the rejection: SetState writes the whole row, so leaving
-	// it out dropped a feature worker out of the collaborative loop on a rejected milestone — it went
-	// idle and claimed unrelated work, abandoning the feature branch its subtasks were on.
+	// The work comes back, container and all: dropping it took a feature worker off its own branch on
+	// a rejected milestone. Where the rejection leaves it is its map's (-> cond.Rejected).
 	prior, _ := ps.GetState(pr.Agent)
-	_ = ps.SetState(store.AgentState{
-		Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Container: prior.Container, Phase: phase,
-	}, store.ReasonRejected, "rejected by "+voice+": "+prID)
+	_ = ps.SetHolding(pr.Agent, pr.Task, pr.Branch, prior.Container,
+		store.ReasonRejected, "rejected by "+voice+": "+prID)
+	a.announceHolding(project, pr.Agent)
 
 	who, msg := voice, prompts.MsgRejectedByAgent(voice, pr.ID)
 	if voice == api.SenderUser {

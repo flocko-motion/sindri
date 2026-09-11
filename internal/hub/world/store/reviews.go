@@ -61,13 +61,20 @@ func (p *ProjectStore) ApprovalCounts() (map[string]int, error) {
 }
 
 // AssignReview marks a review as picked up by an author (in progress).
-func (p *ProjectStore) AssignReview(id int64, author string) error {
-	_, err := p.s.db.Exec(`UPDATE reviews SET author=?, review_at=? WHERE id=? AND project=?`,
+func (p *ProjectStore) AssignReview(id int64, author string) (claimed bool, err error) {
+	// Only while nobody holds it. Every reviewer decides for itself now, so two looking at once would
+	// otherwise both write the row and the second would silently take a review the first is already
+	// checking out — the claim has to be the thing that settles it.
+	res, err := p.s.db.Exec(`UPDATE reviews SET author=?, review_at=? WHERE id=? AND project=? AND author=''`,
 		author, time.Now().UTC().Format(time.RFC3339), id, p.project)
 	if err != nil {
-		return fmt.Errorf("assign review %d: %w", id, err)
+		return false, fmt.Errorf("assign review %d: %w", id, err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("assign review %d: %w", id, err)
+	}
+	return n > 0, nil
 }
 
 // UnclaimedReview returns the oldest review nobody is doing, for a PR that is still open — what a

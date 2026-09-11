@@ -9,7 +9,7 @@ import (
 // runEngine seeds a worker with a workspace, for the tests that queue a run through the machine.
 func runEngine(t *testing.T) (*Engine, *store.ProjectStore) {
 	t.Helper()
-	e := storelessEngine(t, &stubDeps{Alive: true})
+	e := storelessEngine(t, &stubDeps{})
 	if err := e.Store.RegisterProject("repo", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}

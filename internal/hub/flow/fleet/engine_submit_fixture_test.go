@@ -50,8 +50,6 @@ func submitEngine(t *testing.T) (*Engine, *store.ProjectStore, string, registry.
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "the task", Status: "in_progress"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	return newEngine(t, st, &stubDeps{Root: root}), ps, root, registry.Caller{Project: "proj", Agent: "bombur", Role: "worker"}
 }

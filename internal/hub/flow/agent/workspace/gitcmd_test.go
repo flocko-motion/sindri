@@ -68,9 +68,7 @@ func gitEngine(t *testing.T) (*Act, registry.Caller, string, string) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"})
 	return newActOn(t, st, &flowtest.Hub{Root: root}), registry.Caller{Project: proj, Agent: "eitri", Role: "worker"}, wt, root
 }
 
@@ -412,9 +410,7 @@ func manualEngine(t *testing.T, root, wt string) (*Act, registry.Caller) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: rel}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"})
 	return newActOn(t, st, &flowtest.Hub{Root: root}), registry.Caller{Project: proj, Agent: "eitri", Role: "worker"}
 }
 

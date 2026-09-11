@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,9 +58,7 @@ func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Phase: "idle"})
 	container.Use(&fakeRuntime{pane: idlePane}) // a running pod with a pane to type into
 	agentport.Use(claude.New())                 // the real transcript reader, over our own files
 	t.Cleanup(func() {

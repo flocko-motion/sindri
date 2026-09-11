@@ -92,17 +92,20 @@ func (e *Engine) moveTaskState(s, from, to, why string) error {
 		return err
 	}
 	_ = e.taskAct().RefreshTask(project, id)
-	e.WakeProject(project, taskTopicFor(to))
+	e.WakeProject(project, taskTopicFor(from, to))
 	return nil
 }
 
-// taskTopicFor is what a task landing in a state means to everybody watching it.
-func taskTopicFor(state string) machine.Topic {
-	switch state {
-	case flowtask.Open:
-		return topic.TaskAvailable
-	case flowtask.Closed:
+// taskTopicFor is what a task landing in a state means to everybody watching it. It takes where the
+// task CAME FROM as well: a proposal opening is the approval gate opening, which is a different
+// event from a task merely being claimable — it is what frees a feature holder standing in front of
+// gated children (-> cond.SubtasksGated), and that is the only thing watching for it.
+func taskTopicFor(from, to string) machine.Topic {
+	switch {
+	case to == flowtask.Closed:
 		return topic.TaskClosed
+	case from == flowtask.Proposed && to == flowtask.Open:
+		return topic.TaskApproved
 	}
 	return topic.TaskAvailable
 }

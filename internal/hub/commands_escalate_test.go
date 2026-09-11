@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -21,9 +23,7 @@ func escalatedWorker(t *testing.T, question string) (*Hub, *store.ProjectStore) 
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	if out, code := execAs(t, h, "dvalin", append([]string{"escalate"}, strings.Fields(question)...)...); code != 0 {
 		t.Fatalf("escalate failed (%d): %s", code, out)
 	}
@@ -174,7 +174,7 @@ func TestAnEscalatedPlannerShipsNothing(t *testing.T) {
 	if reason := blockedFor(t, h, "dvalin", "openspec"); !strings.Contains(reason, q) {
 		t.Errorf("openspec should be held with the planner's own question: %q", reason)
 	}
-	for _, verb := range []string{"create-task", "edit-task", "prioritise-task", "task", "state"} {
+	for _, verb := range []string{"create-task", "edit-task", "prioritise-task", "task"} {
 		if reason := blockedFor(t, h, "dvalin", verb); reason != "" {
 			t.Errorf("%s only proposes or records, so it stays open while escalated: %q", verb, reason)
 		}
@@ -202,7 +202,7 @@ func TestAHeldVerbAlsoREFUSESToRun(t *testing.T) {
 		t.Errorf("a held submit registered a PR anyway: %v", prs)
 	}
 	st, _ := ps.GetState("dvalin")
-	if st.Phase != "working" || st.Escalation != q {
+	if st.Phase != worker.Working || st.Escalation != q {
 		t.Errorf("nothing about the agent should have moved, got phase %q escalation %q", st.Phase, st.Escalation)
 	}
 }
@@ -426,9 +426,7 @@ func TestResumingAnUnescalatedAgentSaysNothing(t *testing.T) {
 // wake, and the release from a stop is the one push that has to reach it anyway.
 func TestTheResumeNoticeIsNotEatenByTheWakeGate(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonFreed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})
 	a, _, _ := ps.GetAgent("dvalin")
 	a.Retired = true
 	if err := ps.PutAgent(a); err != nil {

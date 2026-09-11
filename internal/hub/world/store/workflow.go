@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS prs (
   created_at TEXT NOT NULL DEFAULT '',
   kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
   updated_at TEXT NOT NULL DEFAULT '', -- stamped by every PutPR, for the active filter (-> api.PRFilterActive)
+  merge_asked INTEGER NOT NULL DEFAULT 0, -- a human asked for this merge; the machine performs it
   PRIMARY KEY (project, id)
 );
 -- The tasks sindri owns, and the authority for them. The tasks table above is a read model the
@@ -331,54 +332,56 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state, leaving the escalation alone (its only writers are
-// SetEscalation/ClearEscalation). reason and detail are required (-> StateReason). A state_log
-// failure is logged, not returned: telemetry must not fail the write it observes.
-func (p *ProjectStore) SetState(st AgentState, reason StateReason, detail string) error {
-	if st.Phase == "" {
-		st.Phase = "idle"
-	}
+// SetHolding records what an agent HOLDS — task, branch, feature — leaving where it stands alone.
+// Two facts with two writers: one call wrote both until twenty-eight places moved an agent without
+// deciding anything (-> SetPhase). A state_log failure is logged, never returned.
+func (p *ProjectStore) SetHolding(agent, task, branch, container string, reason StateReason, detail string) error {
 	_, err := p.s.db.Exec(`
 		INSERT INTO agent_state (project,agent,task,branch,phase,container,phase_since) VALUES (?,?,?,?,?,?,?)
-		ON CONFLICT(project,agent) DO UPDATE SET task=excluded.task, branch=excluded.branch, phase=excluded.phase,
-		  container=excluded.container, phase_since=CASE WHEN agent_state.phase=excluded.phase THEN agent_state.phase_since ELSE excluded.phase_since END`,
-		p.project, st.Agent, st.Task, st.Branch, st.Phase, st.Container, time.Now().UTC().Format(time.RFC3339))
+		ON CONFLICT(project,agent) DO UPDATE SET task=excluded.task, branch=excluded.branch,
+		  container=excluded.container`,
+		p.project, agent, task, branch, restingPhase, container, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
-		return fmt.Errorf("set state %s: %w", st.Agent, err)
+		return fmt.Errorf("set holding %s: %w", agent, err)
 	}
-	if lerr := p.LogState(st.Agent, reason, detail+whatChanged(st.Phase, st.Task, st.Container)); lerr != nil {
+	if lerr := p.LogState(agent, reason, detail+whatChanged("", task, container)); lerr != nil {
 		log.Printf("hub: %v", lerr)
 	}
 	return nil
 }
 
+// restingPhase says nothing: no role declares it, and an undeclared word reads as that role's start.
+const restingPhase = "idle"
+
 // whatChanged appends the written phase (and task/container) to a state_log detail — "what was it",
 // not only "why" — so a write that drops a held container leaves a trace either way.
 func whatChanged(phase, task, container string) string {
-	s := " -> phase=" + phase
+	s := " ->"
+	if phase != "" {
+		s += " phase=" + phase
+	}
 	if task != "" {
 		s += " task=" + task
 	}
 	if container != "" {
 		s += " container=" + container
 	}
+	if s == " ->" {
+		return " -> holding nothing"
+	}
 	return s
 }
 
-// SetPhase changes only an agent's phase, leaving task, branch and container as they were — skipping
-// the read-then-echo SetState forces is how a held container got dropped at four call sites. Needs an
-// existing row (SetState creates those); reason/detail follow SetState's own contract.
+// SetPhase writes where an agent STANDS, leaving what it holds alone. The stamp moves only on a real
+// change, so a state's age is its own. ONE caller, the machine (-> internal/arch/onewriter_test.go).
 func (p *ProjectStore) SetPhase(agent, phase string, reason StateReason, detail string) error {
-	res, err := p.s.db.Exec(
-		`UPDATE agent_state SET phase=?, phase_since=CASE WHEN phase=? THEN phase_since ELSE ? END WHERE project=? AND agent=?`,
-		phase, phase, time.Now().UTC().Format(time.RFC3339), p.project, agent)
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,task,branch,phase,container,phase_since) VALUES (?,?,'','',?,'',?)
+		ON CONFLICT(project,agent) DO UPDATE SET phase=excluded.phase,
+		  phase_since=CASE WHEN agent_state.phase=excluded.phase THEN agent_state.phase_since ELSE excluded.phase_since END`,
+		p.project, agent, phase, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("set phase %s: %w", agent, err)
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("set phase %s: %w", agent, err)
-	} else if n == 0 {
-		return fmt.Errorf("set phase %s: no existing state row (use SetState first)", agent)
 	}
 	if lerr := p.LogState(agent, reason, detail+whatChanged(phase, "", "")); lerr != nil {
 		log.Printf("hub: %v", lerr)
@@ -641,52 +644,4 @@ func (p *ProjectStore) AwaitingPR(agent string) (pr, task string, err error) {
 		return "", "", fmt.Errorf("awaiting pr for %s: %w", agent, err)
 	}
 	return pr, task, nil
-}
-
-// PRState is where the machine has a merge intent, and when it got there. "open" alone cannot tell a
-// PR nobody has read from one a reviewer holds, and both from one at the gate.
-func (p *ProjectStore) PRState(id string) (state, since string, err error) {
-	row := p.s.db.QueryRow(`SELECT state, state_since FROM prs WHERE project=? AND id=?`, p.project, id)
-	if err := row.Scan(&state, &since); err != nil {
-		if err == sql.ErrNoRows {
-			return "", "", nil
-		}
-		return "", "", fmt.Errorf("pr state %s: %w", id, err)
-	}
-	return state, since, nil
-}
-
-// SetPRState moves a merge intent, stamping only a real change so a state's age is its own.
-func (p *ProjectStore) SetPRState(id, state string) error {
-	_, err := p.s.db.Exec(
-		`UPDATE prs SET state=?, state_since=CASE WHEN state=? THEN state_since ELSE ? END WHERE project=? AND id=?`,
-		state, state, time.Now().UTC().Format(time.RFC3339), p.project, id)
-	if err != nil {
-		return fmt.Errorf("set pr state %s: %w", id, err)
-	}
-	return nil
-}
-
-// RunState is where the machine has a run, and when it got there. Its own column because a state the
-// machine cannot store is one it can never enter — "dropping" has no status of its own.
-func (p *ProjectStore) RunState(id string) (state, since string, err error) {
-	row := p.s.db.QueryRow(`SELECT state, state_since FROM runs WHERE project=? AND id=?`, p.project, id)
-	if err := row.Scan(&state, &since); err != nil {
-		if err == sql.ErrNoRows {
-			return "", "", nil
-		}
-		return "", "", fmt.Errorf("run state %s: %w", id, err)
-	}
-	return state, since, nil
-}
-
-// SetRunState moves a run, stamping only a real change so a state's age is its own.
-func (p *ProjectStore) SetRunState(id, state string) error {
-	_, err := p.s.db.Exec(
-		`UPDATE runs SET state=?, state_since=CASE WHEN state=? THEN state_since ELSE ? END WHERE project=? AND id=?`,
-		state, state, time.Now().UTC().Format(time.RFC3339), p.project, id)
-	if err != nil {
-		return fmt.Errorf("set run state %s: %w", id, err)
-	}
-	return nil
 }

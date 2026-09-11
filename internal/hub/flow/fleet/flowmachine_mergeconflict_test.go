@@ -65,11 +65,11 @@ func TestAnInterimConflictKeepsItsTask(t *testing.T) {
 	}
 }
 
-// TestFinishingAnInterimContributionOnlyChangesPhase guards finishPartialMerge's non-feature arm:
-// by construction (promoteToFeature only touches a "working" phase) an interim PR's agent never
-// picks up a container while its PR is out, so the fix — SetPhase instead of a whole-row write —
-// must land the agent back on exactly the task and branch it already held.
-func TestFinishingAnInterimContributionOnlyChangesPhase(t *testing.T) {
+// TestAnInterimMergePutsItsAuthorBackOnTheSameWork: an interim merge ends nothing. The author's own
+// map is what puts it back — the merge writes the pull request and wakes — and it must land on
+// exactly the task and branch it already held, since a milestone changes the base under a branch it
+// never let go of.
+func TestAnInterimMergePutsItsAuthorBackOnTheSameWork(t *testing.T) {
 	e, ps, _, _ := leafWorker(t, "submitted")
 	if err := ps.PutPR(store.PR{
 		ID: "pr-td-LEAF", Task: "td-LEAF", Agent: "dain", Branch: "td-LEAF", Base: "main", Status: "approved", Kind: "interim",
@@ -81,8 +81,9 @@ func TestFinishingAnInterimContributionOnlyChangesPhase(t *testing.T) {
 		t.Fatalf("Merge: %v", err)
 	}
 
+	e.Look("repo", "dain")
 	st, _ := ps.GetState("dain")
-	if st.Container != "" || st.Task != "td-LEAF" || st.Branch != "td-LEAF" || st.Phase != "working" {
+	if st.Container != "" || st.Task != "td-LEAF" || st.Branch != "td-LEAF" || st.Phase != worker.Working {
 		t.Errorf("an interim merge should resume {task:td-LEAF branch:td-LEAF phase:working}, got {container:%q task:%q branch:%q phase:%q}",
 			st.Container, st.Task, st.Branch, st.Phase)
 	}

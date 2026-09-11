@@ -42,6 +42,7 @@ func (b *Box) Deliver(project, name, text string, d Delivery) error {
 		}
 		mailID = m.ID
 		b.deps.Notify() // the unread count is on the board
+		b.deps.MailArrived(project, name)
 	}
 	// The user has no session to type into, so their mailbox IS the channel: a push to them is not a
 	// failure to report, it is a thing that does not exist.

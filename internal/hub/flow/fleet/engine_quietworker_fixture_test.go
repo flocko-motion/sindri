@@ -6,6 +6,7 @@
 package fleet
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"path/filepath"
 	"testing"
 
@@ -22,7 +23,7 @@ func quietWorkerHoldingWork(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	}
 	t.Cleanup(func() { st.Close() })
 	root := t.TempDir()
-	deps.Root, deps.Alive = root, true
+	deps.Root = root
 	if err := st.RegisterProject("proj", root); err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +31,6 @@ func quietWorkerHoldingWork(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: ".worktrees/dvalin"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	return newEngine(t, st, deps), ps
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 
 	"github.com/flo-at/sindri/internal/hub/flow"
+	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
 	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
@@ -62,7 +63,10 @@ func (e *Engine) gather(project, name string) (flow.World, error) {
 	if w.Awaiting, err = e.awaitingVerdict(ps, project, sit); err != nil {
 		return flow.World{}, err
 	}
-	w.Conflicted = e.mergeConflicted(ps, sit.AwaitingPR)
+	if err = e.gatherSubmit(ps, name, &w); err != nil {
+		return flow.World{}, err
+	}
+	w.Conflicted = flowpr.ConflictStanding(ps, sit.AwaitingPR)
 	w.GainedChildren = e.gainedChildren(ps, sit)
 	w.MilestoneLanded = e.milestoneLanded(ps, sit)
 	// FOUND AND CLOSED, never merely absent. A cache that has not synced, or a source that was
@@ -76,6 +80,27 @@ func (e *Engine) gather(project, name string) (flow.World, error) {
 	return w, e.gatherWork(ps, project, name, &w)
 }
 
+// gatherSubmit reads the submit an author has asked for and the question standing against it. Rows
+// rather than a git command: whether the TREE still matches is asked at the two moments it changes
+// anything, and never here — a git invocation per agent per pass is what the observer exists to
+// prevent (-> flowinterview.go).
+func (e *Engine) gatherSubmit(ps *store.ProjectStore, name string, w *flow.World) error {
+	_, asked, err := ps.SubmitAsked(name)
+	if err != nil {
+		return err
+	}
+	w.SubmitAsked = asked
+	if w.GateRefused, err = ps.LandingGateRefused(name); err != nil {
+		return err
+	}
+	_, rows, err := ps.OpenSubmitAnswers(name)
+	if err != nil {
+		return err
+	}
+	_, w.InterviewQuestion, _, _ = flowpr.Standing(rows)
+	return nil
+}
+
 // gatherWork fills in what the agent could be handed next — its feature's open children and the ones
 // still gated, or the best-rated unit in the backlog when it holds no feature.
 func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flow.World) error {
@@ -85,6 +110,9 @@ func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flo
 			return err
 		}
 		w.Subtasks, w.Gated = children, w.Pool.GatedUnder(w.Container)
+		if len(children) > 0 {
+			w.TierMismatch = e.tierMismatch(w, children[0].Tier)
+		}
 		return nil
 	}
 	if w.Role == "reviewer" {
@@ -94,7 +122,8 @@ func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flo
 		// so asking it answers "nothing waiting" while a repo's review sits unread.
 		_, found, ferr := e.Store.UnclaimedReview(project, &id, &prID)
 		w.ReviewWaiting = ferr == nil && found
-		return nil
+		w.Wanted = w.ReviewWaiting
+		return e.gatherPool(ps, w)
 	}
 	if w.Role != "worker" {
 		return nil
@@ -105,6 +134,53 @@ func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flo
 	}
 	packages, leaves := without(w.Pool.Packages, spoken), without(w.Pool.Leaves, spoken)
 	w.Next, w.NextIsFeature, w.HasNext = task.NextUp(packages, leaves, e.roleAct().TierPrefers(project, name))
+	w.Wanted = w.HasNext
+	if w.HasNext {
+		w.TierMismatch = e.tierMismatch(w, w.Next.Tier)
+	}
+	return e.gatherPool(ps, w)
+}
+
+// tierMismatch reports work rated for a model other than the one under the agent. Read here because
+// which model a tier deserves is POLICY and whether two ids name one is the backend's own knowledge.
+func (e *Engine) tierMismatch(w *flow.World, tier string) bool {
+	want, known := e.Deps.ModelForTier(api.TierOrDefault(tier))
+	return known && !e.Harness.ModelMatches(want, w.Model)
+}
+
+// gatherPool answers the two fleet-shaped questions a stopped agent cannot ask for itself: would
+// anybody awake take this, and is this the one asleep to bring back. Per agent, so one wake, one pod.
+func (e *Engine) gatherPool(ps *store.ProjectStore, w *flow.World) error {
+	if !w.Wanted || !w.Stopped {
+		return nil // nothing waiting, or this pod is not one to bring back
+	}
+	roster, err := ps.Roster()
+	if err != nil {
+		return err
+	}
+	first := ""
+	for _, a := range roster {
+		if a.Role != w.Role {
+			continue // one role's queue never wakes another's
+		}
+		sit, serr := e.Sit.Of(w.Project, a.Name)
+		if serr != nil {
+			return serr
+		}
+		if sit.Allowed().Wake != "" {
+			continue // it may not be pushed anything at all, so it answers for nothing here
+		}
+		// NOT-STOPPED rather than up: a pod coming back for this very row reads as down until the
+		// observer catches up, and waking a second one in that window brings a whole pool back.
+		if !sit.Stopped && sit.HoldsNothing() {
+			w.PoolCovered = true
+			return nil
+		}
+		if sit.Stopped && !sit.Up && first == "" {
+			first = a.Name
+		}
+	}
+	w.FirstAsleep = first == w.Name
 	return nil
 }
 
@@ -179,29 +255,6 @@ func (e *Engine) awaitingVerdict(ps *store.ProjectStore, project string, sit sit
 	}
 	return flow.Verdict{Rejected: true, Feedback: p.Feedback,
 		Round: e.taskAct().RejectionRound(project, sit.AwaitingTask)}, nil
-}
-
-// mergeConflicted reports a PR whose last recorded event was a merge conflict — the branch is back
-// in its author's workspace with the resolution to do. Read off the PR's own history rather than a
-// flag somebody wrote onto the agent: the merge records what happened to the merge, and this is what
-// that means for whoever filed it.
-func (e *Engine) mergeConflicted(ps *store.ProjectStore, prID string) bool {
-	if prID == "" {
-		return false
-	}
-	events, err := ps.PREvents(prID)
-	if err != nil {
-		return false
-	}
-	for i := len(events) - 1; i >= 0; i-- {
-		switch events[i].Type {
-		case "conflict":
-			return true
-		case "merged", "scrapped", "resubmitted", "renewed":
-			return false // superseded: the conflict was answered
-		}
-	}
-	return false
 }
 
 // gainedChildren reports a LEAF task that has grown children while its holder worked it. A task that

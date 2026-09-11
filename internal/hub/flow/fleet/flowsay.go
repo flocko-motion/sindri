@@ -34,6 +34,8 @@ func (e *Engine) speak(w flow.World, s flow.State) (string, error) {
 		return prompts.DirSubmitted, nil
 	case says.Gating:
 		return prompts.DirGating, nil
+	case says.Interviewing:
+		return prompts.DirInterviewing(w.InterviewQuestion), nil
 	case says.NoTasks:
 		return prompts.DirNoTasks, nil
 	case says.NoReviews:

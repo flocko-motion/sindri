@@ -90,10 +90,14 @@ func (r *refwatch) closeDormantMeeting() {
 	}
 }
 
-// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this loop:
-// its own steps are cheap now that CheckOpenPRs only decides and queues the check (the run queue
-// runs it), but the review repair and the clears here still touch git per project. Not waited on at
-// shutdown — it only appends advisory history, so a write against a closed store fails harmlessly.
+// preflight polls the task sources and keeps the open PRs honest against their bases, OFF this loop:
+// CheckOpenPRs only decides and queues the check (the run queue runs it), but a sync touches the
+// network per project. Not waited on at shutdown — it only appends advisory history, so a write
+// against a closed store fails harmlessly.
+//
+// The task sources are what is left here, and they are the honest reason a sweep exists at all: td,
+// openspec and GitHub announce nothing, so the cached read model only moves when something reads
+// them. Everything else a beat used to carry is a state now.
 func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 	select {
 	case <-ctx.Done():
@@ -114,21 +118,6 @@ func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 			// happens (-> workflowDeps.Notify), and the machine's floor re-decides regardless.
 			_ = r.h.TaskFlow().SyncTasks(p.Tag)
 			r.h.wf.WakeProject(p.Tag, topic.TaskAvailable)
-			r.h.PRFlow().RepairReviewRows(p.Tag)
-			// A BACKSTOP for the reviewer half, which the state machine does not yet drive in the
-			// background: its reviewer states answer an ask and no more, so an unclaimed review still
-			// needs a sweep to find it. The worker half needs none — a task event notifies the
-			// machine, and its floor re-decides every agent regardless (-> fleet.FloorInterval).
-			r.h.PRFlow().AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
-			// A BACKSTOP for an armed clear on an agent no state machine pass will reach: the clearing
-			// state fires one for an agent standing idle, but a coauthor or a planner never lands
-			// there, and arming is a direct request that must not wait on work arriving
-			// (-> agent.Service.FireArmedClears).
-			r.h.agents.FireArmedClears(ctx, p.Tag)
-			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
-			// rather than any one agent's request, so both belong on this same sweep.
-			r.h.agents.FireIdleStops(ctx, p.Tag)
-			r.h.agents.FireIdleStarts(ctx, p.Tag)
 		}
 	}()
 }

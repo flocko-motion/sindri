@@ -21,7 +21,7 @@ func TestTheBoardSaysWhoIsReviewing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(id, "fili"); err != nil {
+	if _, err := ps.AssignReview(id, "fili"); err != nil {
 		t.Fatal(err)
 	}
 	// A review already answered says nothing about who is reviewing NOW.
@@ -29,7 +29,7 @@ func TestTheBoardSaysWhoIsReviewing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(done, "fili"); err != nil {
+	if _, err := ps.AssignReview(done, "fili"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.RecordVerdict(done, "pass", "fine"); err != nil {

@@ -7,8 +7,8 @@ package task
 
 import (
 	"github.com/flo-at/sindri/internal/hub/core"
-	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
 	"github.com/flo-at/sindri/internal/hub/flow/pr"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
 
 // Act performs what a task's flow decides. Named for what it does, and separate from the map so the
@@ -18,9 +18,12 @@ type Act struct{ *core.Core }
 // New builds the acting half over the hub's handles.
 func New(c *core.Core) *Act { return &Act{Core: c} }
 
+// announceHolding says what an agent holds has changed, so its own map re-decides where that leaves
+// it. A HINT, like every topic: the row is read again on the agent's own beat regardless.
+func (a *Act) announceHolding(project, agent string) {
+	a.Deps.Notify()
+	a.Flow.Wake(project, agent, topic.HoldingChanged)
+}
+
 // pr is the acting half of a pull request's flow: ending a task settles what was open against it.
 func (a *Act) pr() *pr.Act { return pr.New(a.Core) }
-
-// roles is the acting half of an agent's own flow: handing work over prepares the session it
-// lands in, and that preparation is the agent's business rather than the task's.
-func (a *Act) roles() *agentflow.Act { return agentflow.New(a.Core) }

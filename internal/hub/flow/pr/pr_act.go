@@ -11,7 +11,6 @@ package pr
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
-	"github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	hubtask "github.com/flo-at/sindri/internal/hub/world/task"
@@ -22,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
@@ -116,17 +116,26 @@ func (a *Act) PRInfo(project, id string) (PRDetail, error) {
 		LintAt: lintAt, History: history}, nil
 }
 
-// CmdSubmit returns immediately; the worker idles until the hub injects a verdict (D5).
+// CmdSubmit is the one verb an author types through a whole submit: asking for one, then answering
+// each question. Both record a fact and announce it; where the author then stands is its map's.
 func (a *Act) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int, error) {
 	ps := a.Store.For(c.Project)
 	root := a.Deps.ProjectRoot(c.Project)
+	text := strings.TrimSpace(strings.Join(args, " "))
+	// An interview standing takes this as an ANSWER — first, since the checks below would refuse an
+	// author mid-interview the very verb it was told to answer with.
+	if tree, rows, ierr := ps.OpenSubmitAnswers(c.Agent); ierr != nil {
+		return 1, ierr
+	} else if InterviewOpen(rows) {
+		return a.answerInterview(c, ps, tree, rows, text, out)
+	}
 	st, err := ps.GetState(c.Agent)
 	if err != nil {
 		return 1, err
 	}
 	// What goes up: a whole feature branch when the worker holds one, otherwise the leaf task —
 	// a hierarchy changes the unit under review, never who puts it up.
-	target, branch := st.Task, st.Branch
+	target := st.Task
 	if st.Container != "" {
 		open, oerr := ps.OpenSubtasks(st.Container)
 		if oerr != nil {
@@ -146,8 +155,10 @@ func (a *Act) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 			fmt.Fprintln(out, prompts.ReplyFeatureGated(st.Container, hubtask.OpenIDs(gated)))
 			return 1, nil
 		}
-		target, branch = st.Container, st.Container
-	} else if st.Phase != "working" || st.Task == "" {
+		target = st.Container
+	} else if st.Task == "" {
+		// Holding nothing is the whole test: the map offers this verb only where a submit is possible,
+		// so asking the phase too would be a second copy of that rule (-> registry.Standing.Refuses).
 		fmt.Fprintln(out, prompts.ReplyNotWorking("submit", st.Phase, st.Task))
 		return 1, nil
 	} else if grew, gerr := ps.OpenChildIDs(st.Task); gerr != nil {
@@ -190,40 +201,68 @@ func (a *Act) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	if refused, rerr := a.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
 		return 1, rerr
 	}
-	// Recorded before it is judged: the gate checks a COMMIT, which is what makes its verdict
-	// reusable — and agents have no commit verb, so this is where their work gets written down.
-	desc := strings.TrimSpace(strings.Join(args, " "))
-	sha, err := a.GateCommit(c.Project, c.Agent, desc)
+	// NAMED rather than committed: the answers describe this tree, and an author editing it while it
+	// answers is describing a tree that will not be the one going up (-> flowinterview.go).
+	tree, err := git.TreeFingerprint(wt)
 	if err != nil {
 		return 1, err
 	}
-	// The questions, keyed on the commit just made: a clean tree re-commits to the same sha, so the
-	// answers accumulate across these calls, and any edit makes a new sha and starts them over.
-	if asked, aerr := a.AskSubmitQuestions(ps, c.Agent, sha, desc, emptyDiff, out); aerr != nil || asked {
-		return 0, aerr // an ordinary step in submitting, never a refusal to escalate over
-	}
-	// Parked BEFORE the gate opens: a commit that already passed lands its PR inside the next call,
-	// and a phase written after that would overwrite "submitted" with a wait that is already over.
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"},
-		store.ReasonAdvanced, "submit queued: "+sha); err != nil {
+	if err := ps.OpenSubmitInterview(c.Agent, tree, text, SubmitQuestions(tree, emptyDiff)); err != nil {
 		return 1, err
+	}
+	if err := ps.AskSubmit(c.Agent, tree, text); err != nil {
+		return 1, err
+	}
+	a.announceSubmit(c.Project, c.Agent)
+	fmt.Fprintln(out, ReplyInterviewOpened)
+	return 0, nil
+}
+
+// TakeSubmit takes a submit already answered for: the commit, then the gate on it. The request goes
+// back FIRST — left standing, a submit that cannot open its gate would be attempted for ever.
+func (a *Act) TakeSubmit(project, agent string) (qr api.Run, reused bool, err error) {
+	ps := a.Store.For(project)
+	asked, ok, err := ps.SubmitAsked(agent)
+	if err != nil {
+		return api.Run{}, false, err
+	}
+	if aerr := ps.AnswerSubmitRequest(agent); aerr != nil {
+		return api.Run{}, false, aerr
+	}
+	if !ok {
+		return api.Run{}, false, fmt.Errorf("%s asked for no submit", agent)
+	}
+	// Recorded before it is judged: the gate checks a COMMIT, which is what makes its verdict
+	// reusable — and agents have no commit verb, so this is where their work gets written down.
+	sha, err := a.GateCommit(project, agent, asked.Summary)
+	if err != nil {
+		return api.Run{}, false, err
 	}
 	// Queued, not run here: several agents submitting at once must not mean several concurrent
 	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
-	qr, reused, err := a.GateRun(c.Project, c.Agent, run.GateSubmit, desc, sha)
-	if err != nil {
-		// The phase goes back: "gating" has no way out on its own — Stalled ignores it and every
-		// landing verb refuses it — so an agent parked on a gate that never opened is parked for good.
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "working"},
-			store.ReasonAdvanced, "submit gate could not be opened")
+	return a.GateRun(project, agent, run.GateSubmit, asked.Summary, sha)
+}
+
+// answerInterview records one answer and announces it. It puts no question of its own: a second
+// voice putting questions is two interviews.
+func (a *Act) answerInterview(c registry.Caller, ps *store.ProjectStore, tree string, rows []store.SubmitAnswer, text string, out io.Writer) (int, error) {
+	seq, question, of, _ := Standing(rows)
+	if TooShort(text) {
+		fmt.Fprintln(out, ReplyAnswerTooShort(question))
+		return 0, nil // an ordinary step in answering, never a refusal to escalate over
+	}
+	if err := ps.AddSubmitAnswer(c.Agent, tree, seq, question, text); err != nil {
 		return 1, err
 	}
-	if reused {
-		fmt.Fprintln(out, prompts.ReplyGateReused(qr.ID, prompts.ShortSHA(sha)))
-		return 0, nil
-	}
-	fmt.Fprintln(out, prompts.ReplyGateQueued(qr.ID, a.QueuePosition(qr.ID)))
+	a.announceSubmit(c.Project, c.Agent)
+	fmt.Fprintln(out, ReplyAnswerRecorded(seq, of))
 	return 0, nil
+}
+
+// announceSubmit says a submit fact has changed. A HINT: the interview reads the rows regardless.
+func (a *Act) announceSubmit(project, agent string) {
+	a.Deps.Notify()
+	a.Flow.Wake(project, agent, topic.SubmitAsked)
 }
 
 // refuseIfBehind stops a PR being recorded on a base the reference has moved past — refusing
@@ -292,10 +331,13 @@ func (a *Act) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: core.MockSpecTask, Branch: branch, Phase: "submitted"},
+	// The branch is what the planner now answers for; where that leaves it is its own map's
+	// (-> planner/submitted's cond.OwnPROpen).
+	if err := ps.SetHolding(c.Agent, core.MockSpecTask, branch, "",
 		store.ReasonAdvanced, "planner submitted: "+pr.ID); err != nil {
 		return 1, err
 	}
+	a.announceHolding(c.Project, c.Agent)
 	_ = ps.Log(c.Agent, "submit", pr.ID)
 	if existed {
 		_ = ps.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
@@ -501,10 +543,8 @@ func (a *Act) openMilestone(project, agent, msg string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"},
-		store.ReasonAdvanced, "milestone submitted: "+pr.ID); err != nil {
-		return store.PR{}, err
-	}
+	// Moved nowhere: the milestone existing is the fact, and its author's own map stands it down to
+	// wait for the user to land it (-> worker/working's cond.OwnPROpen).
 	if existed {
 		_ = ps.LogPR(pr.ID, "resubmitted", "milestone by "+agent)
 	} else {

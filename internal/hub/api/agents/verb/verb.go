@@ -59,7 +59,6 @@ var Catalogue = []Def{
 	// Named for the verb it is TYPED under. It was declared as "plan" while the registry served
 	// "openspec", so every planner was offered a verb that answered "unknown".
 	{Name: "openspec", Summary: "ship your spec edits as a pull request: openspec submit \"<summary>\"", Roles: []string{"planner"}, Governed: true},
-	{Name: "state", Summary: "say where you are: state idle|planning", Roles: []string{"planner"}, Governed: true},
 	{Name: "staff", Summary: "list this repo's agents and what each is working on: staff", Roles: []string{"planner"}},
 	{Name: "comment", Summary: "comment on a task: comment <id> \"<text>\"", Roles: []string{"worker", "reviewer", "planner", "coauthor"}, Governed: true},
 	{Name: "approve", Summary: "approve the pull request you are reading: approve", Roles: []string{"reviewer", "planner", "coauthor"}, Governed: true},
@@ -99,7 +98,6 @@ var (
 	PrioritiseTask = of("prioritise-task")
 	ReopenTask     = of("reopen-task")
 	Openspec       = of("openspec")
-	State          = of("state")
 	Staff          = of("staff")
 	Comment        = of("comment")
 	Approve        = of("approve")

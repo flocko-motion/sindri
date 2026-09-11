@@ -69,6 +69,11 @@ type Action struct {
 	// the path the action exists to take — which is what a prediction follows when it cannot run it
 	// (-> Machine.Would).
 	Outcomes []Outcome
+	// Awaits marks an action that waits on the SUBJECT — an exchange with it, rather than work done
+	// upon it. It never runs on a caller's goroutine and nobody holding the line waits behind one:
+	// the answer such a caller would be waiting for is the call it is inside, so waiting there is a
+	// deadlock and not a delay.
+	Awaits bool
 }
 
 // Doer performs one action. The only thing in a flow allowed to write anything.
@@ -81,13 +86,15 @@ type Verb struct {
 	Help string
 }
 
-// Stay is the target of a verb or event that moves nobody — a prod is the shape it exists for.
+// Stay is the target of an event that moves nobody — a prod is the shape it exists for.
 const Stay = ""
 
-// Offer is one verb a state makes available, and where running it leads.
+// Offer is one verb a state makes available, and why it is there. It declares NO destination:
+// running a verb moves nobody, and where the subject then stands is whatever its conditions
+// conclude from the world that verb changed (-> Machine.Would). A declared landing was a second
+// account of one truth, and it was wrong for its entire life without anyone noticing.
 type Offer struct {
 	Verb Verb
-	To   string
 	Why  string
 }
 

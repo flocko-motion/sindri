@@ -47,9 +47,7 @@ func holderFixture(t *testing.T) *Act {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-worked", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "nori", Task: "sd-worked", Phase: "working"})
 	// bombur submitted and is no longer holding the task — the PR is the only trace of who did it.
 	if err := ps.PutPR(store.PR{ID: "pr-sd-review", Task: "sd-review", Agent: "bombur", Status: "open"}); err != nil {
 		t.Fatal(err)

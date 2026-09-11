@@ -22,9 +22,9 @@ func TestEveryConditionIsWatched(t *testing.T) {
 }
 
 // TestNothingMergesWithoutAHuman is the one hard gate in sindri, pinned as a property of the map:
-// the approved state runs no action and declares no condition that lands it. A human types `merge`,
-// and only a human ever does — a future edit that gives this state an action would be the whole
-// safety model going quietly.
+// the approved state runs no action, and the ONE thing that leads it into merging is a recorded
+// merge intent — a fact only a human's `merge` writes. A future edit that gave this state an action,
+// or a second way in, would be the whole safety model going quietly.
 func TestNothingMergesWithoutAHuman(t *testing.T) {
 	for _, s := range Flow {
 		if s.Name != Approved {
@@ -33,11 +33,21 @@ func TestNothingMergesWithoutAHuman(t *testing.T) {
 		if s.Action != nil {
 			t.Fatalf("the approved state runs %q — nothing in sindri may merge on its own", s.Action.Name)
 		}
+		var ways []string
 		for _, e := range s.Events {
 			if e.To == Merging {
-				t.Errorf("approved leads to merging on %q; only a human verb may start a merge", e.On.EventName())
+				ways = append(ways, e.On.EventName())
 			}
 		}
+		if len(ways) != 1 || ways[0] != mergeAsked.Name {
+			t.Errorf("approved leads to merging on %v; the only way in is a human's recorded intent (%q)",
+				ways, mergeAsked.Name)
+		}
+	}
+	// And nothing but a human's verb writes that intent: the merging state's own action takes the
+	// request back, and no other caller sets it.
+	if !mergeAsked.Holds(World{MergeAsked: true}) || mergeAsked.Holds(World{}) {
+		t.Error("the merge intent must be exactly the recorded request and nothing else")
 	}
 }
 

@@ -50,11 +50,9 @@ func gatedFeature(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller) 
 	if err := ps.SetApproval("td-2", "pending", ""); err != nil {
 		t.Fatalf("gate td-2: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +105,7 @@ func TestAGatedFeatureWaitsRatherThanBeingDeclaredDone(t *testing.T) {
 	if err := e.taskAct().RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 
 	d, err := e.AgentDirective(t.Context(), "repo", "dain")
 	if err != nil {
@@ -172,7 +168,6 @@ func TestEditTellsTheHolderOfTheEnclosingFeature(t *testing.T) {
 	for _, depth := range []string{"child", "grandchild"} {
 		e, ps, _ := gatedFeature(t)
 		deps := e.Deps.(*stubDeps)
-		deps.Alive = true
 		if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker"}); err != nil {
 			t.Fatal(err)
 		}

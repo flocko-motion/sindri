@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"bytes"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -15,9 +16,7 @@ func TestAnAgentAwaitingAVerdictIsHandedNothing(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "durin", Phase: "idle"})
 	if err := ps.PutPR(store.PR{ID: "pr-sd-9", Task: "sd-9", Agent: "durin", Status: "rejected"}); err != nil {
 		t.Fatal(err)
 	}
@@ -39,9 +38,7 @@ func TestAnIdleAuthorIsSentBackToItsRejectedPR(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "durin", Phase: "idle"})
 	if err := ps.PutPR(store.PR{ID: "pr-sd-9", Task: "sd-9", Agent: "durin", Status: "rejected",
 		Feedback: "the second half is missing"}); err != nil {
 		t.Fatal(err)
@@ -61,9 +58,7 @@ func TestAnIdleAuthorIsSentBackToItsRejectedPR(t *testing.T) {
 // the task and freeing itself. A task ends when its PR lands.
 func TestCheckpointRefusedWhileThePRIsUnlanded(t *testing.T) {
 	e, ps, _, caller := submitEngine(t)
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Container: "sd-0", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Container: "sd-0", Phase: "working"})
 	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "bombur", Status: "rejected"}); err != nil {
 		t.Fatal(err)
 	}

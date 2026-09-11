@@ -33,10 +33,8 @@ func TestARetiredAgentIsNeverAssignedWork(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-free", Title: "claimable", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: worker.Idle}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &stubDeps{Root: root, Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Phase: worker.Idle})
+	deps := &stubDeps{Root: root}
 	e := newEngine(t, st, deps)
 	if err := e.taskAct().SyncTasks("repo"); err != nil {
 		t.Fatal(err)

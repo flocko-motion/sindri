@@ -1,11 +1,8 @@
 package pr
 
 import (
-	"io"
 	"strings"
 	"testing"
-
-	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // TestFeatureWorkerContributesTheBranch: a feature is long-running by design — several subtasks
@@ -43,53 +40,16 @@ func TestFeatureWorkerContributesTheBranch(t *testing.T) {
 	}
 	// Parked on the verdict, still holding the feature — the association that a missing Container
 	// silently dropped, which reads as an unrelated bug days later.
+	// Still on the feature — the association a missing Container silently dropped, which reads as an
+	// unrelated bug days later. Where the milestone leaves it is its own map's: a pull request of its
+	// own is out, and that is the branch it would carry on (-> worker/working's cond.OwnPROpen).
 	st, _ := ps.GetState("dain")
-	if st.Phase != "submitted" || st.Container != "td-EPIC" {
-		t.Errorf("state = {phase:%q container:%q}, want it waiting and still on the feature", st.Phase, st.Container)
+	if st.Container != "td-EPIC" {
+		t.Errorf("container = %q, want the feature still held", st.Container)
 	}
 	// What went up is named in the message injected once the gate passes — the immediate reply
 	// could not have named it, since nothing had landed yet when it was sent.
 	if len(deps.InjectedText) == 0 || !strings.Contains(deps.InjectedText[len(deps.InjectedText)-1], "td-EPIC") {
 		t.Errorf("the agent should be told what went up: %v", deps.InjectedText)
-	}
-}
-
-// TestFeatureContributionMergeKeepsTheFeature: the merge lands the work and the worker carries on
-// with the same feature — the whole point of an interim landing. Closing td-EPIC here would finish a
-// feature that still has subtasks to do.
-func TestFeatureContributionMergeKeepsTheFeature(t *testing.T) {
-	a, ps, c, _ := featureWorker(t, true)
-	if code, err := a.CmdContribute(c, nil, io.Discard); err != nil || code != 0 {
-		t.Fatalf("CmdContribute: code=%d err=%v", code, err)
-	}
-	runQueuedGate(t, a)
-	pr, _, _ := ps.GetPR("pr-td-EPIC")
-	pr.Status = "approved"
-	if err := ps.PutPR(pr); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.Merge("repo", pr.ID); err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-
-	st, _ := ps.GetState("dain")
-	if st.Container != "td-EPIC" || st.Branch != "td-EPIC" || st.Phase != "working" {
-		t.Errorf("state = {container:%q branch:%q phase:%q}, want it back at work on the feature",
-			st.Container, st.Branch, st.Phase)
-	}
-	feature, _, _ := ps.GetTask("td-EPIC")
-	if feature.Status != "open" {
-		t.Errorf("feature status = %q — an instalment of a feature must not finish it", feature.Status)
-	}
-	// And it is still claimable work: a merged interim PR is not the feature having landed.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	open, err := ps.OpenContainers()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(open) != 1 || open[0].ID != "td-EPIC" {
-		t.Errorf("open containers = %v, want td-EPIC still on offer", open)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/flo-at/sindri/internal/hub/core"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"os/exec"
@@ -90,9 +91,7 @@ func TestAStaleRunWhoseAgentMovedOnIsDropped(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: ".worktrees/bombur"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "td-1"})
 	r, err := e.runAct().ScheduleRun("repo", "bombur", "go test ./...", "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -100,9 +99,7 @@ func TestAStaleRunWhoseAgentMovedOnIsDropped(t *testing.T) {
 	if r.Task != "td-1" {
 		t.Fatalf("ScheduleRun should snapshot the agent's task: got %q, want td-1", r.Task)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "td-2"})
 	e.LookRun("repo", r.ID)
 
 	got, _, _ := ps.GetRun(r.ID)

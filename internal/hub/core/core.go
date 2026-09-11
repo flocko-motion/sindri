@@ -44,8 +44,11 @@ type Harness interface {
 	// Interrupt aborts whatever the session is doing (ESC), so a notice lands on an idle prompt
 	// rather than queuing behind work.
 	Interrupt(project, name string) error
-	// Start brings a stopped agent back up, its session resuming.
-	Start(project, name string) error
+	// Start brings a stopped agent back up, its session resuming. Stop takes the pod back, KEEPING
+	// the session, so the cost of being wrong is the next start's latency. Both block until the
+	// runtime answers, which is why each is a state the machine stands the agent in.
+	Start(ctx context.Context, project, name string) error
+	Stop(ctx context.Context, project, name string) error
 	// Container names an agent's box.
 	Container(project, name string) string
 	// ModelMatches is the BACKEND's own knowledge of its models: whether two ids name one. Here
@@ -87,7 +90,8 @@ type Flows interface {
 	// Look settles one agent's own machine, synchronously; Wake nudges it on a topic.
 	Look(project, agent string)
 	Wake(project, agent string, topic machine.Topic)
-	// LookPRs and LookTask settle the machines of a project's pull requests and of one task.
+	// LookPR settles one merge intent; LookPRs every unsettled one in a project, and LookTask one task.
+	LookPR(project, id string)
 	LookPRs(project string)
 	LookTask(project, id string)
 	// LookTasks settles every task machine in a project.
@@ -162,19 +166,6 @@ const LogCap = 40
 // self-filtered by id scheme; sindri's own always leads, the rest are whatever the root wired in.
 func (c *Core) TaskSources(project string) []tasks.Source {
 	return append([]tasks.Source{owned.Over(c.Store.For(project))}, c.Sources...)
-}
-
-// RestPhase is an agent's resting phase: "planning" for a planner, "collab" for a coauthor
-// (neither holds a backlog task, so "idle" would mislead), "idle" for everyone else.
-func RestPhase(role string) string {
-	switch role {
-	case "planner":
-		return "planning"
-	case "coauthor":
-		return "collab"
-	default:
-		return "idle"
-	}
 }
 
 // Kills tracks run ids killed mid-execution, so the blocked ExecContext call can tell a

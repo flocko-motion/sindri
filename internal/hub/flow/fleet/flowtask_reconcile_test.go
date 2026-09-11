@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/world/store"
@@ -40,9 +41,7 @@ func TestReconcileKeepsAnAssignedTaskInProgress(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: "."}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
 	if err := e.taskAct().ReconcileTasks("proj"); err != nil {
 		t.Fatalf("ReconcileTasks: %v", err)
 	}

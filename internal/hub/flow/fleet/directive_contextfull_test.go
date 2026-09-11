@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"path/filepath"
@@ -33,9 +34,7 @@ func idleWorkerWithOpenTask(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-abc123", Title: "a task", Status: "open", Priority: "P2"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Phase: "idle"})
 	e := newEngine(t, st, deps)
 	// The owned row is the source; the cached read model is what every claim and every pass reads,
 	// and only a sync carries one to the other.
@@ -137,11 +136,9 @@ func TestFullnessGatesNewWorkOnly(t *testing.T) {
 	e, ps := idleWorkerWithOpenTask(t, full)
 
 	// Holding a task: the directive is the task's, not a retirement notice.
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "working",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	})
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
@@ -157,11 +154,9 @@ func TestFullnessGatesNewWorkOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "submitted",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	})
 	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
@@ -171,5 +166,23 @@ func TestFullnessGatesNewWorkOnly(t *testing.T) {
 	}
 	if !strings.Contains(dir, "needs a test") {
 		t.Errorf("the directive should carry the reviewer's feedback: %q", dir)
+	}
+}
+
+// TestAClearThatNeverLandsStillHandsOverTheWork: /clear typed into a session mid-turn gives up after
+// its own cap — four of jari's five model switches died there. A clear that never lands costs the
+// freshness, never the work, so the clearing state leads into the hand-over on its failure exactly
+// as it does on its success.
+func TestAClearThatNeverLandsStillHandsOverTheWork(t *testing.T) {
+	deps := &stubDeps{CtxTokens: 80_000, CtxWindow: 200_000, CtxOK: true, ClearErr: errors.New("clear timed out")}
+	e, ps := idleWorkerWithOpenTask(t, deps)
+
+	e.Look("repo", "dvalin")
+
+	if len(deps.Cleared) != 1 {
+		t.Errorf("cleared = %v, want exactly one attempt — the clear is tried and then let go of", deps.Cleared)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want the work handed over anyway — a crowded session beats none at all", st.Task)
 	}
 }

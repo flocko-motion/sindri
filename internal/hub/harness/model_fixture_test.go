@@ -6,6 +6,7 @@
 package harness
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"testing"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
@@ -26,9 +27,7 @@ func modelFixture(t *testing.T) (*Service, *fakeRuntime) {
 	if err := st.For("proj").PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.For("proj").SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, st.For("proj"), store.AgentState{Agent: "durin", Phase: "idle"})
 	f := &fakeRuntime{pane: idlePane}
 	container.Use(f)
 	agentport.Use(claude.New())

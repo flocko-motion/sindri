@@ -67,17 +67,6 @@ func (s *Service) setLifecycle(project, name, state string) {
 	}
 }
 
-// clearLaunching retracts a launch intent this call itself set, leaving the sweep's verdict
-// (-> FailLaunch) alone: that names a reason, where a bare clear reports "down" — nobody asked.
-func (s *Service) clearLaunching(project, name string) {
-	s.lcMu.Lock()
-	defer s.lcMu.Unlock()
-	key := lcKey{project, name}
-	if s.lifecycle[key].state == "launching" {
-		delete(s.lifecycle, key)
-	}
-}
-
 // SettleIntent retires a launch or a stop that reality has caught up with: a pod seen up fulfils a
 // launch, and one seen gone fulfils a stop. The WRITE only — what word the agent then wears is the
 // orchestrator's, folded from the same facts (-> situation.Situation.Allowed).
@@ -112,34 +101,6 @@ func (s *Service) Intent(project, name string) (launching, failed, stopping bool
 		return false, false, true
 	}
 	return false, false, false
-}
-
-// LaunchIntent reports a launch in flight and when it was requested, for the watchdog's own bound
-// on how long one may run (-> FailLaunch).
-func (s *Service) LaunchIntent(project, name string) (since time.Time, ok bool) {
-	s.lcMu.Lock()
-	defer s.lcMu.Unlock()
-	li := s.lifecycle[lcKey{project, name}]
-	return li.since, li.state == "launching"
-}
-
-// FailLaunch ends a launch that will never complete: a distinct status rather than a silent fall to
-// "down", the reason logged beside "launch: requested", then the container removed under ctx — the
-// runtime that hung the launch may hang that too. A no-op unless the intent is still "launching".
-func (s *Service) FailLaunch(ctx context.Context, project, name, reason string) {
-	s.lcMu.Lock()
-	key := lcKey{project, name}
-	if s.lifecycle[key].state != "launching" {
-		s.lcMu.Unlock()
-		return
-	}
-	s.lifecycle[key] = lifecycleIntent{state: api.StatusLaunchFailed, since: time.Now()}
-	s.lcMu.Unlock()
-	_ = s.store.For(project).Log(name, "launch", "failed: "+reason)
-	s.deps.Notify()
-	if err := container.RmContext(ctx, s.deps.ContainerName(project, name)); err != nil {
-		_ = s.store.For(project).Log(name, "launch", "container not released: "+err.Error())
-	}
 }
 
 // whatARoleHolds names what a non-reviewer role carries across its own unit of work — the reason
@@ -258,15 +219,13 @@ func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	return nil
 }
 
-// StopAgent tears down the pod but keeps identity, worktree, socket and log, so a relaunch
-// resumes where it left off.
+// StopAgent tears the pod down, keeping identity, worktree, socket and log for the relaunch.
 func (s *Service) StopAgent(ctx context.Context, project, name string) error {
 	return s.stopAgent(ctx, project, name, "pod removed")
 }
 
-// stopAgent is StopAgent with the log line's reason as the caller's — human-requested by default,
-// but the idle sweep states what it acted on instead (-> FireIdleStops), since this is the hub
-// acting on the fleet unasked and a user who finds an agent stopped must be able to see why.
+// stopAgent is StopAgent with the log line's reason as the caller's — so a user who finds an agent
+// stopped can see whether a human asked or the fleet reclaimed it.
 func (s *Service) stopAgent(ctx context.Context, project, name, reason string) error {
 	ps := s.store.For(project)
 	a, ok, err := ps.GetAgent(name)
@@ -392,10 +351,8 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 		if err := git.WorktreeAdd(root, filepath.Join(root, workspace.ScratchWorktree(name)), "HEAD"); err != nil {
 			return err
 		}
-		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
-		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"}, store.ReasonClaimed, "coauthor launched")
-		}
+		// Nothing is written about where it stands: a coauthor's flow BEGINS standing with the user,
+		// so an agent with nothing stored is already read as being there (-> agent.StartFor).
 	} else if err := git.WorktreeAdd(root, wt, "HEAD"); err != nil {
 		return err
 	}
@@ -415,10 +372,8 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 		if err := git.EnsureBranch(wt, core.PlannerBranch(name), base); err != nil {
 			return err
 		}
-		// Rest in "planning", not "idle" — unless a PR is already in flight.
-		if st, _ := ps.GetState(name); st.Phase != "submitted" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"}, store.ReasonClaimed, "planner launched")
-		}
+		// Nothing is written about where it stands: a planner's work IS its conversation, so whether
+		// it is planning is read off the session rather than guessed at a launch (-> cond.InConversation).
 	}
 	return nil
 }
@@ -447,10 +402,10 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 	s.deps.Notify()
 	defer func() {
 		if err != nil {
-			// Recorded, not just cleared: every early return below reported to the caller alone, so
-			// three of eitri's launches left "requested" as their last word — a launch still running.
+			// NAMED, not just cleared: three of eitri's launches left "requested" as their last word —
+			// a launch still running — and a fall to "down" reads as though nobody had asked.
 			_ = ps.Log(name, "launch", "failed: "+err.Error())
-			s.clearLaunching(project, name)
+			s.setLifecycle(project, name, api.StatusLaunchFailed)
 			s.deps.Notify()
 		}
 	}()

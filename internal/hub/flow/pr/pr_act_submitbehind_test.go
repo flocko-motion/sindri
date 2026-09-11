@@ -2,6 +2,7 @@ package pr
 
 import (
 	"bytes"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"os"
 	"os/exec"
@@ -46,9 +47,7 @@ func submitEngine(t *testing.T) (*Act, *store.ProjectStore, string, registry.Cal
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "the task", Status: "in_progress"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	return newActOn(t, st, &flowtest.Hub{Root: root}), ps, root, registry.Caller{Project: proj, Agent: "bombur", Role: "worker"}
 }
 
@@ -70,9 +69,12 @@ func TestSubmitRefusedWhenBehindTheBase(t *testing.T) {
 	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
 		t.Error("no PR may be recorded on a stale base — that is the whole point")
 	}
-	// The agent stays where it was: refusing must not park it in "submitted" awaiting a review of
-	// something that does not exist.
-	if got, _ := ps.GetState("bombur"); got.Phase != "working" {
+	// The agent stays where it was: a refusal asks for nothing, so nothing about it is recorded and
+	// its map has no reason to move it off the work.
+	if _, asked, _ := ps.SubmitAsked("bombur"); asked {
+		t.Error("a refused submit recorded a request, so the author would be taken through an interview for it")
+	}
+	if got, _ := ps.GetState("bombur"); got.Phase != worker.Working {
 		t.Errorf("a refused submit left the agent in %q", got.Phase)
 	}
 }
@@ -194,8 +196,12 @@ func TestAnEmptyBranchIsAskedToJustifyItself(t *testing.T) {
 	if _, err := a.CmdSubmit(caller, []string{"nothing here"}, &out); err != nil {
 		t.Fatalf("CmdSubmit: %v", err)
 	}
-	if !strings.Contains(out.String(), "changes nothing against its base") {
-		t.Errorf("an empty branch should be asked to justify itself, got %q", out.String())
+	_, rows, err := a.Store.For(proj).OpenSubmitAnswers("bombur")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, question, _, _ := Standing(rows); !strings.Contains(question, "changes nothing against its base") {
+		t.Errorf("an empty branch should be asked to justify itself, got %q", question)
 	}
 	// Answered, it goes through: the author's case is on the record for the reviewer to weigh.
 	if code, sout := submitAll(t, a, caller, "nothing here"); code != 0 {
@@ -203,26 +209,42 @@ func TestAnEmptyBranchIsAskedToJustifyItself(t *testing.T) {
 	}
 }
 
-// submitAll drives CmdSubmit through its questions the way an agent does: the summary, then an
-// answer per question, each arriving as its own `submit` call. Returns the final call's code and
-// output — the one that either lands the submission or refuses it.
+// submitAll drives a whole submit the way an agent does: the `submit` that asks for one, then an
+// answer per question, each arriving as its own `submit` call — and then the taking, which is the
+// machine's in production (-> worker/submitting) and this call here, where no machine is running.
+// Returns the last call's code and output: the one that either takes the submit or refuses it.
 //
-// A test that wants to see a QUESTION calls CmdSubmit directly; this is for the tests whose subject
-// is what happens after the submit is taken.
+// A test that wants to see a QUESTION reads the interview's rows; this is for the tests whose
+// subject is what happens once the submit has been taken.
 func submitAll(t *testing.T, a *Act, c registry.Caller, summary string) (int, string) {
 	t.Helper()
 	const answer = "I swept the call sites this touches and each one is covered by a test that fails without it."
+	ps := a.Store.For(c.Project)
+	var code int
+	var out bytes.Buffer
 	text := summary
 	for i := 0; i < 6; i++ { // a bound, so a flow that never settles fails loudly rather than hanging
-		var out bytes.Buffer
-		code, err := a.CmdSubmit(c, []string{text}, &out)
-		if err != nil {
+		out.Reset()
+		var err error
+		if code, err = a.CmdSubmit(c, []string{text}, &out); err != nil {
 			t.Fatalf("CmdSubmit: %v", err)
 		}
-		// Both shapes mean the questionnaire is still running: a question put, or one put again
-		// because the last answer was too short to be one.
-		if !strings.Contains(out.String(), "Before this submit is taken") &&
-			!strings.Contains(out.String(), "too short") {
+		if code != 0 {
+			return code, out.String() // refused before any interview opened
+		}
+		if _, ok, aerr := ps.SubmitAsked(c.Agent); aerr != nil {
+			t.Fatalf("SubmitAsked: %v", aerr)
+		} else if !ok {
+			return code, out.String() // no submit was asked for, so there is nothing to take
+		}
+		_, rows, rerr := ps.OpenSubmitAnswers(c.Agent)
+		if rerr != nil {
+			t.Fatalf("OpenSubmitAnswers: %v", rerr)
+		}
+		if !InterviewOpen(rows) {
+			if _, _, terr := a.TakeSubmit(c.Project, c.Agent); terr != nil {
+				t.Fatalf("TakeSubmit: %v", terr)
+			}
 			return code, out.String()
 		}
 		text = answer

@@ -23,9 +23,7 @@ func noteSender(t *testing.T, name string) (*Box, *store.ProjectStore) {
 	if err := ps.PutAgent(store.Agent{Name: name, Role: "worker", Workspace: "ws"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	place(t, ps, name, "td-1")
 	if err := ps.GrantNotes(name, prompts.NotesPerClaim); err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
 	"github.com/flo-at/sindri/internal/hub/flow/pr"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"path/filepath"
@@ -28,17 +29,18 @@ func TestARejectedWorkerIsStillCaughtByTheStallNudge(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "td-1", Agent: "bombur", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &flowtest.Hub{Root: t.TempDir(), Alive: true}
+	// Where the machine puts an author answering a verdict — the state this test is about being
+	// visible from. The rejection below is what SENDS it here in production; this package has no
+	// machine to carry it, so the fixture stands it where one would.
+	flowtest.Place(t, ps, store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: worker.Reworking})
+	deps := &flowtest.Hub{Root: t.TempDir()}
 	a := newActOn(t, st, deps)
 
 	if err := pr.New(a.Core).RejectPR(proj, "pr-1", "needs another pass"); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
-	if got, _ := ps.GetState("bombur"); got.Phase != "working" {
-		t.Fatalf("phase after rejection = %q, want working — that's what makes it visible to Stalled", got.Phase)
+	if got, _ := ps.GetState("bombur"); got.Task != "td-1" {
+		t.Fatalf("the rejected work must stay in hand, got %+v", got)
 	}
 
 	before := len(deps.InjectedText)

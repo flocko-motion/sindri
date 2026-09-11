@@ -19,6 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -26,9 +27,8 @@ import (
 // ReviewPrompt is the review instruction: a repo-committed `review_prompt`, else an edited
 // review-prompt.txt, else the built-in default.
 //
-// It does NOT write the default out. Seeding the file on first use meant the default could never be
-// improved again: every project that had ever requested a review already held a copy, so a better
-// one shipped to new installs only — silently, since nothing reports a stale seed.
+// It does NOT write the default out. Seeding on first use froze it: every project that had asked for
+// a review held a copy, so a better default reached new installs only.
 func (a *Act) ReviewPrompt(project string) (string, error) {
 	// A repo-committed `review_prompt` wins; config already validated the path exists.
 	if cfg, err := a.Deps.ProjectConfig(project); err != nil {
@@ -60,9 +60,8 @@ func ReviewPromptPath(project string) string {
 	return filepath.Join(paths.StateDir(), project, "review-prompt.txt")
 }
 
-// seededPrompts are the instructions sindri has written into review-prompt.txt itself, current and
-// superseded. A file byte-matching one of them was never a decision, so it does not outrank the
-// built-in — which is what lets an improved default reach a project that already has the file.
+// seededPrompts are what sindri has written into review-prompt.txt itself, current and superseded. A
+// file byte-matching one was never a decision, so an improved default still reaches that project.
 var seededPrompts = []string{
 	prompts.DefaultReviewPrompt,
 	// Superseded: the one-liner seeded before the reviewer could read the task at all.
@@ -79,8 +78,8 @@ func IsSeededPrompt(text string) bool {
 	return false
 }
 
-// TaskTitle is a task's title for a directive, or "" when it cannot be read. Best-effort by design:
-// a title that will not load must not stop a review being handed out.
+// TaskTitle is a task's title for a directive, "" when unreadable: one that will not load must not
+// stop a review being handed out.
 func (a *Act) TaskTitle(project, id string) string {
 	if id == "" {
 		return ""
@@ -92,8 +91,8 @@ func (a *Act) TaskTitle(project, id string) string {
 	return t.Title
 }
 
-// RequestReview is the ONE review path: every trigger funnels here, so a review is always
-// the same thing. No reviewer running → recorded unassigned; requirement "" uses the default.
+// RequestReview files a review with its own instructions — a human asking for one, or asking again.
+// It records the row and announces it, and hands it to nobody.
 func (a *Act) RequestReview(project, prID, requirement string) error {
 	ps := a.Store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -127,42 +126,32 @@ func (a *Act) RequestReview(project, prID, requirement string) error {
 		a.Deps.Notify()
 		return nil
 	}
-	id, err := ps.AddReview(prID, requirement)
-	if err != nil {
+	if _, err := ps.AddReview(prID, requirement); err != nil {
 		return err
 	}
-	reviewer, err := a.freeReviewer(project)
-	if err != nil {
-		return err
-	}
-	if reviewer == "" {
-		// Left for whichever reviewer frees up (-> UnclaimedReview). Handing it to one that is
-		// mid-review would check the new branch out over the one it is reading: a reviewer has one
-		// workspace, so it can hold exactly one PR, and a second assignment is not a queue.
-		_ = ps.LogPR(prID, "review-requested", "unassigned (no free reviewer)")
-		a.Deps.Notify()
-		return nil
-	}
-	// The hub's lifetime: a submit reaches here through a port carrying no context of its own.
-	if err := a.AssignReview(a.Lifetime, project, id, prID, reviewer, requirement); err != nil {
-		return err
-	}
+	// Nobody is chosen here (-> UnclaimedReview): picking one from outside its own map is how a review
+	// came to be handed to a pod that was not running.
+	_ = ps.LogPR(prID, "review-requested", "unassigned — the next free reviewer takes it")
+	a.Deps.Notify()
+	// The FLEET, not this project: reviewers are a global pool, and a pooled one whose own repo holds
+	// no pull requests would never hear that a review is waiting in another (-> gatherWork).
+	a.Flow.WakeAll(topic.ReviewFiled)
 	return nil
 }
 
-// AssignReview gives one reviewer one PR. The review record stays with the PR's project; the
-// reviewer's own roster row, workspace, state and notes are read and written under its own home.
-// It does NOT prepare the session: the reviewer's own map clears on its way to taking a review
-// (-> hub/flow/roles/reviewer), so a hand-over that also prepared would be a second decider, and two
-// of them clear the session twice.
-func (a *Act) AssignReview(ctx context.Context, project string, id int64, prID, reviewer, requirement string) (err error) {
+// AssignReview gives one reviewer one PR, reporting whether the claim took. The review record stays
+// with the PR's project; the reviewer's own row, workspace, state and notes live under its own home.
+// It does NOT prepare the session: the reviewer's map clears on its way in, and two preparers clear
+// it twice.
+func (a *Act) AssignReview(ctx context.Context, project string, id int64, prID, reviewer, requirement string) (claimed bool, err error) {
 	ps := a.Store.For(project)
 	pr, ok, err := ps.GetPR(prID)
 	if err != nil || !ok {
-		return err
+		return false, err
 	}
-	if err := ps.AssignReview(id, reviewer); err != nil {
-		return err
+	claimed, err = ps.AssignReview(id, reviewer)
+	if err != nil || !claimed {
+		return false, err
 	}
 	home, ag, found := a.reviewerHome(project, reviewer)
 	hs := a.Store.For(home)
@@ -170,7 +159,7 @@ func (a *Act) AssignReview(ctx context.Context, project string, id int64, prID, 
 	// vantage point the note grant pays for (-> store.GrantNotes). Its subsystems are often nobody's
 	// task, so this is the role most likely to notice something with no other home.
 	if err := hs.GrantNotes(reviewer, prompts.NotesPerClaim); err != nil {
-		return err
+		return true, err
 	}
 	// The hub preps the terrain so the reviewer never faces a stale tree; on failure it is told
 	// not to trust /workspace. A api.GlobalProject reviewer gets plain files instead (-> git.ArchiveTree).
@@ -193,9 +182,11 @@ func (a *Act) AssignReview(ctx context.Context, project string, id int64, prID, 
 	}
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
 	msg := prompts.MsgReview(prID, requirement, pr.Branch, pr.Base, a.Deps.ArchitectureDoc(project), checkedOut)
-	go a.Harness.Say(home, reviewer, msg, mail.MailAndPush) // async: don't block a worker's submit
+	// Said HERE rather than in a goroutine: this IS the hand-over action, which the machine already
+	// runs off the caller's line, so a goroutine only risks landing after the state has moved on.
+	_ = a.Harness.Say(home, reviewer, msg, mail.MailAndPush)
 	a.Deps.Notify()
-	return nil
+	return true, nil
 }
 
 // reviewerHome resolves a reviewer's own roster row: its own project first, else api.GlobalProject's.

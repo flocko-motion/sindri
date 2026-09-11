@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"os/exec"
@@ -363,7 +364,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	ps := h.store.For(tag)
-	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup")
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
 
 	if err := h.PRFlow().CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
 		t.Fatalf("closing a held task should be allowed: %v", err)
@@ -554,9 +555,6 @@ func mailAgent(t *testing.T) (*Hub, *store.ProjectStore) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"},
-		store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	return h, ps
 }

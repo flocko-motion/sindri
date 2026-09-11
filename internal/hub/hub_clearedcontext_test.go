@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"io"
 	"os/exec"
@@ -166,9 +167,7 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "waiting work", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})
 	// The measurement memo is package-global and keyed on project/agent, so a previous test can
 	// leave a reading for the same pair — the very staleness under test, arriving by another route.
 	h.agents.ForgetContext(testProject, "dvalin")

@@ -138,7 +138,6 @@ func TestNothingAboutAUserRunGoesStale(t *testing.T) {
 func TestAUserRunResultIsNotInjectedAnywhere(t *testing.T) {
 	a, ps := userRunEngine(t)
 	deps := a.Deps.(*flowtest.Hub)
-	deps.Alive = true
 	r, err := a.ScheduleUserRun("repo", "", "make verify", "", "")
 	if err != nil {
 		t.Fatal(err)

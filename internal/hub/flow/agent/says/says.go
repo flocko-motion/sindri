@@ -16,6 +16,7 @@ const (
 	Rejected     = "rejected"      // the verdict came back, with the feedback to answer
 	AwaitVerdict = "await-verdict" // its PR is with a reviewer
 	Gating       = "gating"        // its commit is in the quality gate's queue
+	Interviewing = "interviewing"  // a submit question stands against it, repeated back
 	Resolving    = "resolving"     // a conflict is in its hands
 	NoTasks      = "no-tasks"      // the backlog has nothing for it
 	NoReviews    = "no-reviews"    // no PR is waiting on a verdict
@@ -44,6 +45,6 @@ func Refused(speech string) string { return Refusals[speech] }
 // All is every declared speech, for the check that each has words and each is said by some state.
 var All = []string{
 	Escalated, Retired, Coauthor, Planner, Planning, Working, Rejected, AwaitVerdict,
-	Gating, Resolving, NoTasks, NoReviews, Reviewing, FeatureDone, FeatureGated, Preparing,
+	Gating, Interviewing, Resolving, NoTasks, NoReviews, Reviewing, FeatureDone, FeatureGated, Preparing,
 	Mail, Stalled,
 }

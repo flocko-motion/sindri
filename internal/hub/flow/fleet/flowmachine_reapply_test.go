@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"io"
 	"os"
 	"os/exec"
@@ -71,8 +72,9 @@ func TestResolveAfterReapplyConflictResumesInterimContribution(t *testing.T) {
 	if pr, ok, _ := ps.GetPR("pr-td-LEAF"); !ok || pr.Status != "merged" {
 		t.Errorf("a merged PR must not be renewed by resolving a post-merge reapply, got status %q", pr.Status)
 	}
+	e.Look("repo", "dain") // where the worker stands is its own map's to write
 	st, _ := ps.GetState("dain")
-	if st.Phase != "working" || st.Task != "td-LEAF" {
+	if st.Phase != worker.Working || st.Task != "td-LEAF" {
 		t.Errorf("the agent should resume working td-LEAF, got {phase:%q task:%q}", st.Phase, st.Task)
 	}
 	if !containsSubstring(deps.InjectedText, "pr-td-LEAF") {
@@ -91,9 +93,7 @@ func TestResolveAfterReapplyConflictResumesAnEstablishedFeature(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The shape workflow/merge.go's own reset step leaves: Task is the real subtask, not pr.Task.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-1", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Task: "td-1", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"})
 	if err := os.WriteFile(filepath.Join(wt, "seed"), []byte("resolved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +124,7 @@ func TestResolveAfterReapplyConflictResumesAJustPromotedFeature(t *testing.T) {
 		t.Fatal(err)
 	}
 	// promoteToFeature's own shape (-> adopt.go): Container set, Task left empty.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Task: "", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"})
 	if err := os.WriteFile(filepath.Join(wt, "seed"), []byte("resolved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

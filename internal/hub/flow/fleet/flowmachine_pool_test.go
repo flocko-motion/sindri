@@ -1,14 +1,14 @@
 package fleet
 
 import (
-	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer"
-	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
@@ -31,53 +31,44 @@ func poolFixture(t *testing.T) (*store.Store, *store.ProjectStore) {
 	return st, ps
 }
 
-// TestIdleReviewerPrefersALocalOneOverTheGlobalPool: a repo that keeps its own reviewer expects it
-// used, so a free local reviewer wins even when the global pool also has one sitting idle.
-func TestIdleReviewerPrefersALocalOneOverTheGlobalPool(t *testing.T) {
+// TestALocalReviewerTakesItsOwnProjectsReview: a repo that keeps its own reviewer expects it used,
+// and a reviewer looks at its own project's rows before the fleet-wide pool.
+func TestALocalReviewerTakesItsOwnProjectsReview(t *testing.T) {
 	st, ps := poolFixture(t)
-	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili"}); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Reviewer(t, ps, "fili")
 	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Projects: []store.Project{{Tag: "repo"}}})
 
-	got, err := e.prAct().IdleReviewer("repo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "fili" {
-		t.Errorf("IdleReviewer = %q, want the local reviewer fili", got)
+	e.Look("repo", "fili")
+
+	if held, _ := ps.ReviewingPR("fili"); held != "pr-1" {
+		t.Errorf("fili holds %q, want pr-1 — its own project's review is its next one", held)
 	}
 }
 
-// TestIdleReviewerFallsBackToTheGlobalPool: a project with no free reviewer of its own can still
-// draw on one living in api.GlobalProject — the capability a project-scoped roster never offered.
-func TestIdleReviewerFallsBackToTheGlobalPool(t *testing.T) {
+// TestAPooledReviewerTakesAReviewFromAnotherProject: a project with no reviewer of its own draws on
+// the api.GlobalProject pool, which is the capability a project-scoped roster never offered.
+func TestAPooledReviewerTakesAReviewFromAnotherProject(t *testing.T) {
 	st, ps := poolFixture(t)
-	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true, Busy: map[string]bool{"fili": true}})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Projects: []store.Project{{Tag: "repo"}}})
 
-	got, err := e.prAct().IdleReviewer("repo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "ori" {
-		t.Errorf("IdleReviewer = %q, want the global reviewer ori once the local one is busy", got)
+	e.Look(api.GlobalProject, "ori")
+
+	if held, _ := ps.ReviewingPR("ori"); held != "pr-1" {
+		t.Errorf("ori holds %q, want pr-1 from the pool", held)
 	}
 }
 
-// TestIdleReviewerSeesAGlobalReviewerBusyInAnotherProject: "what is this reviewer reviewing" has to
-// be a fleet-wide question for a api.GlobalProject reviewer, or a project-scoped read reports it free
-// while it is plainly busy on a PR the current project never touches.
-func TestIdleReviewerSeesAGlobalReviewerBusyInAnotherProject(t *testing.T) {
-	st, _ := poolFixture(t)
+// TestAPooledReviewerBusyElsewhereTakesNothing: "what is this reviewer reviewing" has to be a
+// fleet-wide question for a pooled one, or a project-scoped read reports it free while it is plainly
+// busy on a PR the current project never touches.
+func TestAPooledReviewerBusyElsewhereTakesNothing(t *testing.T) {
+	st, ps := poolFixture(t)
 	gs := st.For(api.GlobalProject)
 	if err := gs.PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
@@ -86,21 +77,17 @@ func TestIdleReviewerSeesAGlobalReviewerBusyInAnotherProject(t *testing.T) {
 	if err := other.PutPR(store.PR{ID: "pr-elsewhere", Task: "td-2", Agent: "dain", Branch: "sd-2", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	rid, err := other.AddReview("pr-elsewhere", "check it")
-	if err != nil {
-		t.Fatal(err)
+	rid := flowtest.FileReview(t, other, "pr-elsewhere")
+	if claimed, err := other.AssignReview(rid, "ori"); err != nil || !claimed {
+		t.Fatalf("seed the hold it is busy with: claimed=%v err=%v", claimed, err)
 	}
-	if err := other.AssignReview(rid, "ori"); err != nil {
-		t.Fatal(err)
-	}
-	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true, Projects: []store.Project{{Tag: "other-repo"}}})
+	e := newEngine(t, st, &flowtest.Hub{Root: t.TempDir(),
+		Projects: []store.Project{{Tag: "repo"}, {Tag: "other-repo"}}})
 
-	got, err := e.prAct().IdleReviewer("repo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("IdleReviewer = %q, want none — the only reviewer is busy in another project", got)
+	e.Look(api.GlobalProject, "ori")
+
+	if held, _ := ps.ReviewingPR("ori"); held != "" {
+		t.Errorf("ori took %q while already reading pr-elsewhere — one workspace, one pull request", held)
 	}
 }
 
@@ -129,15 +116,9 @@ func TestAssignReviewResolvesAGlobalReviewersOwnRecord(t *testing.T) {
 	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := newEngine(t, st, &flowtest.Hub{Root: root, Alive: true})
+	e := newEngine(t, st, &flowtest.Hub{Root: root, Projects: []store.Project{{Tag: "repo"}}})
 
-	rid, err := ps.AddReview("pr-1", "look again")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := e.prAct().AssignReview(t.Context(), "repo", rid, "pr-1", "ori", "look again"); err != nil {
-		t.Fatal(err)
-	}
+	e.Look(api.GlobalProject, "ori")
 
 	entries, err := ps.PREvents("pr-1")
 	if err != nil {
@@ -150,7 +131,6 @@ func TestAssignReviewResolvesAGlobalReviewersOwnRecord(t *testing.T) {
 	}
 	// The hand-over assigns the review; where the reviewer STANDS is its own map's to write, under
 	// its own home rather than the PR's project.
-	e.Look(api.GlobalProject, "ori")
 	gstate, err := st.For(api.GlobalProject).GetState("ori")
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +172,7 @@ func TestAssignReviewMaterialisesAGlobalReviewersWorkspaceAsPlainFiles(t *testin
 	run("commit", "-qm", "pr commit")
 	run("checkout", "-q", "main")
 
-	st, ps := poolFixture(t)
+	st, _ := poolFixture(t)
 	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
@@ -205,14 +185,8 @@ func TestAssignReviewMaterialisesAGlobalReviewersWorkspaceAsPlainFiles(t *testin
 		t.Fatal(err)
 	}
 
-	e := newEngine(t, st, &flowtest.Hub{Root: repoRoot, Alive: true})
-	rid, err := ps.AddReview("pr-1", "look")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := e.prAct().AssignReview(t.Context(), "repo", rid, "pr-1", "ori", "look"); err != nil {
-		t.Fatal(err)
-	}
+	e := newEngine(t, st, &flowtest.Hub{Root: repoRoot, Projects: []store.Project{{Tag: "repo"}}})
+	e.Look(api.GlobalProject, "ori")
 
 	if _, err := os.Stat(filepath.Join(wt, "changed.txt")); err != nil {
 		t.Errorf("the PR's own file should be materialised: %v", err)

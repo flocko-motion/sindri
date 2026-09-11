@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestAgentDirectiveAnswersAtOnceForAnIdleReviewer(t *testing.T) {
 // so that race is gone by construction — and a dispatcher that only spreads rumours about jobs
 // maybe waiting is not a dispatcher.
 func TestTheDispatcherAssignsRatherThanAdvertises(t *testing.T) {
-	deps := &stubDeps{Alive: true}
+	deps := &stubDeps{}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	e.LookProject("repo")
@@ -103,9 +104,7 @@ func TestAssignPendingWorkLeavesABusyWorkerAlone(t *testing.T) {
 	if err := e.taskAct().RefreshTask("repo", "td-EPIC"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Container: "td-EPIC", Phase: "working"})
 
 	e.LookProject("repo")
 
@@ -130,9 +129,7 @@ func TestAnApprovalReachesTheFeatureWorkerWithoutASweep(t *testing.T) {
 	if err := e.taskAct().RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 	deps := e.Deps.(*stubDeps)
 
 	e.LookProject("repo")
@@ -165,9 +162,7 @@ func TestAssignPendingSubtaskDoesNotRepeatIdenticalNudges(t *testing.T) {
 	if err := e.taskAct().RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 	if err := e.taskAct().ApproveTask("repo", "td-2", false); err != nil {
 		t.Fatalf("ApproveTask: %v", err)
 	}
@@ -190,9 +185,7 @@ func TestAssignPendingSubtaskDoesNotPushAPendingClearNotice(t *testing.T) {
 	if err := e.taskAct().RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 	a, _, _ := ps.GetAgent("dain")
 	a.ClearArmed = true
 	if err := ps.PutAgent(a); err != nil {

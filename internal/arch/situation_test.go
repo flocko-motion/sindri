@@ -40,7 +40,7 @@ var ruleDerivers = map[string]string{
 	// The writers: setting a flag is not deriving a rule from it.
 	"internal/hub/harness/clearcontext.go": "sets and clears the arming — its writer",
 	"internal/hub/harness/retire.go":       "sets and clears retirement — its writer",
-	"internal/hub/flowtest/reviews.go":     "the test fixture that SETS the flag, standing in for that writer",
+	"internal/hub/flowtest/roster.go":      "the fixture that SETS the flag, standing in for that writer",
 	"internal/hub/api/frontend/routes.go":  "the retire endpoint's own request field, not a roster row",
 	"internal/hub/hub.go":                  "SetRetired reads the prior value to spot a return to service",
 	// Rendering: the board carries these as fields for a front-end to show.
@@ -48,11 +48,9 @@ var ruleDerivers = map[string]string{
 	"internal/hub/commands.go": "renders the retirement note beside what the agent holds",
 	// Read off the SITUATION, which is the sanctioned carrier — the fact, for a caller that needs the
 	// fact rather than a rule: which armed clear to fire, and which directive a retired agent gets.
-	"internal/hub/core/core.go":              "reads both off the situation and hands the FACT on — the one place either is read",
-	"internal/hub/flow/agent/session_act.go": "reads ClearArmed off the situation, to fire the clear it names",
-	"internal/hub/flow/task/task_act.go":     "reads Retired off the situation, to serve DirRetired",
-	"internal/hub/flow/pr/reviewer_act.go":   "reads Retired off the situation, to skip a parked reviewer",
-	"internal/hub/flow/fleet/flowdo.go":      "takes the arming BACK once the clear has answered it — its writer, not a second decider",
+	"internal/hub/core/core.go":          "reads both off the situation and hands the FACT on — the one place either is read",
+	"internal/hub/flow/task/task_act.go": "reads Retired off the situation, to serve DirRetired",
+	"internal/hub/flow/fleet/flowdo.go":  "takes the arming BACK once the clear has answered it — its writer, not a second decider",
 	// The declared states read both off the situation for the same reason: which action follows an
 	// armed clear, and which words a retired agent is given. The surface's own wakeRefusal mirrors
 	// this table branch for branch, and now that the table is declared data that mirroring is

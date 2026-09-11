@@ -45,11 +45,9 @@ func unownedSubtask(t *testing.T) (*Engine, *store.ProjectStore) {
 		t.Fatalf("parent os-spec: %v", err)
 	}
 	// Holding the feature, between subtasks — the state the directive and the submit gate disagreed in.
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: agent, Container: "td-feat", Branch: "td-feat", Phase: "idle",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	return newEngine(t, st, &stubDeps{Root: root}), ps
 }
 

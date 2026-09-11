@@ -6,7 +6,10 @@
 // limits:  pure strings/builders; which one to use is the acting half's.
 package prompts
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const DirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. " +
 	"While you wait, `sindri resolve` checks your branch still merges onto its base (and resolves it " +
@@ -20,6 +23,19 @@ const DirSubmitted = "Your pull request is under review. Wait — the hub will t
 // it does next — asking again is how it would notice, not required to.
 const DirGating = "Your quality gate is queued. A failure reaches you as a message, with what to " +
 	"fix. A pass sends nothing — you're simply moved to review; ask `sindri` again if you want to see it."
+
+// DirInterviewing answers an author standing in the interview: the question it owes an answer to,
+// repeated back. Repeated rather than summarised, since asking where it stands is exactly what an
+// author does when the question it was put has scrolled out of its pane.
+func DirInterviewing(question string) string {
+	if question == "" {
+		return "Your submit is being taken. Nothing is asked of you — wait for the gate's answer."
+	}
+	return fmt.Sprintf("Your submit is waiting on one answer:\n\n%s\n\nAnswer with "+
+		"`sindri submit \"<your answer>\"`, from the code rather than from memory. Leave your tree "+
+		"as it stands: editing it abandons this submit, because your answers describe the tree that "+
+		"was going up.", question)
+}
 
 // ReplyRegistered acknowledges a submitted PR and tells the worker to wait for review.
 func ReplyRegistered(prID string) string {
@@ -151,9 +167,14 @@ func ReplyRebased(incoming []string) string {
 // ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
 // doesn't mount the real .git, so every git command fails. The verb it names tracks the caller's
 // surface — contribute/submit exist only in "working", and a feature worker holds checkpoint.
-func ReplyResolveDirty(phase string, inContainer bool) string {
+func ReplyResolveDirty(state string, inContainer bool) string {
 	const dirty = "Changes in /workspace the hub hasn't recorded yet block the rebase. "
-	switch phase {
+	// The state's own leaf word: where an agent stands is "worker/working", and what changes this
+	// advice is the standing rather than which role is doing it.
+	if _, leaf, named := strings.Cut(state, "/"); named {
+		state = leaf
+	}
+	switch state {
 	case "working":
 		if inContainer {
 			return dirty + "Call `sindri checkpoint \"<summary>\"` for the hub to record them and move to your next subtask."

@@ -210,7 +210,14 @@ func Handler(h Hub) http.Handler {
 		if !serve.Decode(w, r, &req) {
 			return
 		}
-		serve.WriteJSON(w, serve.OKMsg{"stopped"}, h.Agents().StopAgent(serve.Detached(r), h.AgentReq(r, req.Name), req.Name))
+		// The request, not the act: the machine's stopping state takes the pod back, and settling the
+		// agent here means this answers after it has rather than before.
+		project := h.AgentReq(r, req.Name)
+		err := h.AgentFlow().AskStop(project, req.Name)
+		if err == nil {
+			h.AgentFlow().Settle(project, req.Name) // the pod is gone before this answers, not after
+		}
+		serve.WriteJSON(w, serve.OKMsg{"stopped"}, err)
 	})
 	mux.HandleFunc("POST /agent/clear-context", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -236,10 +243,21 @@ func Handler(h Hub) http.Handler {
 		w.Header().Set("Trailer", "X-Sindri-Error")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fw := serve.Flushing(w)
-		if err := h.Agents().Launch(serve.Detached(r), h.AgentReq(r, req.Name), req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
+		// Recorded before the launch runs, so a client that drops mid-build leaves "asked for, and not
+		// yet done" as a fact the machine reads and finishes. The launch itself stays HERE: a human
+		// watching an image build must see it, and doLaunch has nowhere to stream.
+		project := h.AgentReq(r, req.Name)
+		if err := h.AgentFlow().AskStart(project, req.Name); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
+			return
 		}
+		if err := h.Agents().Launch(serve.Detached(r), project, req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
+			fmt.Fprintf(fw, "error: %v\n", err)
+			w.Header().Set("X-Sindri-Error", err.Error())
+			return
+		}
+		h.AgentFlow().AnswerPodRequest(project, req.Name) // this call was the request; nothing is left to do
 	})
 	mux.HandleFunc("POST /agent/rebuild", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

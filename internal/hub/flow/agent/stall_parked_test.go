@@ -19,7 +19,7 @@ func quietWorkerHoldingWork(t *testing.T, deps *flowtest.Hub) (*Act, *store.Proj
 	}
 	t.Cleanup(func() { st.Close() })
 	root := t.TempDir()
-	deps.Root, deps.Alive = root, true
+	deps.Root = root
 	if err := st.RegisterProject(proj, root); err != nil {
 		t.Fatal(err)
 	}
@@ -27,9 +27,7 @@ func quietWorkerHoldingWork(t *testing.T, deps *flowtest.Hub) (*Act, *store.Proj
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: ".worktrees/dvalin"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"})
 	return newActOn(t, st, deps), ps
 }
 
@@ -79,9 +77,7 @@ func TestARetiredAgentHoldingNothingIsNotNudged(t *testing.T) {
 	}
 	// Nothing in hand, written into the state rather than stated by a stub: the phase is left
 	// "working" so the screen still reads as stalled, which is what makes the exemption the reason.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "working"}, store.ReasonFreed, "wound down"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "working"})
 	if a.NudgeStalled(proj, "dvalin", flowtest.Saying("idle"), 6*time.Minute) {
 		t.Error("a retired agent with nothing in hand was nudged for waiting as it was told to")
 	}
@@ -98,7 +94,7 @@ func TestAGatedFeatureWorkerIsNotNudged(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 	root := t.TempDir()
-	deps.Root, deps.Alive = root, true
+	deps.Root = root
 	if err := st.RegisterProject(proj, root); err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +111,7 @@ func TestAGatedFeatureWorkerIsNotNudged(t *testing.T) {
 	if err := ps.SetApproval("td-gated", "pending", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"})
 	a := newActOn(t, st, deps)
 
 	if a.NudgeStalled(proj, "dain", flowtest.Saying("idle"), 6*time.Minute) {

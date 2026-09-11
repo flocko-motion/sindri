@@ -2,6 +2,8 @@ package fleet
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"strings"
 	"testing"
@@ -111,9 +113,7 @@ func TestAnEscalationSurvivesAPhaseChange(t *testing.T) {
 	if err := ps.SetEscalation("dvalin", q); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "submitted"})
 	st, err := ps.GetState("dvalin")
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestAnEscalationSurvivesAPhaseChange(t *testing.T) {
 	if st.Escalation != q {
 		t.Errorf("escalation after a phase write = %q, want it untouched", st.Escalation)
 	}
-	if st.Phase != "submitted" {
+	if st.Phase != worker.Submitted {
 		t.Errorf("phase = %q — the phase write itself must still land", st.Phase)
 	}
 }

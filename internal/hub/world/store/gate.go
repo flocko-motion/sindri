@@ -7,6 +7,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -99,6 +101,24 @@ func (p *ProjectStore) RunWaiters(runID string) ([]string, error) {
 		out = append(out, agent)
 	}
 	return out, rows.Err()
+}
+
+// LandingGateRefused reports the last gate an agent opened to LAND something having finished
+// without landing it — failed, timed out, or cancelled by a hub that died holding it. The fact that
+// frees an author standing at the gate: nothing was filed, so there is no pull request carrying a
+// verdict for it to read instead, and without this it stands there for ever.
+func (p *ProjectStore) LandingGateRefused(agent string) (bool, error) {
+	var status string
+	err := p.s.db.QueryRow(`
+		SELECT status FROM runs WHERE project=? AND agent=? AND kind IN ('submit','contribute')
+		ORDER BY created_at DESC, rowid DESC LIMIT 1`, p.project, agent).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("last landing gate for %s: %w", agent, err)
+	}
+	return status == "failed" || status == "timed_out" || status == "cancelled", nil
 }
 
 // AgentWaitingOnRun reports whether agent's next move depends on a run the fleet's own queue is

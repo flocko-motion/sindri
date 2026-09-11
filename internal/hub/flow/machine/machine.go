@@ -23,10 +23,6 @@ type Machine[W any] interface {
 	// condition, and start the state's action if it has one. For a caller that wants the answer
 	// before it returns — and for a test, which cannot wait on a beat.
 	Look(subject string)
-	// Verbs is what a subject may run where it stands, for the surface it is offered.
-	Verbs(subject string) ([]Offer, error)
-	// Run performs a verb for a subject, refusing one its state does not offer.
-	Run(ctx context.Context, subject, verb string) (Offer, error)
 	// State is where a subject stands, and the declaration of that state.
 	State(subject string) (State[W], error)
 	// Would is where a subject would land if it were looked at now — the conditions followed, and
@@ -59,9 +55,8 @@ type Config[W any] struct {
 	// Default is the poll cadence for a state that declares no Every of its own.
 	Default time.Duration
 	// Tick is how often the engine looks for subjects whose poll has come due. ZERO runs no loop at
-	// all: the machine still answers where a subject stands, offers its verbs and runs a pass on
-	// demand (-> Look), but nothing happens on its own. That is what a machine outside the hub — a
-	// test, a one-off — should be.
+	// all: the machine still answers where a subject stands and runs a pass on demand (-> Look), but
+	// nothing happens on its own. That is what a machine outside the hub — a test, a one-off — should be.
 	Tick time.Duration
 	// Record receives every step of every pass.
 	Record Recorder
@@ -75,6 +70,9 @@ type running struct {
 	pass   string
 	cancel context.CancelFunc
 	done   chan struct{}
+	// awaits carries the action's own declaration (-> Action.Awaits), so a caller holding the line
+	// knows not to wait behind this one without looking up where the subject stands again.
+	awaits bool
 }
 
 type machine[W any] struct {
@@ -87,6 +85,11 @@ type machine[W any] struct {
 	due   map[string]time.Time
 	act   map[string]*running
 	woken map[string]bool
+	// gates make a PASS atomic per subject. Every look used to happen on the loop's one goroutine,
+	// which is no longer true: a caller asks for one on its own (-> Look). Two passes reading one
+	// subject at once each decided from the state before the other moved it — which is how an agent
+	// came to be handed work by one pass and freed by the next for holding none.
+	gates map[string]*sync.Mutex
 	// ran is every (subject, action) this PROCESS has started. An acting state with no entry here
 	// was entered by a hub that is gone, which is what Orphaned reports.
 	ran map[string]bool
@@ -110,8 +113,9 @@ func New[W any](lifetime context.Context, cfg Config[W]) (Machine[W], error) {
 	m := &machine[W]{
 		cfg: cfg, states: make(map[string]State[W], len(cfg.States)),
 		due: map[string]time.Time{}, act: map[string]*running{}, woken: map[string]bool{},
-		ran:  map[string]bool{},
-		poke: make(chan struct{}, 1), started: time.Now().Truncate(time.Second),
+		gates: map[string]*sync.Mutex{},
+		ran:   map[string]bool{},
+		poke:  make(chan struct{}, 1), started: time.Now().Truncate(time.Second),
 	}
 	for _, s := range cfg.States {
 		if _, dup := m.states[s.Name]; dup {
@@ -141,13 +145,6 @@ func (m *machine[W]) check() error {
 		}
 		if err := m.checkExits(s); err != nil {
 			return err
-		}
-		for _, v := range s.Verbs {
-			if v.To != Stay {
-				if _, ok := m.states[v.To]; !ok {
-					return fmt.Errorf("machine: state %q offers %q leading to undeclared %q", s.Name, v.Verb.Name, v.To)
-				}
-			}
 		}
 	}
 	return nil
@@ -220,6 +217,18 @@ func (m *machine[W]) standing(subject string) (State[W], time.Time, error) {
 		return State[W]{}, since, fmt.Errorf("machine: %s stands in %q, which is not declared", subject, name)
 	}
 	return s, since, nil
+}
+
+// gate is one subject's pass lock, made on first use.
+func (m *machine[W]) gate(subject string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.gates[subject]
+	if !ok {
+		g = &sync.Mutex{}
+		m.gates[subject] = g
+	}
+	return g
 }
 
 // Close stops the loop and every action in flight.

@@ -175,6 +175,16 @@ func (m *machine[W]) expected(s State[W]) (Transition[W], bool) {
 // look is one pass over one subject: read where it stands, start its action if it has one and none
 // is running, then ask every condition the state declared.
 func (m *machine[W]) look(subject string, wait bool) {
+	// One pass at a time per subject. A caller holding the line WAITS its turn; the loop SKIPS a
+	// subject somebody is already deciding, and comes round to it again — a dropped look costs a
+	// beat, which is the same bargain every topic makes.
+	g := m.gate(subject)
+	if wait {
+		g.Lock()
+	} else if !g.TryLock() {
+		return
+	}
+	defer g.Unlock()
 	pass := m.passes.next()
 	s, since, err := m.standing(subject)
 	if err != nil {
@@ -265,9 +275,11 @@ func (m *machine[W]) begin(pass, subject string, s State[W], w W, wait bool) {
 	m.mu.Lock()
 	if in := m.act[subject]; in != nil {
 		m.mu.Unlock()
-		if wait {
+		if wait && !in.awaits {
 			// The loop got there first. A caller holding the line WAITS rather than reporting over the
-			// top of it: answering from a world mid-move is Look going missing.
+			// top of it: answering from a world mid-move is Look going missing. An action that waits on
+			// the subject is the exception, and the reason Awaits exists: the answer it is waiting for
+			// can only arrive from the subject, which is who is holding this line.
 			select {
 			case <-in.done:
 			case <-m.lifetime.Done():
@@ -277,7 +289,8 @@ func (m *machine[W]) begin(pass, subject string, s State[W], w W, wait bool) {
 	}
 	ctx, cancel := context.WithCancel(m.lifetime)
 	settled := make(chan struct{})
-	m.act[subject] = &running{action: s.Action.Name, pass: pass, cancel: cancel, done: settled}
+	m.act[subject] = &running{action: s.Action.Name, pass: pass, cancel: cancel, done: settled,
+		awaits: s.Action.Awaits}
 	m.ran[subject+"\x00"+s.Action.Name] = true
 	m.mu.Unlock()
 	m.record(Entry{Pass: pass, Subject: subject, State: s.Name, Step: StepStarted, Detail: s.Action.Name})
@@ -301,7 +314,7 @@ func (m *machine[W]) begin(pass, subject string, s State[W], w W, wait bool) {
 		m.record(Entry{Pass: pass, Subject: subject, State: s.Name, Step: StepOutcome, Detail: out.Name})
 		m.landed(pass, subject, s, out)
 	}
-	if wait {
+	if wait && !s.Action.Awaits {
 		run() // the caller is holding the line for the answer
 		return
 	}

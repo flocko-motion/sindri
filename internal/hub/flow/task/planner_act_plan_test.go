@@ -129,7 +129,8 @@ func TestAssignPlanRefusedWithAnOpenPR(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-os-new", Agent: "galar", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	a := newActWith(t, st, &flowtest.Hub{Root: root, Alive: true})
+	deps := &flowtest.Hub{Root: root}
+	a := newActWith(t, st, deps)
 
 	err = a.AssignPlan(proj, "galar", "another thing", "")
 	if err == nil {
@@ -148,8 +149,10 @@ func TestAssignPlanRefusedWithAnOpenPR(t *testing.T) {
 	if err := a.AssignPlan(proj, "galar", "another thing", ""); err != nil {
 		t.Fatalf("a planner with no open PR should take an assignment: %v", err)
 	}
-	if got, _ := ps.GetState("galar"); got.Phase != "planning" {
-		t.Errorf("phase = %q, want planning", got.Phase)
+	// The BRIEF is the assignment: a planner's work is the conversation it has just been handed, and
+	// where that leaves it is read off the session rather than written here (-> cond.InConversation).
+	if len(deps.Injected) == 0 {
+		t.Error("the planner was assigned nothing it could read")
 	}
 }
 

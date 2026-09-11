@@ -19,7 +19,7 @@ import (
 // would hand over if it were allowed to.
 func coauthorEngine(t *testing.T) (*Engine, *store.ProjectStore) {
 	t.Helper()
-	e := storelessEngine(t, &stubDeps{Alive: true})
+	e := storelessEngine(t, &stubDeps{})
 	if err := e.Store.RegisterProject("repo", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func coauthorEngine(t *testing.T) (*Engine, *store.ProjectStore) {
 func TestTheQueueNeverHandsACoauthorAReview(t *testing.T) {
 	e, ps := coauthorEngine(t)
 
-	e.prAct().AssignPendingReviews("repo") // the push path: it hands unclaimed rows to an idle reviewer
+	e.LookProject("repo") // every agent re-decides; a coauthor's map offers no route to a review
 	if held, _ := ps.ReviewingPR("brokk"); held != "" {
 		t.Errorf("the coauthor was handed %s — nothing may assign it a review", held)
 	}

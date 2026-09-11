@@ -20,6 +20,7 @@ type stubDeps struct {
 	pushed    []string // who a push was typed at
 	texts     []string // what each push said
 	notices   int
+	announced []string // who the mailbox said had mail, in order
 }
 
 func (d *stubDeps) Push(project, name, text string) error {
@@ -31,6 +32,7 @@ func (d *stubDeps) Push(project, name, text string) error {
 	return nil
 }
 func (d *stubDeps) Notify()                             { d.notices++ }
+func (d *stubDeps) MailArrived(project, name string)    { d.announced = append(d.announced, name) }
 func (d *stubDeps) RepoName(project string) string      { return project }
 func (d *stubDeps) Reachable(project, name string) bool { return d.up }
 
@@ -97,10 +99,7 @@ func mailAgent(t *testing.T) (*Box, *store.ProjectStore) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"},
-		store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	place(t, ps, "dvalin", "td-1")
 	return b, ps
 }
 
@@ -116,4 +115,17 @@ func newBox2(t *testing.T) (*Box, *store.ProjectStore) {
 func verbIn(t *testing.T, b *Box, project, agent string, args ...string) (string, int) {
 	t.Helper()
 	return verbAs(t, b, b.store.For(project), agent, args...)
+}
+
+// place puts an agent on a task, through the two writers the hub itself uses. Its own rather than
+// flowtest's, which stands in for the hub and so imports this package — a fixture here cannot reach
+// for it without a cycle.
+func place(t *testing.T, ps *store.ProjectStore, agent, task string) {
+	t.Helper()
+	if err := ps.SetHolding(agent, task, task, "", store.ReasonClaimed, "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetPhase(agent, "worker/working", store.ReasonAdvanced, "fixture"); err != nil {
+		t.Fatal(err)
+	}
 }

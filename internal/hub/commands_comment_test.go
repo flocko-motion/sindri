@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -18,9 +19,7 @@ func TestWorkerCanCommentOnItsOwnTask(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	out, code := execAs(t, h, "dvalin", "comment", "td-1", "the body is stale, needs review")
 	if code != 0 {
 		t.Fatalf("comment failed (%d): %s", code, out)
@@ -48,9 +47,7 @@ func TestWorkerCanCommentOnItsHeldContainer(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-feat", Title: "a feature", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Branch: "td-feat", Task: "td-sub", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Container: "td-feat", Branch: "td-feat", Task: "td-sub", Phase: "working"})
 	out, code := execAs(t, h, "dvalin", "comment", "td-feat", "worth flagging at the feature level")
 	if code != 0 {
 		t.Fatalf("comment failed (%d): %s", code, out)
@@ -72,9 +69,7 @@ func TestWorkerCommentsWithNoID(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	out, code := execAs(t, h, "dvalin", "comment", "the body is stale, needs review")
 	if code != 0 {
 		t.Fatalf("bare comment failed (%d): %s", code, out)
@@ -99,9 +94,7 @@ func TestBareCommentKeepsAWholeSentence(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	const body = "sd-1c3041 is the task this corrects"
 	out, code := execAs(t, h, "dvalin", "comment", body)
 	if code != 0 {
@@ -130,9 +123,7 @@ func TestFeatureWorkerCanTellWhichTaskItCommentedOn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"})
 
 	bare, code := execAs(t, h, "dvalin", "comment", "this subtask is wrong")
 	if code != 0 {
@@ -177,7 +168,7 @@ func TestReviewerCommentsWithNoID(t *testing.T) {
 	if err != nil || len(revs) == 0 {
 		t.Fatalf("reviews = %v, err %v", revs, err)
 	}
-	if err := ps.AssignReview(revs[0].ID, "brokkr"); err != nil {
+	if _, err := ps.AssignReview(revs[0].ID, "brokkr"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "brokkr", "comment", "one nit filed here")
@@ -212,12 +203,8 @@ func TestCommentHelpAsksOnlyForWhatTheRoleSupplies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: "nabbi", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
+	flowtest.Place(t, ps, store.AgentState{Agent: "nabbi", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"})
 
 	helpOf := func(agent string) string {
 		t.Helper()
@@ -265,9 +252,7 @@ func TestWorkerCannotCommentOnAnotherTask(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	out, code := execAs(t, h, "dvalin", "comment", "td-2", "not mine to touch")
 	if code == 0 {
 		t.Fatalf("commenting on a task the worker doesn't hold should fail: %s", out)
@@ -318,7 +303,7 @@ func TestReviewerCanCommentOnTheTaskItIsReviewing(t *testing.T) {
 	if err != nil || len(revs) == 0 {
 		t.Fatalf("reviews = %v, err %v", revs, err)
 	}
-	if err := ps.AssignReview(revs[0].ID, "brokkr"); err != nil {
+	if _, err := ps.AssignReview(revs[0].ID, "brokkr"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -390,9 +375,7 @@ func TestCommentRefusesAnEmptyBody(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"})
 	out, code := execAs(t, h, "dvalin", "comment", "td-1")
 	if code == 0 {
 		t.Fatalf("a comment with no body should be refused: %s", out)

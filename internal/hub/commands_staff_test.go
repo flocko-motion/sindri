@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -24,9 +25,7 @@ func staffFixture(t *testing.T) *Hub {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "nori", Task: "sd-1", Phase: "working"})
 	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "sd-1", Agent: "nori", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +33,7 @@ func staffFixture(t *testing.T) *Hub {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(rev, "dvalin"); err != nil {
+	if _, err := ps.AssignReview(rev, "dvalin"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.store.For("other-repo").PutAgent(store.Agent{Name: "dwalin", Role: "planner"}); err != nil {

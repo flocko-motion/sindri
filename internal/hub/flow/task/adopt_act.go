@@ -10,6 +10,7 @@ package task
 import (
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
@@ -34,7 +35,7 @@ func (a *Act) AdoptChild(project, parent, child string) {
 		if st.Container != parent && st.Task != parent {
 			continue
 		}
-		promoted := st.Container == "" && st.Phase == "working"
+		promoted := st.Container == "" && situation.Standing(st.Phase, "working")
 		if promoted {
 			a.PromoteToFeature(project, ag.Name, parent)
 		}
@@ -50,8 +51,7 @@ func (a *Act) AdoptChild(project, parent, child string) {
 // may go out, and it asks LATER — a proposal's approval row is written a moment after the task.
 func (a *Act) PromoteToFeature(project, agent, task string) {
 	ps := a.Store.For(project)
-	_ = ps.SetState(store.AgentState{Agent: agent, Container: task, Branch: task, Phase: "idle"},
-		store.ReasonClaimed, "promoted to a feature: "+task)
+	_ = ps.SetHolding(agent, "", task, task, store.ReasonClaimed, "promoted to a feature: "+task)
 	_ = ps.Log(agent, "promote", task+" gained work, so it is a feature now")
-	a.Deps.Notify()
+	a.announceHolding(project, agent)
 }

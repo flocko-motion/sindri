@@ -53,6 +53,7 @@ func (b *Box) CmdMail(c registry.Caller, args []string, out io.Writer) (int, err
 	}
 	fmt.Fprintf(out, "\n%s\n", prompts.ReplyMailRead(len(unread)))
 	b.deps.Notify() // the unread count is on the board, and it has just changed
+	b.deps.MailArrived(c.Project, c.Agent)
 	return 0, nil
 }
 

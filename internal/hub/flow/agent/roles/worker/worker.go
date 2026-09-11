@@ -17,17 +17,14 @@ import (
 // The worker's states. Named here so the map below reads as one page rather than as forward
 // references to four files.
 const (
-	Idle       = "worker/idle"
-	Assigning  = "worker/assigning"
-	Working    = "worker/working"
-	Submitting = "worker/submitting"
-	Gating     = "worker/gating"
-	Submitted  = "worker/submitted"
-	Resolving  = "worker/resolving"
-	Clearing   = "worker/clearing"
-	Retiering  = "worker/retiering"
-	Escalated  = "worker/escalated"
-	Retired    = "worker/retired"
+	Idle         = "worker/idle"
+	Assigning    = "worker/assigning"
+	Working      = "worker/working"
+	Interviewing = "worker/interviewing"
+	Submitting   = "worker/submitting"
+	Gating       = "worker/gating"
+	Submitted    = "worker/submitted"
+	Resolving    = "worker/resolving"
 )
 
 // idle: holding nothing, watching for something to hold.
@@ -48,18 +45,30 @@ var idle = flow.State{
 		{cond.Retired, Retired, "a human wound it down, and it holds nothing to answer for"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear — it fires before any claim"},
 		{cond.HoldsFeature, Between, "it holds a feature, so the subtask loop answers for it"},
+		// The session is prepared BEFORE the hand-over, each preparation its own state: work arrives
+		// whole, so the previous unit is context to drop rather than condense, and a switch of model
+		// restarts the session on its way through.
+		{cond.TierMismatch, Retiering, "the unit waiting is rated for another model"},
+		{cond.SessionInTheWay, Clearing, "there is work waiting and a session still holding the last unit"},
 		{cond.WorkAvailable, Assigning, "the backlog has a unit rated for it"},
+		// The pod comes LAST, after everything the agent could be answering for: a stop must not
+		// interrupt an agent about to be handed work, and a start is only worth making for work
+		// nobody awake would take.
+		{cond.StartAsked, Launching, "a human asked for this pod"},
+		{cond.NeededWhileAsleep, Launching, "the backlog has work, this pod was reclaimed, and nobody awake would take it"},
+		{cond.StopAsked, Stopping, "a human asked for this pod back"},
+		{cond.Reclaimable, Stopping, "it has held nothing long enough that its pod is worth taking back"},
 	},
 	Verbs: flow.Offers{
-		{verb.Next, Assigning, "take the next task"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Resolve, flow.Stay, "check your branch still merges"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Next, "take the next task"},
+		{verb.Task, "read the backlog"},
+		{verb.Git, "read your changes"},
+		{verb.Resolve, "check your branch still merges"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -80,7 +89,7 @@ var assigning = flow.State{
 		{flow.Orphaned{}, Idle, "the hub restarted mid-assignment — nothing was handed over"},
 		{cond.Retired, Retired, "a human wound it down while the hand-over ran"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // working: the agent is the actor here, not the hub.
@@ -97,24 +106,57 @@ var working = flow.State{
 		{cond.GainedChildren, Promoting, "the task it holds grew children, so it holds a feature"},
 		{cond.Rejected, Refreshing, "a verdict came back asking for another round"},
 		{cond.Stalled, Stalled, "it holds this work and has stopped doing it"},
+		{cond.SubmitAsked, Interviewing, "it asked to submit, and answers for the tree before it goes up"},
 		{cond.BetweenSubtasks, Between, "it holds the feature and no child of it — a leaf boundary"},
 		{cond.TaskGone, Idle, "the work it held was closed or given to somebody else"},
 		{cond.FeatureGone, Releasing, "the feature it held landed without it"},
 		{cond.TreeSplit, Yielding, "another agent is working inside its tree"},
+		{cond.AsleepHolding, Launching, "it holds this work and its pod is gone — a claim must not outlive the pod it was made for"},
+		// LAST, so every reason to stay at the work wins over it. An interim contribution is the case:
+		// the author keeps the task and the branch, and there is nothing for it to do until the user
+		// lands what it put up, since the branch it would carry on is the one waiting.
+		{cond.AwaitingContribution, Submitted, "a contribution of its own is out, and it is the branch it would carry on"},
 	},
 	Verbs: flow.Offers{
-		{verb.Submit, Submitting, "file what you have for review"},
-		{verb.Checkpoint, Submitting, "land an interim slice"},
-		{verb.Run, flow.Stay, "queue a slow build or test"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Comment, flow.Stay, "comment on the task"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Resolve, flow.Stay, "check the branch still merges"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Submit, "file what you have for review"},
+		{verb.Checkpoint, "land an interim slice"},
+		{verb.Run, "queue a slow build or test"},
+		{verb.Git, "read your changes"},
+		{verb.Task, "read the backlog"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Comment, "comment on the task"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Resolve, "check the branch still merges"},
+		{verb.Escalate, "stop on a question"},
+	},
+}
+
+// interviewing: the worker is answering for the tree it wants taken.
+var interviewing = flow.State{
+	Name:   Interviewing,
+	Title:  "Answering for a submit",
+	Action: act.Interview,
+	About: "The worker asked to submit and the hub is putting its questions, one at a time, waiting " +
+		"as long as each answer takes. Nothing is committed yet: the answers describe the tree as it " +
+		"stands, so an author that edits it is answering about a tree that is gone and starts again.",
+	Says: says.Interviewing,
+	Events: flow.Events{
+		{act.Done, Submitting, "every question is answered; what it holds can go up"},
+		{act.Stale, Working, "the tree moved under the questions, so the answers describe nothing"},
+		{act.Failed, Working, "the interview could not be conducted; the work is still in hand"},
+		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
+		{cond.TaskGone, Idle, "the work it was submitting was closed or given to somebody else"},
+		{cond.AsleepHolding, Launching, "its pod is gone, and nothing can be asked of a dead pane"},
+		{cond.NoSubmitAsked, Working, "the submit it was answering for is gone"},
+		{flow.Orphaned{}, Working, "the hub restarted mid-interview; the request stands and puts it back here"},
+	},
+	Verbs: flow.Offers{
+		{verb.Submit, "answer the question standing against your submit"},
+		{verb.Git, "read your changes"},
+		{verb.Log, "record a note"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -123,16 +165,16 @@ var submitting = flow.State{
 	Name:   Submitting,
 	Title:  "Submitting",
 	Action: act.Submit,
-	About: "The hub is taking what the worker has: the quality gate first, then a pull request. " +
-		"A gate that queues hands the answer to the run queue rather than to this state.",
+	About: "The hub is taking what the worker has: the commit first, then the quality gate, then a " +
+		"pull request. A gate that queues hands the answer to the run queue rather than to this state.",
 	Says: says.Preparing,
 	Events: flow.Events{
-		{act.Done, Submitted, "the pull request is out"},
 		{act.Queued, Gating, "the gate took it; its result decides"},
-		{act.Failed, Refreshing, "the gate said no — its output is the next round's brief"},
+		{act.Done, Submitted, "the gate had already passed this commit, and the pull request is out"},
+		{act.Failed, Working, "the submit could not be taken; the work is still in hand"},
 		{flow.Orphaned{}, Working, "the hub restarted mid-submit — outcome unknown"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // gating: somebody else's queue owns the answer.
@@ -145,10 +187,11 @@ var gating = flow.State{
 	Events: flow.Events{
 		{cond.OwnPROpen, Submitted, "the gate passed and the pull request is out"},
 		{cond.Rejected, Refreshing, "the gate failed it"},
+		{cond.GateRefused, Working, "the gate answered and nothing landed — its output is the brief, and the work is still in hand"},
 		{cond.TaskGone, Idle, "the work was closed under it"},
 		{cond.Escalated, Escalated, "it stopped on a question"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}, {verb.Mail, flow.Stay, "read your mailbox"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}, {verb.Mail, "read your mailbox"}},
 }
 
 // submitted: a reviewer owes it a verdict.
@@ -173,15 +216,15 @@ var submitted = flow.State{
 		{cond.PRSettled, Idle, "the pull request landed or was withdrawn, and it holds nothing else"},
 	},
 	Verbs: flow.Offers{
-		{verb.Revoke, Working, "withdraw the pull request"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Resolve, flow.Stay, "check your branch still merges"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Revoke, "withdraw the pull request"},
+		{verb.Git, "read your changes"},
+		{verb.Resolve, "check your branch still merges"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Task, "read the backlog"},
+		{verb.Log, "record a note"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -201,13 +244,23 @@ var resolving = flow.State{
 		{cond.NoConflict, Working, "nothing conflicts any more"},
 	},
 	Verbs: flow.Offers{
-		{verb.Resolve, flow.Stay, "check the branch merges now"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Submit, Submitting, "file it once it is clean"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Resolve, "check the branch merges now"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Task, "read the backlog"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Submit, "file it once it is clean"},
+		{verb.Git, "read your changes"},
+		{verb.Log, "record a note"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
+
+// Flow is the worker's whole map, in the order a reader should meet it.
+var Flow = []flow.State{
+	idle, assigning, working, refreshing, reworking, interviewing, submitting, gating, submitted, resolving,
+	between, picking, featureGated, featureDone, releasing, yielding, promoting, rebasing,
+	launching, stopping, clearing, retiering, escalated, retired, mail, stalled,
+}
+
+// Start is where a worker with no state stored begins.
+const Start = Idle

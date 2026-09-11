@@ -115,9 +115,7 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 	if err := ps.SetParent("td-kid", "td-pkg"); err != nil {
 		t.Fatalf("set parent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Phase: "idle"})
 
 	e := newEngine(t, st, &stubDeps{
 		Root:       root,
@@ -152,7 +150,6 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 // fix avoids. The ask itself settles first and then reports where the agent ended up.
 func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	deps := &stubDeps{
-		Alive:      true,
 		Model:      "claude-haiku-4-5",
 		TierModels: map[string]string{"senior": "claude-opus-5"},
 	}
@@ -184,7 +181,6 @@ func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 // should stop an ordinary claim when the model already matches.
 func TestAMatchingTaskIsHandedOverWithoutChangingTheModel(t *testing.T) {
 	deps := &stubDeps{
-		Alive:      true,
 		Model:      "claude-opus-5",
 		TierModels: map[string]string{"senior": "claude-opus-5"},
 	}

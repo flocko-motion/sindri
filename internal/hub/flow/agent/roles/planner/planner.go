@@ -17,30 +17,41 @@ const (
 	Idle      = "planner/idle"
 	Planning  = "planner/planning"
 	Submitted = "planner/submitted"
-	Clearing  = "planner/clearing"
-	Escalated = "planner/escalated"
+	Disowning = "planner/disowning"
 )
 
 var idle = flow.State{
 	Name:  Idle,
 	Title: "Planner at rest",
 	About: "A planner never grabs a backlog task. Work reaches it as a conversation, so at rest it " +
-		"is pointed at whatever the user has already said rather than at a queue.",
-	Says: says.Planner,
+		"is pointed at whatever the user has already said rather than at a queue. It is TOLD that on " +
+		"arrival: a planner reaches this state with a session somebody just emptied, and asking it to " +
+		"ask would be a round trip for an answer the hub is already holding.",
+	Says:  says.Planner,
+	Tells: true,
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question"},
+		{cond.HoldsBacklogWork, Disowning, "a backlog task is on its row, and a planner holds none"},
+		{cond.MailWaiting, Mail, "it has mail it has not read, so it is not done"},
+		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear"},
+		{cond.StartAsked, Launching, "a human asked for this pod"},
+		{cond.StopAsked, Stopping, "a human asked for this pod back"},
+		{cond.Reclaimable, Stopping, "it has held nothing long enough that its pod is worth taking back"},
+		// A planner's work IS the conversation, so a session with something in it is one with work in
+		// hand. It declares nothing about where it stands: the session is the fact, and reading a fact
+		// is the machine's job.
+		{cond.InConversation, Planning, "something has been said into its session"},
 	},
 	Verbs: flow.Offers{
-		{verb.State, Planning, "say you are working a plan"},
-		{verb.CreateTask, flow.Stay, "propose a task"},
-		{verb.Comment, flow.Stay, "comment on a task"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.CreateTask, "propose a task"},
+		{verb.Comment, "comment on a task"},
+		{verb.Task, "read the backlog"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -52,18 +63,24 @@ var planning = flow.State{
 	Says: says.Planning,
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question"},
+		{cond.HoldsBacklogWork, Disowning, "a backlog task is on its row, and a planner holds none"},
+		{cond.ConversationOver, Idle, "its session holds nothing, so the plan it was inside is gone with it"},
+		// A planner holds no backlog task, so every moment is a leaf boundary and an armed clear
+		// fires wherever it stands. It lands at rest afterwards on purpose: the conversation it was
+		// inside is what the clear discarded, so telling it to carry on with one would name a
+		// session that no longer exists.
+		{cond.ClearArmed, Clearing, "a human armed a context clear"},
 	},
 	Verbs: flow.Offers{
-		{verb.Openspec, Submitted, "ship the spec edits as a pull request"},
-		{verb.CreateTask, flow.Stay, "propose a task"},
-		{verb.State, Idle, "say you are done"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Comment, flow.Stay, "comment on a task"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Openspec, "ship the spec edits as a pull request"},
+		{verb.CreateTask, "propose a task"},
+		{verb.Task, "read the backlog"},
+		{verb.Comment, "comment on a task"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -79,59 +96,37 @@ var submitted = flow.State{
 		{cond.OwnPRRejected, Planning, "it came back with feedback to answer"},
 	},
 	Verbs: flow.Offers{
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Comment, flow.Stay, "comment on a task"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Task, "read the backlog"},
+		{verb.Comment, "comment on a task"},
+		{verb.Log, "record a note"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
-var clearing = flow.State{
-	Name:   Clearing,
-	Title:  "Having its session cleared",
-	Action: act.Clear,
-	About:  "A human armed a clear on this planner's session, and the hub is waiting for it to land.",
-	Says:   says.Preparing,
+// disowning: a backlog task ended up on a planner's row, which is a claim nobody should have made.
+var disowning = flow.State{
+	Name:   Disowning,
+	Title:  "Letting go of a backlog task",
+	Action: act.Disown,
+	About: "A planner's work arrives as a conversation, so a backlog task on its row is an invalid " +
+		"claim however it got there. The task goes back to the backlog and the planner goes back to " +
+		"resting — noticed by the planner's own map wherever it stands, rather than by a sweep that " +
+		"only ever ran at the hub's start.",
+	Says: says.Preparing,
 	Events: flow.Events{
-		{act.Done, Idle, "the session is empty"},
-		{act.Failed, Idle, "the clear never landed — carry on regardless"},
-		{flow.Orphaned{}, Idle, "the hub restarted mid-clear"},
+		{act.Done, Idle, "the task is back in the backlog"},
+		{act.Failed, Idle, "it could not be put back — the reason is on its record"},
+		{flow.Orphaned{}, Idle, "the hub restarted mid-release"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
-}
-
-var escalated = flow.State{
-	Name:  Escalated,
-	Title: "Escalated",
-	About: "The planner stopped on a question only the user can answer, and it is repeated on every " +
-		"ask: one relaunched mid-escalation remembers nothing of how it got here.",
-	Says: says.Escalated,
-	Events: flow.Events{
-		{cond.Resolved, Planning, "the user answered and it cleared the escalation"},
-	},
-	// Only the LANDING verbs are held — shipping a proposal. Reading, proposing tasks and talking
-	// to the user are how a planner gets its answer in the first place.
-	Verbs: flow.Offers{
-		{verb.Resume, Planning, "clear the escalation once you have the answer"},
-		{verb.Escalate, flow.Stay, "replace the question with a sharper one"},
-		{verb.Git, flow.Stay, "read the changes"},
-		{verb.Revoke, flow.Stay, "withdraw a proposal you have out"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.CreateTask, flow.Stay, "propose a task"},
-		{verb.Comment, flow.Stay, "comment on a task"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.State, flow.Stay, "say where you are"},
-		{verb.Meeting, flow.Stay, "say something in the meeting room"},
-	},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // Flow is the planner's whole map.
-var Flow = []flow.State{idle, planning, submitted, clearing, escalated}
+var Flow = []flow.State{
+	idle, planning, submitted, disowning, mail, launching, stopping, clearing, escalated, retired,
+}
 
 // Start is where a planner with no state stored begins.
 const Start = Idle

@@ -27,9 +27,9 @@ func stallStore(t *testing.T) (*Act, *flowtest.Hub, *store.ProjectStore) {
 			t.Fatal(err)
 		}
 	}
-	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Branch: "td-d9a8c3", Phase: "working"}, store.ReasonClaimed, "test setup")
-	_ = ps.SetState(store.AgentState{Agent: "nori", Task: "td-other", Branch: "td-other", Phase: "submitted"}, store.ReasonClaimed, "test setup")
-	deps := &flowtest.Hub{Root: t.TempDir(), Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Branch: "td-d9a8c3", Phase: "working"})
+	flowtest.Place(t, ps, store.AgentState{Agent: "nori", Task: "td-other", Branch: "td-other", Phase: "submitted"})
+	deps := &flowtest.Hub{Root: t.TempDir()}
 	return newActOn(t, st, deps), deps, ps
 }
 
@@ -67,12 +67,10 @@ func reviewingAgent(t *testing.T, ps *store.ProjectStore, name, pr string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(id, name); err != nil {
+	if _, err := ps.AssignReview(id, name); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: name, Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: name, Phase: "reviewing"})
 }
 
 // TestAStalledReviewerIsNudgedAboutItsPR (sd-9a7f80): a reviewer's hold lives in the review row, so
@@ -110,9 +108,7 @@ func TestAReviewerWithNothingToNameIsLeftAlone(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: ".worktrees/ori"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "ori", Phase: "reviewing"})
 	if a.NudgeStalled(proj, "ori", flowtest.Saying("idle"), StallDwell+time.Minute) {
 		t.Error("with no review held there is nothing to say, so nothing should be sent")
 	}
@@ -137,7 +133,7 @@ func TestNudgeStalledLeavesWaitingAgentsAlone(t *testing.T) {
 // moved on while it elapsed. The state at nudge time is what decides.
 func TestNudgeStalledRechecksThePhase(t *testing.T) {
 	a, deps, ps := stallStore(t)
-	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Phase: "submitted"}, store.ReasonClaimed, "test setup")
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Phase: "submitted"})
 
 	if a.NudgeStalled(proj, "dvalin", flowtest.Saying("idle"), StallDwell+time.Minute) {
 		t.Error("an agent that moved on before the nudge landed must not be nudged")
@@ -185,7 +181,7 @@ func TestNudgeStalledLeavesAReviewerOnAnAskedLintPRAlone(t *testing.T) {
 // TestNudgeStalledNeedsALiveAgent: a stopped pod has no session to type into.
 func TestNudgeStalledNeedsALiveAgent(t *testing.T) {
 	a, deps, _ := stallStore(t)
-	deps.Alive = false
+	deps.Down = true
 	if a.NudgeStalled(proj, "dvalin", flowtest.SayingWhileDown("idle"), StallDwell+time.Minute) {
 		t.Error("a down agent cannot be nudged")
 	}

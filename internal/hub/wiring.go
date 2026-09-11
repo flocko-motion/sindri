@@ -79,8 +79,15 @@ func (x hubHarness) Interrupt(project, name string) error {
 	return x.h.agents.Interrupt(x.h.lifetime, project, name)
 }
 
-func (x hubHarness) Start(project, name string) error {
-	return x.h.agents.Launch(x.h.lifetime, project, name, false, false, 0, 0, io.Discard)
+// Start and Stop take the CALLER's context — the machine's, which cancels it when the agent leaves
+// the launching or stopping state. That cancellation is the bound on a launch a runtime never
+// answers, in place of a sweep watching the intent from outside.
+func (x hubHarness) Start(ctx context.Context, project, name string) error {
+	return x.h.agents.Launch(ctx, project, name, false, false, 0, 0, io.Discard)
+}
+
+func (x hubHarness) Stop(ctx context.Context, project, name string) error {
+	return x.h.agents.StopAgent(ctx, project, name)
 }
 
 func (x hubHarness) Container(project, name string) string { return x.h.container(project, name) }
@@ -149,6 +156,11 @@ func (d mailDeps) Push(project, name, text string) error {
 }
 func (d mailDeps) Notify()                        { d.h.notify() }
 func (d mailDeps) RepoName(project string) string { return d.h.repoName(project) }
+
+// MailArrived tells the one agent whose count moved, which is as far as this topic reaches.
+func (d mailDeps) MailArrived(project, name string) {
+	d.h.wf.Wake(project, name, topic.MailArrived)
+}
 
 // Reachable is the watchdog's standing reading, not a probe: announcing sweeps the whole fleet, and
 // a fresh exec per agent per sweep is exactly what the watchdog exists to spare.
@@ -237,13 +249,11 @@ func (d workflowDeps) ArchitectureDoc(project string) string {
 	return d.h.projects.ArchitectureDoc(project)
 }
 
-// Notify tells the board AND the decider. Every event used to reach the board alone, and that gap is
-// where every timer in the hub came from. It names no subject on purpose — the notify carries no
-// meaning, so it reaches all of them and the machine drops what it cannot use.
-func (d workflowDeps) Notify() {
-	d.h.notify()
-	d.h.wf.WakeAll(topic.SessionRead)
-}
+// Notify tells the BOARD, and nothing else. It used to wake every subject on topic.SessionRead as
+// well, which said "something happened somewhere" to states asking about a session — so a write
+// nothing was watching for woke the fleet, and the one thing that does read a session published
+// nothing (-> watchdog.announce). Each writer now publishes the topic naming what it changed.
+func (d workflowDeps) Notify() { d.h.notify() }
 
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)

@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,8 +32,15 @@ import (
 // enough to drive ScrapPR without a real hub. (First workflow Engine test harness;
 // extend as more Engine methods get covered.)
 type Hub struct {
-	Root         string
-	Alive        bool
+	Root string
+	// Down is a pod that is NOT there. Named for the exception rather than the rule, so a fixture
+	// that says nothing about liveness builds a world the machine could have produced — one where
+	// an agent handed work can be told about it. The default the other way round is how most of
+	// these fixtures came to assert that a stranded agent behaves correctly.
+	Down bool
+	// DownAgents says it of named agents only, for a fixture with a MIXED fleet — one pod reclaimed
+	// beside one still up, which is the shape every question about waking turns on.
+	DownAgents   map[string]bool
 	Interrupted  []string
 	Injected     []string
 	InjectedText []string                   // the message bodies too, for tests that assert what an agent was told
@@ -66,10 +75,49 @@ type Hub struct {
 	// escalated records Escalate calls as "name: question", in order.
 	Escalated []string
 	// Looked and Woke record the re-decisions an act asked for, in order.
-	Looked   []string
-	Woke     []string
-	started  []string // agents StartAgent was called for, in order
-	startErr error
+	Looked []string
+	Woke   []string
+	// Started and Stopped are the pods the machine asked for, in order — the evidence that a
+	// launch or a reclaim is a transition somebody made rather than a sweep's side effect.
+	Started  []string
+	Stopped  []string
+	StartErr error
+	StopErr  error
+	// mu guards everything a test changes, or reads, WHILE an action is running. One action waits on
+	// the agent rather than on work done to it (-> machine.Action.Awaits), so it is the one thing
+	// here reading this fixture from a goroutine that is not the test's own.
+	mu sync.Mutex
+	// takenAt places every reading this fixture hands out at one moment, zero meaning now. No
+	// observer sweeps in a test, so a rule comparing a reading's age against something the hub did
+	// ITSELF needs the test to put the reading in time (-> the submit interview's re-posing).
+	takenAt time.Time
+}
+
+// Said is every message delivered so far, copied under the lock — for a test reading what an action
+// has said WHILE it is still running. A direct read of InjectedText races with it.
+func (d *Hub) Said() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.InjectedText...)
+}
+
+// ObservedAt places every reading this fixture hands out at one moment. Through the lock, because a
+// test changing what the world looks like mid-action is changing it under a running reader.
+func (d *Hub) ObservedAt(at time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.takenAt = at
+}
+
+// Turning says whether name's session reports a turn in progress, for the same reason and under the
+// same lock as ObservedAt.
+func (d *Hub) Turning(name string, busy bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.Busy == nil {
+		d.Busy = map[string]bool{}
+	}
+	d.Busy[name] = busy
 }
 
 // ProjectRoot is the one repo these fixtures registered. It PANICS on an unset root rather than
@@ -159,6 +207,9 @@ func (d *Hub) Push(project, name, text string) error {
 // MayWake answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) MayWake(string, string) bool { return true }
 
+// MailArrived answers as a hub would, recording the ask where a test can read it.
+func (d *Hub) MailArrived(project, name string) { d.Wake(project, name, topic.MailArrived) }
+
 // Reachable answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) Reachable(p, name string) bool { return d.Observe(p, name).Up }
 
@@ -172,6 +223,8 @@ func (d *Hub) Deliver(_, name, text string, del mail.Delivery) error {
 	if d.DeliverErr {
 		return fmt.Errorf("nothing could be delivered to %s", name)
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.Injected = append(d.Injected, name)
 	d.InjectedText = append(d.InjectedText, text)
 	d.Delivered = append(d.Delivered, del)
@@ -187,6 +240,8 @@ func (d *Hub) Interrupt(_, name string) error {
 // Observe is the harness's standing look, off the same fields the fixture already sets. Probe is the
 // fresh one; nothing here distinguishes them, since no test in this package turns on the difference.
 func (d *Hub) Observe(_, name string) observe.Observation {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	// An agent nothing marked busy is AT A PROMPT, which is what the sweeps read; `busy` says a turn
 	// is running, and an explicit runtime beats both.
 	state := observe.ParseState(d.Runtime)
@@ -196,9 +251,13 @@ func (d *Hub) Observe(_, name string) observe.Observation {
 			state = observe.Working
 		}
 	}
+	at := d.takenAt
+	if at.IsZero() {
+		at = time.Now()
+	}
 	o := observe.Observation{
-		TakenAt: time.Now(), Up: d.Alive, State: state, Model: d.Model,
-		StillSince: time.Now().Add(-d.StillFor),
+		TakenAt: at, Up: !d.Down && !d.DownAgents[name], State: state, Model: d.Model,
+		StillSince: at.Add(-d.StillFor),
 	}
 	if d.CtxOK {
 		// Nothing recorded yet is a zero window, which is how the observation says "unreadable" —
@@ -218,9 +277,25 @@ func (d *Hub) Say(project, name, text string, del mail.Delivery) error {
 
 // Start records who was woken, so a test can assert work arriving for an empty pool brings a
 // reviewer back rather than waiting for one that never comes.
-func (d *Hub) Start(_, name string) error {
-	d.started = append(d.started, name)
-	return d.startErr
+func (d *Hub) Start(_ context.Context, _, name string) error {
+	d.mu.Lock()
+	d.Started = append(d.Started, name)
+	d.mu.Unlock()
+	return d.StartErr
+}
+
+// Launched is every pod started so far, copied under the lock — for a test watching the fleet's own
+// loop, which starts pods from a goroutine that is not the test's.
+func (d *Hub) Launched() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.Started...)
+}
+
+// Stop records whose pod was reclaimed, the other half of the same evidence.
+func (d *Hub) Stop(_ context.Context, _, name string) error {
+	d.Stopped = append(d.Stopped, name)
+	return d.StopErr
 }
 
 // TaskComments answers as a hub would, recording the ask where a test can read it.
@@ -268,10 +343,16 @@ func (d *Hub) SetModel(_ context.Context, _, name, model string) error {
 // HoldsNothing answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) HoldsNothing(_, _, _ string) (bool, error) { return d.EmptyHanded, nil }
 
-// Clear answers as a hub would, recording the ask where a test can read it.
+// Clear answers as a hub would, recording the ask where a test can read it — and DROPPING the
+// recorded fill, which is what the real one waits for: a clear that left the reading where it was
+// would be answered by every condition that asks whether there is a session to discard, for ever.
 func (d *Hub) Clear(_ context.Context, _, name string) error {
 	d.Cleared = append(d.Cleared, name)
-	return d.ClearErr
+	if d.ClearErr != nil {
+		return d.ClearErr
+	}
+	d.CtxTokens = 0
+	return nil
 }
 
 // TestProject is the one repo these fixtures register, named as every subject's tests name theirs.
@@ -321,6 +402,9 @@ func Over(st *store.Store, d *Hub) *core.Core {
 // again; here that is recorded rather than run, so a test can assert what a write UNSETTLED without
 // standing up a machine to watch it happen.
 func (d *Hub) Look(project, agent string) { d.Looked = append(d.Looked, project+"/"+agent) }
+
+// LookPR answers as a hub would, recording the ask where a test can read it.
+func (d *Hub) LookPR(project, id string) { d.Looked = append(d.Looked, project+"/"+id) }
 
 // LookPRs answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) LookPRs(project string) { d.Looked = append(d.Looked, project+"/prs") }

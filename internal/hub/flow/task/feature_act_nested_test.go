@@ -95,11 +95,9 @@ func TestCheckpointCarriesOnPastAParentAndClosesOneItCompletes(t *testing.T) {
 	c := registry.Caller{Project: "repo", Agent: "dain", Role: "worker", Phase: "working"}
 	hold := func(task string) {
 		t.Helper()
-		if err := ps.SetState(store.AgentState{
+		flowtest.Place(t, ps, store.AgentState{
 			Agent: "dain", Container: "os-feat", Branch: "os-feat", Task: task, Phase: "working",
-		}, store.ReasonClaimed, "test setup"); err != nil {
-			t.Fatalf("hold %s: %v", task, err)
-		}
+		})
 	}
 
 	// td-mid has two open children, so no checkpoint can call it done — but the agent is carried on

@@ -11,6 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
@@ -87,7 +88,7 @@ func (a *Act) referenceMoved(project, root, base, prevTip, tip string, advanced 
 		}
 		// A branch under review, resolving, or gating must not move — a reviewer or a queued gate
 		// is reading it right now, and a rebase would pull the ground out from under either.
-		underReview := st.Phase == "submitted" || st.Phase == "resolving" || st.Phase == "gating"
+		underReview := situation.Standing(st.Phase, "submitted", "resolving", "gating")
 		switch {
 		case !advanced:
 			_ = ps.Log(ag.Name, "reference-rewritten", base)

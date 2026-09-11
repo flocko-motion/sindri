@@ -21,6 +21,9 @@ type Deps interface {
 	Push(project, name, text string) error
 	// Notify tells the board the unread count moved.
 	Notify()
+	// MailArrived says one agent's unread count moved, so the states watching for mail need not wait
+	// out their poll to notice. A HINT, like every topic: the count is read again on its own beat.
+	MailArrived(project, name string)
 	// RepoName is a project's display name, for a sender addressed from another repo.
 	RepoName(project string) string
 	// Reachable is whether the agent is THERE, and nothing else — whether a push has anywhere to

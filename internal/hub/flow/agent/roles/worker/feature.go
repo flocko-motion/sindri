@@ -35,18 +35,22 @@ var between = flow.State{
 		{cond.TreeSplit, Yielding, "another agent is working inside its tree — the container holder yields"},
 		{cond.FeatureGone, Releasing, "the feature landed, or was closed, without it"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear — it fires at this boundary and no other"},
+		// The same preparation a leaf claim goes through, for the same reason: a subtask arrives whole
+		// and the one before it is context to drop.
+		{cond.TierMismatch, Retiering, "the next child is rated for another model"},
+		{cond.SessionInTheWay, Clearing, "there is a child to hand over and a session still holding the last one"},
 		{cond.SubtaskReady, Picking, "the feature has an open child to hand over"},
 		{cond.SubtasksGated, FeatureGated, "what is left awaits the user's verdict"},
 		{cond.FeatureFinished, FeatureDone, "every child is closed"},
 	},
 	Verbs: flow.Offers{
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Resolve, flow.Stay, "check your branch still merges"},
-		{verb.Rebase, flow.Stay, "align onto the reference branch"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Task, "read the backlog"},
+		{verb.Log, "record a note"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Git, "read your changes"},
+		{verb.Resolve, "check your branch still merges"},
+		{verb.Rebase, "align onto the reference branch"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -63,7 +67,7 @@ var picking = flow.State{
 		{act.Nothing, Between, "nothing open after all — look again"},
 		{flow.Orphaned{}, Between, "the hub restarted mid-hand-over"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // featureGated: the tree is unfinished but nothing in it is claimable yet.
@@ -80,11 +84,11 @@ var featureGated = flow.State{
 		{cond.FeatureFinished, FeatureDone, "the gated children were closed rather than approved"},
 	},
 	Verbs: flow.Offers{
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Fyi, flow.Stay, "one note to the user"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Task, "read the backlog"},
+		{verb.Log, "record a note"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Fyi, "one note to the user"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -101,9 +105,9 @@ var featureDone = flow.State{
 		{cond.SubtaskReady, Picking, "a child was reopened under it"},
 	},
 	Verbs: flow.Offers{
-		{verb.Submit, Submitting, "file the feature for review"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Submit, "file the feature for review"},
+		{verb.Git, "read your changes"},
+		{verb.Log, "record a note"},
+		{verb.Escalate, "stop on a question"},
 	},
 }

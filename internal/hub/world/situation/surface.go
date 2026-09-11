@@ -214,7 +214,7 @@ func (s Situation) nudgeRefusal(wake string) string {
 	if why := s.assignRefusal(wake); why != "" {
 		return why
 	}
-	if s.Phase != "" && s.Phase != "idle" {
+	if s.Phase != "" && !Standing(s.Phase, "idle") {
 		return "mid " + s.Phase + " — not waiting on work to arrive"
 	}
 	return ""
@@ -236,7 +236,7 @@ func (s Situation) wakeRefusal() string {
 		return s.parkedRefusal()
 	}
 	if s.Container != "" && !s.FeatureLanded {
-		if s.Phase == "working" || s.Phase == "submitted" || s.Phase == "gating" {
+		if Standing(s.Phase, "working", "submitted", "gating") {
 			return ""
 		}
 		if s.ClearArmed { // the subtask claim gates on this alone, never on retirement
@@ -246,7 +246,7 @@ func (s Situation) wakeRefusal() string {
 	}
 	// No feature, or one that has landed: the directive loop drops the agent to idle and looks for
 	// new work either way, so a stale "working" left over from before it landed must not exempt it.
-	if s.Container == "" && (s.Phase == "working" || s.Phase == "submitted" || s.Phase == "gating") {
+	if s.Container == "" && Standing(s.Phase, "working", "submitted", "gating") {
 		return ""
 	}
 	if s.AwaitingPR != "" {
@@ -288,10 +288,11 @@ func (s Situation) stalled() bool {
 	if s.AwaitingHuman() || s.SignedOut() || s.WaitingOnRun || s.StillFor < StallDwell {
 		return false
 	}
-	// "submitted" and "gating" exist to wait; reviewing does not — a reviewer with a PR is meant to
-	// be reading it.
-	return s.Phase == "working" || s.Phase == "reviewing" ||
-		(s.Container != "" && s.Phase != "submitted" && s.Phase != "gating")
+	// The states where the AGENT is the actor and holds something to act on. "submitted" and
+	// "gating" exist to wait; reviewing does not — a reviewer with a PR is meant to be reading it —
+	// and answering a verdict or a conflict is work exactly as the first round was.
+	return Standing(s.Phase, "working", "reworking", "resolving", "reviewing") ||
+		(s.Container != "" && !Standing(s.Phase, "submitted", "gating"))
 }
 
 // needsUser reports a state only a human resolves, read off the very word the board shows, so the
@@ -308,7 +309,7 @@ func (s Situation) ParkedByTheHub() bool {
 		// requires the verdicts about that work to keep reaching it.
 		return s.HoldsNothing()
 	}
-	if s.Container == "" || s.Task != "" || s.Phase != "idle" {
+	if s.Container == "" || s.Task != "" || !Standing(s.Phase, "idle") {
 		return false
 	}
 	return len(s.Pool.GatedUnder(s.Container)) > 0

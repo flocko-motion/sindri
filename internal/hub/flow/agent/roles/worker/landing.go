@@ -34,7 +34,7 @@ var promoting = flow.State{
 		{act.Failed, Working, "the promotion did not take — carry on with the leaf"},
 		{flow.Orphaned{}, Working, "the hub restarted mid-promotion"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // rebasing: a milestone of its own landed, so its standing branch is behind.
@@ -52,5 +52,5 @@ var rebasing = flow.State{
 		{act.Failed, Resolving, "reapplying the uncommitted work conflicts — the agent resolves it"},
 		{flow.Orphaned{}, Working, "the hub restarted mid-reset"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }

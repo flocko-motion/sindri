@@ -35,7 +35,7 @@ var refreshing = flow.State{
 		{act.Failed, Reworking, "the clear never landed — a crowded session beats withholding the feedback"},
 		{flow.Orphaned{}, Reworking, "the hub restarted mid-clear"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // reworking: the verdict came back and the feedback is the brief for this round.
@@ -53,14 +53,14 @@ var reworking = flow.State{
 		{cond.NotRejected, Working, "the rejection was withdrawn or answered"},
 	},
 	Verbs: flow.Offers{
-		{verb.Submit, Submitting, "file the next round"},
-		{verb.Run, flow.Stay, "queue a slow build or test"},
-		{verb.Git, flow.Stay, "read your changes"},
-		{verb.Task, flow.Stay, "read the backlog"},
-		{verb.Log, flow.Stay, "record a note"},
-		{verb.Mail, flow.Stay, "read your mailbox"},
-		{verb.Comment, flow.Stay, "comment on the task"},
-		{verb.Escalate, Escalated, "stop on a question"},
+		{verb.Submit, "file the next round"},
+		{verb.Run, "queue a slow build or test"},
+		{verb.Git, "read your changes"},
+		{verb.Task, "read the backlog"},
+		{verb.Log, "record a note"},
+		{verb.Mail, "read your mailbox"},
+		{verb.Comment, "comment on the task"},
+		{verb.Escalate, "stop on a question"},
 	},
 }
 
@@ -77,7 +77,7 @@ var releasing = flow.State{
 		{act.Done, Idle, "the hold is dropped; back to the backlog"},
 		{flow.Orphaned{}, Idle, "the hub restarted mid-release"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }
 
 // yielding: somebody else is inside this tree, and the container holder is the one that gives way.
@@ -93,5 +93,5 @@ var yielding = flow.State{
 		{act.Done, Idle, "the tree is somebody else's; back to the backlog"},
 		{flow.Orphaned{}, Idle, "the hub restarted mid-yield"},
 	},
-	Verbs: flow.Offers{{verb.Log, flow.Stay, "record a note"}},
+	Verbs: flow.Offers{{verb.Log, "record a note"}},
 }

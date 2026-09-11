@@ -6,6 +6,7 @@
 package pr
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
 	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"os/exec"
 	"path/filepath"
@@ -33,14 +34,14 @@ func TestScrapPRStopsReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(rid, "rev"); err != nil {
+	if _, err := ps.AssignReview(rid, "rev"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := ps.ReviewingPR("rev"); got != "pr-1" {
 		t.Fatalf("precondition: reviewer should be reviewing pr-1, got %q", got)
 	}
 
-	a := newActOn(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	a := newActOn(t, st, &flowtest.Hub{Root: t.TempDir()})
 	if err := a.ScrapPR("repo", "pr-1"); err != nil {
 		t.Fatalf("ScrapPR: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestScrapEmptiesAStandingBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := newActOn(t, st, &flowtest.Hub{Root: root, Alive: false})
+	a := newActOn(t, st, &flowtest.Hub{Root: root, Down: true})
 	if err := a.ScrapPR(proj, "pr-plan-galar"); err != nil {
 		t.Fatalf("ScrapPR: %v", err)
 	}
@@ -128,10 +129,8 @@ func TestDiscardPRReleasesItsAuthor(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-os-new", Task: "os-new", Agent: "galar", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &flowtest.Hub{Root: root, Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"})
+	deps := &flowtest.Hub{Root: root}
 	a := newActOn(t, st, deps)
 
 	if err := a.DiscardPR(proj, "pr-os-new"); err != nil {
@@ -140,8 +139,10 @@ func TestDiscardPRReleasesItsAuthor(t *testing.T) {
 	if pr, _, _ := ps.GetPR("pr-os-new"); pr.Status != "scrapped" {
 		t.Errorf("PR status = %q, want scrapped", pr.Status)
 	}
-	if got, _ := ps.GetState("galar"); got.Phase != "idle" {
-		t.Errorf("author phase = %q, want idle — it must not wait on a PR that is gone", got.Phase)
+	// It holds nothing once its PR is gone, which is what its map reads to stand it down — waiting on
+	// a pull request that no longer exists is the state this exists to prevent (-> cond.PRSettled).
+	if got, _ := ps.GetState("galar"); got.Task != "" || got.Container != "" {
+		t.Errorf("author still holds %+v — it must not wait on a PR that is gone", got)
 	}
 	if len(deps.Injected) == 0 {
 		t.Error("the author must be told its PR was scrapped")
@@ -168,17 +169,15 @@ func TestDiscardPRLeavesAnUninvolvedAgentAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Already working something else — not waiting on this PR.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps := &flowtest.Hub{Root: root, Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"})
+	deps := &flowtest.Hub{Root: root}
 	a := newActOn(t, st, deps)
 
 	if err := a.DiscardPR(proj, "pr-td-1"); err != nil {
 		t.Fatalf("DiscardPR: %v", err)
 	}
-	if got, _ := ps.GetState("eitri"); got.Phase != "working" {
-		t.Errorf("phase = %q, want working left untouched", got.Phase)
+	if got, _ := ps.GetState("eitri"); got.Phase != worker.Working || got.Task == "" {
+		t.Errorf("state = %+v, want the uninvolved agent left working", got)
 	}
 	if len(deps.Interrupted) != 0 {
 		t.Errorf("an agent not waiting on the PR must not be interrupted, got %v", deps.Interrupted)

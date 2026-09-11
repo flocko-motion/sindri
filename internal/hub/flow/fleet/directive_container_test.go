@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,11 +26,9 @@ func containerWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, 
 	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open", Type: "epic"}); err != nil {
 		t.Fatalf("seed container: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: phase,
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	deps := &stubDeps{Root: t.TempDir()}
 	return newEngine(t, st, deps), ps, deps
 }

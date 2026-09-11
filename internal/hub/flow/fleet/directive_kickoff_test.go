@@ -2,6 +2,8 @@ package fleet
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"os/exec"
@@ -21,9 +23,7 @@ func plannerIn(t *testing.T, phase string) (*Engine, registry.Caller, *store.Pro
 	if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: "planner"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: c.Agent, Phase: phase})
 	return e, c, ps
 }
 
@@ -211,11 +211,14 @@ func TestMidRebaseFrontsAPlannersDirective(t *testing.T) {
 // TestMidRebaseNamesResolveForASubmittedBranch: a branch halted while resolving for its own PR is
 // continued by `resolve`, which renews the PR — `rebase` would leave it out of review.
 func TestMidRebaseNamesResolveForASubmittedBranch(t *testing.T) {
-	e, c, ps := plannerIn(t, "resolving")
-	stoppedRebase(t, e.Deps.ProjectRoot(c.Project), "wt")
+	// A WORKER standing in its own resolving state: only a worker has one, which is the whole point
+	// — a branch halted mid-resolve is work in hand, and the role that holds work is the worker.
+	e, c, ps := plannerIn(t, "")
 	if err := ps.PutAgent(store.Agent{Name: c.Agent, Role: "worker", Workspace: "wt"}); err != nil {
 		t.Fatal(err)
 	}
+	flowtest.Place(t, ps, store.AgentState{Agent: c.Agent, Task: "sd-1", Branch: "sd-1", Phase: worker.Resolving})
+	stoppedRebase(t, e.Deps.ProjectRoot(c.Project), "wt")
 	notice := e.prAct().RebaseNotice(c.Project, c.Agent)
 	if !strings.Contains(notice, "sindri resolve") {
 		t.Errorf("a resolving branch should be pointed at resolve: %q", notice)

@@ -29,9 +29,7 @@ func TestGatePassedSendsNoMessage(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "fix it", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"})
 	wt := filepath.Join(root, ".worktrees", agent)
 	if err := os.WriteFile(filepath.Join(wt, "fix.txt"), []byte("patched\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -69,9 +67,7 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "fix it", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"})
 	wt := filepath.Join(root, ".worktrees", agent)
 	if err := os.WriteFile(filepath.Join(wt, "fix.txt"), []byte("patched\n"), 0o644); err != nil {
 		t.Fatal(err)

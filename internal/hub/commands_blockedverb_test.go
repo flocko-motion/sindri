@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -50,11 +51,9 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 			t.Fatalf("seed %s: %v", task.ID, err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 
 	out, code := execAs(t, h, "dvalin", "submit", "done with it")
 	if code == 0 {
@@ -81,11 +80,9 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 	}
 
 	// The mirror case: the same explanation runs the other way for a worker on a task of its own.
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: "dvalin", Branch: "td-9", Task: "td-9", Phase: "working",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
+	})
 	out, code = execAs(t, h, "dvalin", "checkpoint")
 	if code == 0 {
 		t.Error("checkpoint must not run for a worker with no feature")

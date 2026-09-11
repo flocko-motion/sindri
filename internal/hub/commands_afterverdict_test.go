@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -8,8 +9,11 @@ import (
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
-// ruledReviewer registers a reviewer and gives it an assigned review of each pr, over a task named
-// after it — the state AssignReview leaves behind, which ruleOn then completes.
+// ruledReviewer registers a reviewer and gives it a review of each pr, over a task named after it —
+// the state a hand-over leaves behind, which ruleOn then completes. It goes through AssignReview,
+// which is the one function that assigns one and the machine's own action half: nothing in this
+// package has a live pod for the reviewer's map to claim through, and a fixture writing the review
+// row itself would be a second assigner.
 func ruledReviewer(t *testing.T, h *Hub, reviewer string, prs ...string) {
 	t.Helper()
 	ps := h.store.For(testProject)
@@ -28,8 +32,9 @@ func ruledReviewer(t *testing.T, h *Hub, reviewer string, prs ...string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := ps.AssignReview(id, reviewer); err != nil {
-			t.Fatal(err)
+		claimed, err := h.PRFlow().AssignReview(t.Context(), testProject, id, pr, reviewer, "check it")
+		if err != nil || !claimed {
+			t.Fatalf("assign %s to %s: claimed=%v err=%v", pr, reviewer, claimed, err)
 		}
 	}
 }
@@ -173,9 +178,7 @@ func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"})
 	if err := h.PRFlow().RejectPR(testProject, "pr-td-1", "the gate is missing"); err != nil {
 		t.Fatalf("RejectPR: %v", err)
 	}

@@ -50,12 +50,6 @@ func TestNoFlowLeavesItsOwnRole(t *testing.T) {
 					t.Errorf("%s: %q leads to %q, outside the %s flow", role, s.Name, e.To, role)
 				}
 			}
-			for _, v := range s.Verbs {
-				if v.To != flow.Stay && !own[v.To] {
-					t.Errorf("%s: %q offers %q leading to %q, outside the %s flow",
-						role, s.Name, v.Verb.Name, v.To, role)
-				}
-			}
 		}
 	}
 }

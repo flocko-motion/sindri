@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	"path/filepath"
 	"strings"
@@ -50,9 +51,7 @@ func (c wakeRefusalCase) build(t *testing.T) *Engine {
 			}
 		}
 	}
-	if err := ps.SetState(state, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, state)
 	if c.escalated {
 		if err := ps.SetEscalation("ag", "one column or two?"); err != nil {
 			t.Fatal(err)
@@ -155,7 +154,9 @@ func TestWakeRefusalAgreesWithDirectiveForOtherRoles(t *testing.T) {
 			{"clear-armed", false, true},
 		} {
 			t.Run(role+"/"+flag.name, func(t *testing.T) {
-				c := wakeRefusalCase{role: role, retired: flag.retired, clearArmed: flag.clearArmed, phase: "idle"}
+				// Each role rests where its OWN flow begins, so the case names no phase and the fixture
+				// leaves the agent wherever the machine would start it.
+				c := wakeRefusalCase{role: role, retired: flag.retired, clearArmed: flag.clearArmed}
 				e := c.build(t)
 				refusal := e.WakeRefusal("repo", "ag")
 				dir, err := e.directive(context.Background(), "repo", "ag")

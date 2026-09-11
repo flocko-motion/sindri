@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/world/store"
@@ -16,9 +17,7 @@ func awaitingAuthor(t *testing.T, status string) *Service {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Phase: "idle"})
 	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "eitri", Branch: "sd-1", Status: status}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,9 +79,7 @@ func TestATaskGivenToSomebodyElseEndsTheHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The task moves on, exactly as a release leaves it.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "sd-1", Phase: "working"})
 
 	if nothing, err := s.HoldsNothing("proj", "eitri", "worker"); err != nil || !nothing {
 		t.Errorf("HoldsNothing = (%v, %v); the work is dvalin's now", nothing, err)

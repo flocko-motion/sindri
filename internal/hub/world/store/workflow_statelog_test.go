@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-// SetState must log every call under the caller's own reason and detail — the whole point of
-// requiring them: a transition nobody can say why for should not be writable.
-func TestSetStateLogsTheReason(t *testing.T) {
+// SetHolding must log every call under the caller's own reason and detail — the whole point of
+// requiring them: a change nobody can say why for should not be writable.
+func TestSetHoldingLogsTheReason(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Task: "td-1", Phase: "working"}, ReasonClaimed, "claimed td-1"); err != nil {
+	if err := p.SetHolding("brokkr", "td-1", "", "", ReasonClaimed, "claimed td-1"); err != nil {
 		t.Fatal(err)
 	}
 	log, err := p.StateLog("brokkr", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "claimed td-1 -> phase=working task=td-1"
+	want := "claimed td-1 -> task=td-1"
 	if len(log) != 1 || log[0].Reason != string(ReasonClaimed) || log[0].Detail != want {
 		t.Fatalf("want one claimed/%q row, got %+v", want, log)
 	}
@@ -26,7 +26,7 @@ func TestSetStateLogsTheReason(t *testing.T) {
 // carries.
 func TestSetPhaseLogsTheReason(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}, ReasonClaimed, "setup"); err != nil {
+	if err := place(t, p, "brokkr", "", "", "", "working", ReasonClaimed, "setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.SetPhase("brokkr", "resolving", ReasonAdvanced, "conflict"); err != nil {
@@ -37,26 +37,26 @@ func TestSetPhaseLogsTheReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "conflict -> phase=resolving"
-	if len(log) != 2 || log[0].Reason != string(ReasonAdvanced) || log[0].Detail != want {
+	if len(log) != 3 || log[0].Reason != string(ReasonAdvanced) || log[0].Detail != want {
 		t.Fatalf("want the resolving/%q row newest-first, got %+v", want, log)
 	}
 }
 
-// SetState and SetPhase both append what they wrote to the detail, so a row answers "what was it"
+// SetHolding and SetPhase both append what they wrote to the detail, so a row answers "what was it"
 // as well as "why" — the class of gap that left a state_log row unable to show a dropped container.
+// Each says only what IT writes, which is how the two writers read apart on the record.
 func TestLogStateDetailCarriesWhatChanged(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Task: "td-1", Container: "td-feature", Phase: "working"},
-		ReasonClaimed, "claimed subtask"); err != nil {
+	if err := place(t, p, "brokkr", "td-1", "", "td-feature", "working", ReasonClaimed, "claimed subtask"); err != nil {
 		t.Fatal(err)
 	}
 	log, err := p.StateLog("brokkr", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "claimed subtask -> phase=working task=td-1 container=td-feature"
-	if len(log) != 1 || log[0].Detail != want {
-		t.Fatalf("want detail %q, got %+v", want, log)
+	held, stood := "claimed subtask -> task=td-1 container=td-feature", "claimed subtask -> phase=working"
+	if len(log) != 2 || log[1].Detail != held || log[0].Detail != stood {
+		t.Fatalf("want %q then %q, got %+v", held, stood, log)
 	}
 }
 
@@ -176,7 +176,7 @@ func TestSetStateSucceedsEvenWhenLogStateFails(t *testing.T) {
 	if _, err := p.s.db.Exec(`DROP TABLE state_log`); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SetState(AgentState{Agent: "brokkr", Task: "td-1", Phase: "working"}, ReasonClaimed, "test"); err != nil {
+	if err := place(t, p, "brokkr", "td-1", "", "", "working", ReasonClaimed, "test"); err != nil {
 		t.Fatalf("SetState must succeed even though state_log is gone, got: %v", err)
 	}
 	got, err := p.GetState("brokkr")
@@ -193,7 +193,7 @@ func TestSetStateSucceedsEvenWhenLogStateFails(t *testing.T) {
 // error here must mean the phase genuinely did not change, never "changed fine, telemetry failed".
 func TestSetPhaseSucceedsEvenWhenLogStateFails(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}, ReasonClaimed, "setup"); err != nil {
+	if err := place(t, p, "brokkr", "", "", "", "working", ReasonClaimed, "setup"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.s.db.Exec(`DROP TABLE state_log`); err != nil {
@@ -216,7 +216,7 @@ func TestSetPhaseSucceedsEvenWhenLogStateFails(t *testing.T) {
 // question IS the detail), which made ClearEscalation's silence the odd one out.
 func TestClearEscalationLogsWhatWasCleared(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}, ReasonClaimed, "setup"); err != nil {
+	if err := place(t, p, "brokkr", "", "", "", "working", ReasonClaimed, "setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.SetEscalation("brokkr", "should this touch prod config?"); err != nil {
@@ -239,7 +239,7 @@ func TestClearEscalationLogsWhatWasCleared(t *testing.T) {
 // measures its age — a re-write of the same phase that restamped it would hide an agent stuck there.
 func TestPhaseSinceStampsOnlyARealChange(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "clearing"}, ReasonAdvanced, "clearing"); err != nil {
+	if err := place(t, p, "brokkr", "", "", "", "clearing", ReasonAdvanced, "clearing"); err != nil {
 		t.Fatalf("SetState: %v", err)
 	}
 	first, err := p.GetState("brokkr")

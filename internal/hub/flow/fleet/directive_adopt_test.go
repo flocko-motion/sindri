@@ -36,10 +36,8 @@ func leafWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, regis
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-LEAF", Title: "one task", Status: "in_progress"}); err != nil {
 		t.Fatalf("own: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: "td-LEAF", Branch: "td-LEAF", Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
-	deps := &stubDeps{Root: root, Alive: true}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: "td-LEAF", Branch: "td-LEAF", Phase: phase})
+	deps := &stubDeps{Root: root}
 	return newEngine(t, st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
 }
 
@@ -59,7 +57,6 @@ func gatedFeatureAlive(t *testing.T) (*Engine, *store.ProjectStore, registry.Cal
 	t.Helper()
 	e, ps, c := gatedFeature(t)
 	deps := e.Deps.(*stubDeps)
-	deps.Alive = true
 	if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker", Workspace: filepath.Join(".worktrees", "dain")}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +152,9 @@ func TestAGainedChildAwaitingAVerdictParksRatherThanIsHandedOut(t *testing.T) {
 // would leave it with a task it cannot finish and no verb that reaches the child.
 func TestSubmitOfAGrownTaskExtendsItRatherThanRefusing(t *testing.T) {
 	e, ps, c, deps := leafWorker(t, "working")
-	deps.Alive = false // nobody to inject into, so the promotion at add-time does not happen
+	deps.Down = true // nobody to inject into, so the promotion at add-time does not happen
 	child := addChild(t, e, "td-LEAF", true)
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"})
 
 	var out strings.Builder
 	code, err := e.prAct().CmdSubmit(c, []string{"done"}, &out)
@@ -229,7 +224,7 @@ func TestAMergeNeverClosesATaskOverOpenChildren(t *testing.T) {
 		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
-	deps.Alive = false
+	deps.Down = true
 	child := addChild(t, e, "td-LEAF", true)
 	if st, _ := ps.GetState("dain"); st.Container != "" {
 		t.Fatalf("a PR already out must not be moved, got container %q", st.Container)
@@ -293,9 +288,7 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 	}
 
 	// The submit door: the leaf guard must see a child that is being worked, not just one waiting.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"})
 	var out strings.Builder
 	if code, _ := e.prAct().CmdSubmit(c, []string{"done"}, &out); code == 0 {
 		t.Errorf("a task must not go up over a child being worked:\n%s", out.String())
@@ -305,10 +298,8 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 	}
 
 	// The merge door: submit from the feature state it now holds, then land it.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	deps.Alive = false
+	flowtest.Place(t, ps, store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"})
+	deps.Down = true
 	if err := ps.SetParent(child, ""); err != nil { // detach so the submit can open the PR at all
 		t.Fatal(err)
 	}

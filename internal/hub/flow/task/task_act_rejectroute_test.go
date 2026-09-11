@@ -13,7 +13,7 @@ import (
 // that author, so a stale one was served for ever, paired with whatever task was held at the time.
 func TestARejectionIsAboutTheWorkInHand(t *testing.T) {
 	st, ps := poolFixture(t)
-	a := newActWith2(t, st, &flowtest.Hub{Root: t.TempDir(), Alive: true})
+	a := newActWith2(t, st, &flowtest.Hub{Root: t.TempDir()})
 	old := store.PR{ID: "pr-old", Task: "sd-old", Agent: "hepti", Branch: "b", Base: "main",
 		Status: "rejected", Feedback: "about the OLD task"}
 	if err := ps.PutPR(old); err != nil {

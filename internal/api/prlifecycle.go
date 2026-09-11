@@ -36,10 +36,14 @@ var prEventMilestone = map[string]bool{
 	// them: a hand-over hands over, and the session is the receiving agent's map to clear.
 	"scrap-branch-failed": false,
 	"review-amended":      false,
-	"review-repaired":     false,
 	"review-requested":    false,
 	"conflict":            false,
 	"warning":             false,
+	// A merge asked for and a merge that could not run: both are steps toward the one milestone the
+	// story wants, which is "merged" or "merge-failed". The refusal's words are what a human reads
+	// to know what to fix, and they are in the full log where the rest of the diagnostics are.
+	"merge-asked":   false,
+	"merge-refused": false,
 
 	// The flow machine's own account of this pull request (-> hub/flow/pr). Diagnostics, not
 	// milestones: the states it moves through say the same things "merged" and "scrapped" already

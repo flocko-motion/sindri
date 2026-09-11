@@ -17,6 +17,7 @@ var (
 	Failed  = flow.Outcome{Name: "failed"}  // it did not work, and the reason is the agent's brief
 	Queued  = flow.Outcome{Name: "queued"}  // handed to a queue; somebody else answers
 	Held    = flow.Outcome{Name: "held"}    // refused for now by a rule, not an error
+	Stale   = flow.Outcome{Name: "stale"}   // what it was working from moved, so what it produced describes nothing
 )
 
 // PickWork looks for the best-rated unit the backlog would hand this agent, and claims it. The claim
@@ -40,8 +41,14 @@ var Yield = &flow.Action{Name: "yield", Outcomes: []flow.Outcome{Done}}
 // Release drops a feature that has already landed and returns the agent to the backlog.
 var Release = &flow.Action{Name: "release", Outcomes: []flow.Outcome{Done}}
 
-// Submit files what the agent has for review, through the quality gate.
-var Submit = &flow.Action{Name: "submit", Outcomes: []flow.Outcome{Done, Queued, Failed}}
+// Interview puts the submit questions to an author and collects the answers, one exchange at a
+// time. It WAITS on the agent — the whole sequence is one process, cancelled if anything moves the
+// agent out from under it, which is what leaves a half-finished interview with nothing to reset.
+var Interview = &flow.Action{Name: "interview", Outcomes: []flow.Outcome{Done, Stale, Failed}, Awaits: true}
+
+// Submit files what the agent has for review, through the quality gate. Unattended: every question
+// it might have asked has been answered by the time this runs.
+var Submit = &flow.Action{Name: "submit", Outcomes: []flow.Outcome{Queued, Done, Failed}}
 
 // TakeReview claims the oldest unclaimed review and puts its branch in the reviewer's workspace.
 var TakeReview = &flow.Action{Name: "take-review", Outcomes: []flow.Outcome{Done, Nothing, Failed}}
@@ -63,8 +70,22 @@ var Promote = &flow.Action{Name: "promote", Outcomes: []flow.Outcome{Done, Faile
 // the agent is mid-editing rather than discarding it.
 var Rebase = &flow.Action{Name: "rebase", Outcomes: []flow.Outcome{Done, Failed}}
 
+// Launch brings a reclaimed pod back up and waits for its session, so a claim is never made against
+// an agent that cannot be told about it.
+var Launch = &flow.Action{Name: "launch", Outcomes: []flow.Outcome{Done, Failed}}
+
+// Stop takes an idle pod back, preserving the session so the cost of being wrong is the next start's
+// latency and nothing else.
+var Stop = &flow.Action{Name: "stop", Outcomes: []flow.Outcome{Done, Failed}}
+
+// Disown releases work a role must not hold and puts it back in the backlog. A planner's work
+// arrives as a conversation, so a backlog task on its row is a claim that should never have been
+// made — and the planner's own map is what notices, wherever it stands.
+var Disown = &flow.Action{Name: "disown", Outcomes: []flow.Outcome{Done, Failed}}
+
 // All is every declared action, for the check that each has an implementation.
 var All = []*flow.Action{
 	PickWork, PickSubtask, Clear, Retier, Yield, Release,
-	Submit, TakeReview, DropReview, Prod, Promote, Rebase,
+	Interview, Submit, TakeReview, DropReview, Prod, Promote, Rebase,
+	Launch, Stop, Disown,
 }

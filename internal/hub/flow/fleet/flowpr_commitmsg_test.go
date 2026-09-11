@@ -116,9 +116,7 @@ func TestSubmitCommitsConventionally(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "fix the flaky retry", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"})
 	wt := filepath.Join(root, ".worktrees", agent)
 	if err := os.WriteFile(filepath.Join(wt, "fix.txt"), []byte("patched\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -166,11 +164,9 @@ func TestCheckpointFallsBackToTaskTitle(t *testing.T) {
 	if err := ps.SetParent("td-1", "td-EPIC"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{
+	flowtest.Place(t, ps, store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
-	}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	})
 	wt := filepath.Join(root, ".worktrees", agent)
 	if err := os.WriteFile(filepath.Join(wt, "retry.txt"), []byte("wired\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -206,9 +202,7 @@ func TestMergeCommitIsConventional(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "stop the retry storm", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"})
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "work.txt"), []byte("progress\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

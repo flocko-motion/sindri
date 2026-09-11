@@ -8,13 +8,13 @@ package pr
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"io"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 	"github.com/flo-at/sindri/internal/hub/flow/run"
 	"github.com/flo-at/sindri/internal/hub/prompts"
-	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // CmdContribute queues an interim contribution's quality gate and returns at once — a worker
@@ -28,26 +28,22 @@ func (a *Act) CmdContribute(c registry.Caller, args []string, out io.Writer) (in
 	}
 	// Inside a feature what is worth landing is the branch, not the subtask in hand — which is the
 	// operation the user's milestone trigger already performs, so this is the same door for the agent.
-	if st.Container == "" && (st.Phase != "working" || st.Task == "") {
+	if st.Container == "" && (!situation.Standing(st.Phase, "working") || st.Task == "") {
 		fmt.Fprintln(out, prompts.ReplyNotWorking("contribute", st.Phase, st.Task))
 		return 1, nil
 	}
-	// The gate is queued, not run here (sd-cf630b) — see CmdSubmit for why, including why the work
-	// is committed and the agent parked before it opens. No PR exists until the gate passes.
+	// The gate is queued, not run here (sd-cf630b) — see CmdSubmit for why the work is committed
+	// before it opens. No PR exists until the gate passes.
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	sha, err := a.GateCommit(c.Project, c.Agent, msg)
 	if err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "gating"},
-		store.ReasonAdvanced, "contribute queued: "+sha); err != nil {
-		return 1, err
-	}
+	// The agent is moved nowhere: it keeps the task and the branch through a contribution, and where
+	// that leaves it is decided by what the gate then lands (-> worker/working's own exits).
 	qr, reused, err := a.GateRun(c.Project, c.Agent, run.GateContribute, msg, sha)
 	if err != nil {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"},
-			store.ReasonAdvanced, "contribute gate could not be opened")
-		return 1, err // see CmdSubmit: "gating" is a park with no way out if no gate was opened
+		return 1, err
 	}
 	if reused {
 		fmt.Fprintln(out, prompts.ReplyGateReused(qr.ID, prompts.ShortSHA(sha)))

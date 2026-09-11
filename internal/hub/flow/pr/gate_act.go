@@ -407,16 +407,13 @@ func (a *Act) openMilestoneOrInterim(project string, r api.Run) (store.PR, error
 		return store.PR{}, err
 	}
 	if !done {
-		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
-			store.ReasonAdvanced, "contribute rebase conflicts: "+strings.Join(conflicts, ", "))
+		a.RecordConflict(ps, pr.ID, base, conflicts)
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
+		a.announceVerdict(project)
 		_ = a.Harness.Say(project, r.Agent, "[hub] "+prompts.ReplyContributeConflicts(base, conflicts), mail.MailAndPush)
 		return pr, nil
 	}
-	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
-		store.ReasonAdvanced, "interim contribution submitted: "+pr.ID); err != nil {
-		return store.PR{}, err
-	}
+	// Moved nowhere: the pull request existing is the fact (-> cond.AwaitingContribution).
 	_ = ps.Log(r.Agent, "contribute", pr.ID)
 	msg := a.gateCommitMessage(ps, st, r.Message)
 	if existed {
@@ -457,11 +454,7 @@ func (a *Act) landSubmit(project string, ps *store.ProjectStore, r api.Run) erro
 	if err := ps.PutPR(pr); err != nil {
 		return err
 	}
-	if err := ps.SetState(store.AgentState{
-		Agent: r.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "submitted",
-	}, store.ReasonAdvanced, "submitted: "+pr.ID); err != nil {
-		return err
-	}
+	// Moved nowhere: the pull request existing is the fact (-> worker/gating's cond.OwnPROpen).
 	_ = ps.Log(r.Agent, "submit", pr.ID)
 	msg := a.gateCommitMessage(ps, st, r.Message)
 	// On the TASK THREAD in the author's own name, where the reviewer's brief already sends it — so
@@ -542,16 +535,14 @@ func (a *Act) stallGate(project string, ps *store.ProjectStore, r api.Run, statu
 	return a.Harness.Say(project, r.Agent, prompts.MsgGateIncomplete(status), mail.MailAndPush)
 }
 
-// backToWorking releases an agent a landing gate parked. A self-check is exempt: it parked nobody, so
-// a phase written here would overwrite whatever the agent moved on to while it waited.
+// backToWorking reads what an agent a landing gate parked still holds. It MOVES nobody: the run
+// row saying the gate refused is what frees it (-> cond.GateRefused).
 func (a *Act) backToWorking(ps *store.ProjectStore, r api.Run) (store.AgentState, error) {
-	st, _ := ps.GetState(r.Agent)
-	if r.Kind == run.GateLint {
-		return st, nil
+	st, err := ps.GetState(r.Agent)
+	if err == nil && r.Kind != run.GateLint {
+		_ = ps.Log(r.Agent, "gate-failed", gateTarget(st))
 	}
-	return st, ps.SetState(store.AgentState{
-		Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working",
-	}, store.ReasonRejected, "gate failed: "+gateTarget(st))
+	return st, err
 }
 
 // gateTarget names what a gate was checking, for the activity log — the container if the agent

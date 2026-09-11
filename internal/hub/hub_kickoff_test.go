@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"strings"
 	"testing"
 
@@ -19,9 +20,7 @@ func greetable(t *testing.T, role string) (*Hub, *clearableRuntime) {
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: role}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})
 	w := stillWatchdog(t, h)
 	w.record(store.Agent{Project: testProject, Name: "dvalin"}, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
 	rt := &clearableRuntime{}
@@ -76,29 +75,31 @@ func TestAClearedPlannerIsHandedItsDirective(t *testing.T) {
 	}
 }
 
-// TestTheArmedClearSweepHandsThePlannerItsDirective is the third path and the one no human is present
-// for: a clear armed while the agent held work fires later off the hub's own tick.
-func TestTheArmedClearSweepHandsThePlannerItsDirective(t *testing.T) {
+// TestAnArmedClearFiresAtTheBoundaryAndHandsThePlannerItsDirective is the third path and the one no
+// human is present for: a clear armed while the agent held work fires later, from the planner's own
+// clearing state, the moment it reaches a boundary.
+func TestAnArmedClearFiresAtTheBoundaryAndHandsThePlannerItsDirective(t *testing.T) {
 	h, rt := greetable(t, "planner")
 	ps := h.store.For(testProject)
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Phase: "planning"}, store.ReasonClaimed, "holds work"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Task: "td-1", Phase: "planning"})
 	if err := h.agents.SetClearArmed(t.Context(), testProject, "dvalin", true); err != nil {
 		t.Fatalf("SetClearArmed: %v", err)
 	}
 	if sent := rt.joined(); strings.Contains(sent, "/clear") {
 		t.Fatalf("precondition: an agent holding work must not be cleared yet: %s", sent)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "planning"}, store.ReasonFreed, "reached a boundary"); err != nil {
-		t.Fatal(err)
-	}
-	h.agents.FireArmedClears(t.Context(), testProject)
-	if sent := rt.joined(); !strings.Contains(sent, prompts.DirPlanning) {
-		t.Errorf("the sweep's kickoff should carry the planner's directive too: %s", sent)
+	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "planning"})
+	// A session with something in it: a clear typed into an empty one never lands, so the arming
+	// waits for context to answer it with (-> cond.ClearArmed).
+	h.watch.recordFill(store.Agent{Project: testProject, Name: "dvalin"}, fill{tokens: 40_000, window: 200_000})
+	h.wf.Look(testProject, "dvalin")
+	// Its own words on arrival: the conversation it was inside is what the clear discarded, so what
+	// it is told is where it now stands rather than "carry on" with a session that is gone.
+	if sent := rt.joined(); !strings.Contains(sent, prompts.DirPlanner) {
+		t.Errorf("the clearing state's own kickoff should carry the planner's directive too: %s", sent)
 	}
 }
 

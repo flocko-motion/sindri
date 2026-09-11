@@ -30,9 +30,7 @@ func gateRepo(t *testing.T, agent, task string) (*Act, *store.ProjectStore, stri
 	if err := ps.PutAgent(store.Agent{Name: agent, Role: "worker", Workspace: filepath.Join(".worktrees", agent)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: task, Phase: "gating"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: agent, Task: task, Branch: task, Phase: "gating"})
 	return newActOn(t, st, &flowtest.Hub{Root: root, Projects: []store.Project{{Tag: "repo", Path: root}}}), ps, root
 }
 
@@ -49,6 +47,19 @@ func openGate(t *testing.T, a *Act, agent, kind, message string) api.Run {
 		t.Fatalf("gateRun: %v", err)
 	}
 	return r
+}
+
+// finishGate ends a gate run the way the queue does: the result on the run row first, then the
+// continuation it unlocks. The order matters — an author standing at the gate is freed by the row
+// saying the gate refused it (-> store.LandingGateRefused), not by the continuation.
+func finishGate(t *testing.T, a *Act, r api.Run, status, output string) {
+	t.Helper()
+	if err := a.Store.For("repo").SetRunResult(r.ID, status, output, 0); err != nil {
+		t.Fatalf("recording the gate's result: %v", err)
+	}
+	if err := a.CompleteGate("repo", r, status, output); err != nil {
+		t.Fatalf("completeGate: %v", err)
+	}
 }
 
 func TestQueuePositionsRanksGateRunsFirst(t *testing.T) {
@@ -196,14 +207,17 @@ func TestRejectGateReturnsAgentToWorkingWithoutAPR(t *testing.T) {
 	a, ps, _ := gateRepo(t, "bombur", "sd-1")
 	r := openGate(t, a, "bombur", runflow.GateSubmit, "my summary")
 	deps := a.Deps.(*flowtest.Hub)
-	if err := a.CompleteGate("repo", r, "failed", "lint: line too long"); err != nil {
-		t.Fatalf("completeGate: %v", err)
-	}
+	finishGate(t, a, r, "failed", "lint: line too long")
 	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
 		t.Error("a failed gate must never create a PR")
 	}
-	if st, _ := ps.GetState("bombur"); st.Phase != "working" || st.Task != "sd-1" {
-		t.Errorf("state after a failed gate = %+v, want back to working on sd-1", st)
+	// The work is still in hand, and the run says the gate refused it — which is what puts the author
+	// back on the round (-> worker/gating's cond.GateRefused). Nothing here moves it.
+	if st, _ := ps.GetState("bombur"); st.Task != "sd-1" {
+		t.Errorf("state after a failed gate = %+v, want it still holding sd-1", st)
+	}
+	if refused, err := ps.LandingGateRefused("bombur"); err != nil || !refused {
+		t.Errorf("a failed gate must read as refused: %v (err %v)", refused, err)
 	}
 	if len(deps.InjectedText) == 0 {
 		t.Fatal("the agent must be told the gate failed")
@@ -223,14 +237,12 @@ func TestStallGateDoesNotReadAsALintFailure(t *testing.T) {
 			a, ps, _ := gateRepo(t, "bombur", "sd-1")
 			r := openGate(t, a, "bombur", runflow.GateSubmit, "my summary")
 			deps := a.Deps.(*flowtest.Hub)
-			if err := a.CompleteGate("repo", r, status, "whatever partial output"); err != nil {
-				t.Fatalf("completeGate: %v", err)
-			}
+			finishGate(t, a, r, status, "whatever partial output")
 			if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
 				t.Error("a gate that never reached a verdict must never create a PR")
 			}
-			if st, _ := ps.GetState("bombur"); st.Phase != "working" {
-				t.Errorf("phase = %q, want working — the agent must be free to try again", st.Phase)
+			if refused, err := ps.LandingGateRefused("bombur"); err != nil || !refused {
+				t.Errorf("a gate that never answered must free its author to try again: %v (err %v)", refused, err)
 			}
 			last := deps.InjectedText[len(deps.InjectedText)-1]
 			if strings.Contains(last, "Lint failed") || strings.Contains(last, "violation") {

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/flowtest"
 	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"strings"
 	"testing"
@@ -70,9 +71,7 @@ func TestArmingWaitsForTheBoundary(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"})
 	if err := s.SetClearArmed(t.Context(), "proj", "eitri", true); err != nil {
 		t.Fatalf("arming a working agent must succeed — the waiting IS the feature: %v", err)
 	}
@@ -100,23 +99,17 @@ func TestABoundaryIsNoLeafTaskAndNoReview(t *testing.T) {
 		}
 	}
 	// Between subtasks: the feature is still held, and that is a boundary.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Container: "td-epic", Phase: "idle"})
 	if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || !at {
 		t.Errorf("a feature between subtasks is a boundary: at=%v err=%v", at, err)
 	}
 	// Mid-subtask: not a boundary, feature or no feature.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Task: "td-leaf", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Container: "td-epic", Task: "td-leaf", Phase: "working"})
 	if at, _ := s.AtLeafBoundary("proj", "eitri"); at {
 		t.Error("a subtask in hand is exactly what the clear must not cut into")
 	}
 	// A reviewer owing a verdict is mid-review.
-	if err := ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "nori", Phase: "idle"})
 	if at, _ := s.AtLeafBoundary("proj", "nori"); !at {
 		t.Fatal("a reviewer holding nothing is at a boundary")
 	}
@@ -127,7 +120,7 @@ func TestABoundaryIsNoLeafTaskAndNoReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.AssignReview(id, "nori"); err != nil {
+	if _, err := ps.AssignReview(id, "nori"); err != nil {
 		t.Fatal(err)
 	}
 	if at, _ := s.AtLeafBoundary("proj", "nori"); at {
@@ -144,9 +137,7 @@ func TestDisarmingIsJustTheFlag(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", ClearArmed: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"})
 	if err := s.SetClearArmed(t.Context(), "proj", "eitri", false); err != nil {
 		t.Fatalf("disarming must not fail: %v", err)
 	}
@@ -165,9 +156,7 @@ func TestArmingAtABoundaryNeedsALivePod(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Phase: "idle"})
 	err := s.SetClearArmed(t.Context(), "proj", "eitri", true)
 	if err == nil {
 		t.Fatal("arming an agent with no running container should report that it cannot be cleared")
@@ -179,24 +168,6 @@ func TestArmingAtABoundaryNeedsALivePod(t *testing.T) {
 	// not leave the agent durably armed — armed, it would also be withheld from work by the gate.
 	if armedFlag(t, ps, "eitri") {
 		t.Error("a failed immediate clear must leave no arming behind it")
-	}
-}
-
-// TestFireArmedClearsPassesOverAgentsStillWorking: the sweep is what lands an arming set minutes
-// earlier, so it must be as careful as the arming was — a working agent is left alone, armed.
-func TestFireArmedClearsPassesOverAgentsStillWorking(t *testing.T) {
-	_, st := newService(t)
-	s := New(st, clearTestDeps{}, nil)
-	ps := st.For("proj")
-	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", ClearArmed: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
-	s.FireArmedClears(t.Context(), "proj")
-	if !armedFlag(t, ps, "eitri") {
-		t.Error("a working agent's arming must survive the sweep — it fires at the boundary, not before")
 	}
 }
 
@@ -215,9 +186,7 @@ func TestAClearThatNeverLandsAnswersAFailure(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
-		t.Fatal(err)
-	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "eitri", Phase: "idle"})
 	ctx, abandon := context.WithCancel(t.Context())
 	defer abandon()
 	container.Use(&fakeRuntime{pane: idlePane, afterSubmit: abandon})
