@@ -144,12 +144,20 @@ SHALL refuse any state no role's flow declares. A fixture whose SUBJECT is the f
 what a verb, a verdict or a merge leaves an agent standing in — SHALL run the machine
 rather than writing the answer it is asserting.
 
-This closes the gap that hid the stranded reviewer: a fixture writing directly can
-construct a world the machine would never produce — a reviewer holding an assigned
-review with its pod down — and then assert that it behaves correctly. One door with a
-declared-states check is narrower than the hundred call sites it replaced, and wider
-than running the machine for every fixture: a fixture may still stand an agent somewhere
-the machine would not have put it THIS time, and only the states it could ever produce.
+This does NOT close the gap that hid the stranded reviewer. That shape — a reviewer
+holding an assigned review with its pod down — is still writable, and only running the
+machine for every fixture would forbid it. What the door buys is narrower and worth
+stating exactly:
+
+- A state no role declares is refused, so a fixture can no longer put an agent
+  somewhere that reads as its role's start and then assert about it.
+- Both facts go through both writers, so a fixture cannot write a holding and a
+  standing that the two writers would never have produced together.
+- A pod that is DOWN is now deliberate rather than the default (`flowtest.Hub.Down`,
+  inverted from `Alive`), so the world under the bug has to be asked for by name.
+
+A fixture may still stand an agent somewhere the machine would not have put it THIS
+time. Closing that is the stronger form of this requirement and is not what landed.
 
 #### Scenario: A fixture cannot build an undeclared state
 

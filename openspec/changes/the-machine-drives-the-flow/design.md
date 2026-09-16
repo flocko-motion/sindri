@@ -160,13 +160,24 @@ submit is taken; the rows outlive it, since they are what the reviewer reads on 
 ### The submit questionnaire is a state running a process
 
 The agent stands in `worker/interviewing`, whose action conducts the whole exchange
-under the machine's cancellable context. *Alternatives considered:* a counter inside
+under the machine's cancellable context. *Alternative considered:* a counter inside
 `working`, which hides a distinct situation and makes the board show an agent working
-while it waits on questions; or moving the questions into `Tells`, which splits every
-exchange into two messages and makes the interview depend on delivery landing. The
-process form gives the question sequence as one function, and cancellation as the
-cleanup — code moved, escalation, retirement, the PR scrapped underneath all discard
-a half-finished interview with nothing to reset, and the cancel is recorded.
+while it waits on questions. The process form gives the question sequence as one
+function, and cancellation as the cleanup — code moved, escalation, retirement, the PR
+scrapped underneath all discard a half-finished interview with nothing to reset, and
+the cancel is recorded.
+
+What the process owns is the SEQUENCE, not the delivery. Each question is pushed as
+its own message and the verb that takes an answer puts none of its own, so there is
+exactly one asker: a verb that also asked would be a second one racing the process for
+which question is outstanding. This was first written the other way round — pushing was
+listed as a rejected alternative, for splitting every exchange into two messages and
+making the interview depend on delivery landing — and both costs are real and were
+accepted. A re-posed question has no command to ride back on, so push is the only path
+that serves every question rather than all but the first, and one path is worth the
+second message. The delivery risk is what the re-posing below answers: a question that
+never landed leaves the author at an empty prompt, which is precisely the reading that
+puts it again.
 
 Two details decided here. The reminder fires when the agent is **observed at an empty
 prompt** after a question was put, rather than on a dwell: an agent researching has a
@@ -304,9 +315,19 @@ this process is the hub that ran it.
 
 ## Open Questions
 
-- `escalated` carries a long, genuinely role-specific verb list. Whether it takes its
-  verbs as a factory parameter or stays hand-written is an implementation judgement.
-- Where the merge intent is recorded. `Reconciling` describes its subjects as "agents,
-  tasks and merge intents", so a home may already exist.
-- The dwell `act.Prod` uses for its own dedup wants an argument rather than a number
-  chosen by feel, now that a second caller depends on it.
+None left open. All three were settled while building, and are recorded here rather
+than deleted, because what a question was and how it went is worth more to a later
+reader than a heading that was quietly emptied.
+
+- *Whether `escalated` takes its verb list as a factory parameter or stays
+  hand-written.* **A parameter.** `lifecycle.Escalated(name, back, alsoAllowed)` takes
+  the role's own additions positionally, beside the four every role shares, so a role
+  that forgets one does not compile.
+- *Where the merge intent is recorded.* **Its own column on the pull request row**
+  (`prs.merge_asked`, via `SetMergeAsked`), kept off the shape the board renders: it
+  is an instruction to the hub, and what a reader looks at is the state it leads to.
+- *The dwell `act.Prod` dedups on.* **No dwell.** It keys on the idle SPELL the
+  observation carries (`Spells.First` against `obs.StillSince`), so a stall is named
+  once however many things notice it, and a pane that moves and stops again is a new
+  spell rather than one already prodded for. The number chosen by feel is gone rather
+  than argued over.

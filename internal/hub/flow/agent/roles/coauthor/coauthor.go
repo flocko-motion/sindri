@@ -19,10 +19,11 @@ var collab = flow.State{
 	Title: "Working with the user",
 	About: "A coauthor works directly with the user in the shared checkout. There is no task queue " +
 		"behind it and nothing the hub is waiting for — it is never empty-handed, because its " +
-		"session is the seat somebody is sitting in. It is TOLD that on arrival, since the one way " +
-		"a coauthor reaches this state again is a session somebody just emptied.",
-	Says:  says.Coauthor,
-	Tells: true,
+		"session is the seat somebody is sitting in. It TELLS NOTHING on arrival: six lifecycle " +
+		"states lead back here, so anything said would be said again for reading a message or " +
+		"stopping a pod — and what there is to say is standing in the agent's own brief already, " +
+		"which a cleared session keeps.",
+	Says: says.Coauthor,
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
 		{cond.MailWaiting, Mail, "it has mail it has not read"},

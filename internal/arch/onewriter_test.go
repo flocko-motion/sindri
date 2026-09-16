@@ -5,6 +5,9 @@
 // the agent who will do a thing, which is the machine's decision and nobody else's.
 // limits:  the count, over the product. `internal/hub/flowtest` is not the product: it stands in for
 // the hub so a test can build a world, and it is the ONE door fixtures go through (-> flowtest.Place).
+// Matched over the SOURCE TEXT, which cuts two ways: a name in a comment counts as a caller, which
+// fails loudly and is the safe direction, and a call split across lines is missed, which is not —
+// gofmt is what makes that shape unlikely rather than anything here.
 package arch
 
 import (

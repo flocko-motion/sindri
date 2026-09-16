@@ -471,9 +471,10 @@ func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 	return b.String() + ToolingBlock()
 }
 
-// DirCoauthor never blocks or hands out managed work — the user drives directly — so it just
-// reorients to freestyle collaboration in the shared checkout.
-const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note, `sindri scratch <ref|pr-id>` checks work you want to test out into " + ScratchMount + ", and the backlog verbs and PR verdicts are yours whenever the user asks for them (`sindri help` lists them). When the user goes quiet, wait for their next instruction."
+// DirCoauthor answers a coauthor that ASKED where it stands, with what is true at that moment and
+// nothing else. It restated the whole role until every sentence of it turned out to be standing in
+// the agent's own brief already (-> SystemPrompt), which is where orientation belongs.
+const DirCoauthor = "Nothing is waiting for you — this seat has no queue behind it. Carry on with whatever the user last asked."
 
 // DirNoReviews answers a free reviewer with nothing waiting — DirNoTasks's twin, since `sindri`
 // answers at once either way rather than blocking until one arrives.
