@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
@@ -41,6 +42,10 @@ type fakeRuntime struct {
 	cols              int    // the width this fake terminal draws at; paneWide when unset
 	blank             bool   // capture-pane comes back empty with no error: a reading that is not one
 	blankFor          int    // ... for this many captures only, then normally: a pane blank in passing
+	// typedFor is a pane showing somebody's unsent line for this many captures, and an empty box after
+	// — a person finishing their sentence, modelled by the count rather than raced with a sleep.
+	typedFor int
+	typedBox string // what that line looks like; the empty box is what follows it
 	// swallow is a session that accepts the keystrokes and shows nothing — the failure the read-back
 	// exists for, and the one thing a fake cannot be honest about by accident.
 	swallow bool
@@ -113,6 +118,10 @@ func (f *fakeRuntime) ExecContext(ctx context.Context, _ string, args ...string)
 	}
 	switch {
 	case containsArg(args, "capture-pane"):
+		if f.typedFor > 0 {
+			f.typedFor--
+			return []byte(f.typedBox), nil
+		}
 		if f.blankFor > 0 {
 			f.blankFor--
 			return nil, nil
@@ -212,6 +221,11 @@ func (paneReader) DetectState(screen string) agentport.State {
 }
 
 func (paneReader) ToolRunning(string) bool { return false }
+
+// InputPending is the REAL classifier's, not a stand-in: what counts as a box with something in it
+// is precisely what the guard turns on, and a fixture answering it its own way would agree with
+// itself rather than with the pane a user is typing into (-> claude.Claude.InputPending).
+func (paneReader) InputPending(screen string) bool { return claude.New().InputPending(screen) }
 
 // tellFixture wires a service over a fake backend showing pane, with one agent registered.
 func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {

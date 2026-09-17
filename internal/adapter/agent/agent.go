@@ -80,6 +80,10 @@ type Agent interface {
 	// (a plain tier id) — not always a bare string equality, since a backend may run a tier's model
 	// under a more specific id than the one it dispatches to.
 	ModelMatches(want, detected string) bool
+	// InputPending reports the pane's input box holding text that has been typed and not sent. The
+	// hub types into these panes, and typing into a box somebody is already using appends to their
+	// line and submits both — so this is what makes a push safe rather than destructive.
+	InputPending(screen string) bool
 	// ToolRunning reports whether the pane shows a tool call in flight (a shell, or anything else the
 	// backend renders the same way) — evidence the screen is quiet because nothing has RETURNED yet,
 	// not because the turn is stuck. Separate from DetectState: the state stays Working either way,
@@ -95,6 +99,9 @@ func Use(a Agent) { active = a }
 
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
+
+// InputPending reports somebody's unsent text sitting in the pane's input box, via the wired backend.
+func InputPending(screen string) bool { return active.InputPending(screen) }
 
 // Runtime is the single source of the "working"|"blocked"|"idle"|"signed-out" word every reader
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.
@@ -158,3 +165,7 @@ func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing 
 func (noop) ModelMatches(want, detected string) bool { return want == detected }
 
 func (noop) ToolRunning(string) bool { return false }
+
+// InputPending answers FALSE with no backend wired, which is the same answer a pane it cannot read
+// gets: a guard that refuses every push on no evidence would silence the fleet.
+func (noop) InputPending(string) bool { return false }

@@ -135,6 +135,7 @@ func (f fakeAgent) ModelWindow(string) (int, bool)     { return 0, false }    //
 func (f fakeAgent) ModelForTier(string) (string, bool) { return "", false }   // not this test's concern
 func (f fakeAgent) ModelMatches(want, got string) bool { return want == got } // not this test's concern
 func (f fakeAgent) ToolRunning(string) bool            { return false }       // not this test's concern
+func (f fakeAgent) InputPending(string) bool           { return false }       // nobody is typing in these fixtures
 
 // fullAgentWithWorkWaiting seeds an idle, over-threshold worker with a task waiting. The returned
 // pointer is the reported context size: set it to simulate a clear.

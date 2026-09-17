@@ -46,6 +46,11 @@ func (s *Service) inject(ctx context.Context, project, name, text string, guard 
 			"--anyway` sends regardless. If it is genuinely at the prompt, only a fresh token on the HOST "+
 			"fixes it — the hub stages that itself, and restarts the agent when it arrives", name, name)
 	}
+	if guard {
+		if err := s.waitForAnEmptyBox(ctx, project, c, name, text); err != nil {
+			return err
+		}
+	}
 	if _, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.SendLiteral(name, text)...)...); err != nil {
 		return err // the tmux session is the agent name
 	}
@@ -85,6 +90,51 @@ func (s *Service) inject(ctx context.Context, project, name, text string, guard 
 // errUnconfirmed marks a send that WAS typed and submitted and whose text never showed. A different
 // fact from nothing being typed at all, and the log a user reconstructs from must not conflate them.
 var errUnconfirmed = errors.New("nothing confirms the message arrived")
+
+// errSomebodyTyping marks a send given up on with a line still in the input box. Nothing was typed.
+var errSomebodyTyping = errors.New("somebody is typing in that pane")
+
+// typingBound is how long a push waits out somebody's line, typingBeat how often it looks. Past the
+// bound the line is not being written, it is sitting there — and an abandoned one must not deafen.
+const (
+	typingBound = time.Minute
+	typingBeat  = time.Second
+)
+
+// waitForAnEmptyBox holds a push WHILE somebody types and sends the moment they stop. Held rather
+// than refused: the message is wanted, it only must not land mid-sentence — and a line being
+// written stops being one a second later. Mail is kept and announced again either way.
+func (s *Service) waitForAnEmptyBox(ctx context.Context, project, c, name, text string) error {
+	deadline := time.Now().Add(typingBound)
+	for {
+		if !s.holdsSomebodysTyping(ctx, c, name) {
+			return nil // the box is clear: send now, while it still is
+		}
+		if !time.Now().Before(deadline) {
+			_ = s.store.For(project).Log(name, "inject-held", text)
+			return fmt.Errorf("agent %q: a line has been sitting in its input box for %s — %w",
+				name, typingBound, errSomebodyTyping)
+		}
+		select {
+		case <-ctx.Done():
+			_ = s.store.For(project).Log(name, "inject-held", text)
+			return fmt.Errorf("agent %q: %w while somebody was typing — nothing was injected", name, ctx.Err())
+		case <-time.After(typingBeat):
+		}
+	}
+}
+
+// holdsSomebodysTyping reports a line in the input box, off a FRESH capture — Observe's is memoised,
+// and this is about the screen right now. A failed capture does NOT hold.
+func (s *Service) holdsSomebodysTyping(ctx context.Context, c, name string) bool {
+	look, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, err := container.ExecContext(look, c, append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...)
+	if err != nil {
+		return false
+	}
+	return agentport.InputPending(string(out))
+}
 
 // needleCap is the most of a message worth looking for: past it a slice is no more distinctive, only
 // likelier to straddle a row.
@@ -333,17 +383,19 @@ func (s *Service) Tell(ctx context.Context, project, name, msg, source, signedOu
 // names. It applies only where the pane really reads signed out, so a fine session is never bounced.
 func (s *Service) deliver(ctx context.Context, project, name, stamped, signedOut string) error {
 	switch signedOut {
-	case api.SignedOutSend, api.SignedOutRestart:
-		if !s.readsSignedOut(ctx, project, name) {
-			break
-		}
-		if signedOut == api.SignedOutRestart {
-			if err := s.RestartAgent(ctx, project, name, io.Discard); err != nil {
-				return fmt.Errorf("restarting %s to deliver the message: %w", name, err)
-			}
-			return s.injectWhenReady(ctx, project, name, stamped, false)
-		}
+	case api.SignedOutSend:
+		// Overrules the PANE whatever it says — a /login banner, or a line the user knows is their own
+		// abandoned one. Unconditional on purpose: a guard that lifts only for the reading the user
+		// named leaves the other with no way past it, and an agent behind that is deaf for good.
 		return s.inject(ctx, project, name, stamped, false)
+	case api.SignedOutRestart:
+		if !s.readsSignedOut(ctx, project, name) {
+			break // a pane that reads fine is not bounced; the message goes the ordinary way
+		}
+		if err := s.RestartAgent(ctx, project, name, io.Discard); err != nil {
+			return fmt.Errorf("restarting %s to deliver the message: %w", name, err)
+		}
+		return s.injectWhenReady(ctx, project, name, stamped, false)
 	}
 	return s.Inject(ctx, project, name, stamped)
 }

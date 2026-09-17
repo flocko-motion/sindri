@@ -221,3 +221,57 @@ func TestRuntime(t *testing.T) {
 		}
 	}
 }
+
+// TestInputPendingSeesSomebodyMidSentence is the guard behind every push. send-keys APPENDS to the
+// input box, so typing into one a person is part-way through joins the two and submits the pair —
+// which is how a user's half-written message went up with a hub notice spliced into it.
+func TestInputPendingSeesSomebodyMidSentence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		screen string
+		want   bool
+	}{
+		{
+			name:   "empty box",
+			screen: "some earlier output\n\n╭─────────────╮\n❯                          \n╰─────────────╯",
+		},
+		{
+			name:   "somebody typing",
+			screen: "╭─────────────╮\n❯ ranke-db is not an issue now, we focus on the webapp\n╰─────────────╯",
+			want:   true,
+		},
+		{
+			// The case this exists for: a turn is running and a person has typed ahead into the box.
+			// Claude queues what is typed mid-turn, which is exactly why the hub pushes then — but it
+			// queues it onto THEIR line, not beside it.
+			name:   "typed ahead while a turn runs",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ and also check the migration\n  ⏵⏵ bypass permissions on · esc to interrupt",
+			want:   true,
+		},
+		{
+			name:   "empty box while a turn runs",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on · esc to interrupt",
+		},
+		{
+			// A form's options carry the same chevron. They are nobody's typing, and answering one is
+			// what typing at the pane is FOR — holding here would make `sindri agent tell` unable to
+			// answer the dialog it exists to answer.
+			name:   "a form is not somebody typing",
+			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)",
+		},
+		{
+			name:   "a form with its own input box below",
+			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)\n❯ ",
+		},
+		{
+			name:   "no input box at all",
+			screen: "$ ls\nREADME.md\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (Claude{}).InputPending(tc.screen); got != tc.want {
+				t.Errorf("InputPending = %v, want %v for:\n%s", got, tc.want, tc.screen)
+			}
+		})
+	}
+}
