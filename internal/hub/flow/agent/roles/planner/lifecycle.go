@@ -15,7 +15,6 @@ const (
 	Launching = "planner" + lifecycle.LaunchingIn
 	Stopping  = "planner" + lifecycle.StoppingIn
 	Clearing  = "planner" + lifecycle.ClearingIn
-	Mail      = "planner" + lifecycle.MailIn
 	Escalated = "planner" + lifecycle.EscalatedIn
 	Retired   = "planner" + lifecycle.RetiredIn
 )
@@ -28,11 +27,6 @@ var (
 // A planner's clear leads nowhere but back to rest: nothing is handed to it, so there is no
 // hand-over waiting behind the empty session.
 var clearing = lifecycle.Clearing(Clearing, Idle, Idle)
-
-var mail = lifecycle.Mail(Mail, Idle, flow.Offers{
-	{Verb: verb.Task, Why: "read the backlog"},
-	{Verb: verb.Escalate, Why: "stop on a question"},
-})
 
 // The verbs an escalated planner keeps: everything but shipping a proposal. Reading, proposing tasks
 // and talking to the user are how a planner gets its answer in the first place.

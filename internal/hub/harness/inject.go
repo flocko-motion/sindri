@@ -129,7 +129,9 @@ func (s *Service) waitForAnEmptyBox(ctx context.Context, project, c, name, text 
 func (s *Service) holdsSomebodysTyping(ctx context.Context, c, name string) bool {
 	look, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	out, err := container.ExecContext(look, c, append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...)
+	// WITH escapes: the placeholder in an empty box is faint, and stripping that is what made every
+	// fresh agent look like somebody was typing in it.
+	out, err := container.ExecContext(look, c, append([]string{"tmux"}, tmux.CapturePane(name, 0, true)...)...)
 	if err != nil {
 		return false
 	}

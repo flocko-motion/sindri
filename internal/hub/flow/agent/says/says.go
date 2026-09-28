@@ -24,8 +24,8 @@ const (
 	FeatureDone  = "feature-done"  // every subtask is closed; the feature can go up
 	FeatureGated = "feature-gated" // what is left awaits the user's verdict
 	Preparing    = "preparing"     // a running action is landing; the instruction follows it
-	Mail         = "mail"          // it has unread mail, and is not done until it has read it
 	Stalled      = "stalled"       // it holds work and has stopped moving
+	NotDone      = "not-done"      // it holds nothing and is not taking any, with something unanswered
 )
 
 // Refusals are the answers that tell an agent it has nothing to do here. Waking one standing in a
@@ -46,5 +46,5 @@ func Refused(speech string) string { return Refusals[speech] }
 var All = []string{
 	Escalated, Retired, Coauthor, Planner, Planning, Working, Rejected, AwaitVerdict,
 	Gating, Interviewing, Resolving, NoTasks, NoReviews, Reviewing, FeatureDone, FeatureGated, Preparing,
-	Mail, Stalled,
+	Stalled, NotDone,
 }

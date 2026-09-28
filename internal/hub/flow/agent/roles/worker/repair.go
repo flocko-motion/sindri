@@ -23,9 +23,10 @@ const (
 
 // refreshing: a new round starts on a fresh session, the same way a claim does.
 var refreshing = flow.State{
-	Name:   Refreshing,
-	Title:  "Starting the next round fresh",
-	Action: act.Clear,
+	WhenIdle: flow.LetItRest, // the hub is clearing for the next round
+	Name:     Refreshing,
+	Title:    "Starting the next round fresh",
+	Action:   act.Clear,
 	About: "A rejection is a NEW ROUND on the same work, and a round starts fresh like a claim does: " +
 		"the reasoning that produced the rejected work is exactly what the feedback asks to be " +
 		"reconsidered, and carrying it over is how the same answer comes back a second time.",
@@ -40,8 +41,9 @@ var refreshing = flow.State{
 
 // reworking: the verdict came back and the feedback is the brief for this round.
 var reworking = flow.State{
-	Name:  Reworking,
-	Title: "Answering a rejection",
+	WhenIdle: flow.Nudge, // the feedback is in its hands and the next round is its to write
+	Name:     Reworking,
+	Title:    "Answering a rejection",
 	About: "A verdict came back asking for another round. The feedback is the brief, so it arrives " +
 		"the moment the agent lands here — the session it would have asked from was just discarded " +
 		"by refreshing, and the round number travels with it as the fact that changes the approach.",
@@ -66,9 +68,10 @@ var reworking = flow.State{
 
 // releasing: the feature landed without it, so the hold is dropped.
 var releasing = flow.State{
-	Name:   Releasing,
-	Title:  "Letting go of a landed feature",
-	Action: act.Release,
+	WhenIdle: flow.LetItRest, // the hub is dropping the hold
+	Name:     Releasing,
+	Title:    "Letting go of a landed feature",
+	Action:   act.Release,
 	About: "The feature this worker held is closed at its source, or was carried in by a merged pull " +
 		"request. There is nothing left to work, so the hold is dropped and any PR still standing " +
 		"against it is settled.",
@@ -82,9 +85,10 @@ var releasing = flow.State{
 
 // yielding: somebody else is inside this tree, and the container holder is the one that gives way.
 var yielding = flow.State{
-	Name:   Yielding,
-	Title:  "Yielding a split tree",
-	Action: act.Yield,
+	WhenIdle: flow.LetItRest, // the hub is giving the tree up
+	Name:     Yielding,
+	Title:    "Yielding a split tree",
+	Action:   act.Yield,
 	About: "This worker holds a container while another agent holds a task under it — a tree split " +
 		"after the fact by reparenting, which no claim guard can cover. The CONTAINER holder yields, " +
 		"since the leaf is the concrete work, and its unsettled pull request goes with the feature.",

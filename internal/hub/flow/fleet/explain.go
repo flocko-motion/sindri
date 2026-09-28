@@ -75,8 +75,18 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 	}
 	// Ranked by the assigner's own rule over the same two pools, so the answer to "what is next"
 	// cannot part company with what is actually handed out (-> nextUp).
+	// The tiebreak reads what the agent's session runs; an unqualified ask names no agent, so there
+	// is no session to spare and no preference to express (-> Act.TierPrefers).
+	on := ""
+	if agent != "" {
+		sit, serr := e.Sit.Of(project, agent)
+		if serr != nil {
+			return out, serr
+		}
+		on = sit.Model
+	}
 	var pick string
-	if t, _, ok := task.NextUp(packages, leaves, e.roleAct().TierPrefers(project, agent)); ok {
+	if t, _, ok := task.NextUp(packages, leaves, e.roleAct().TierPrefers(on)); ok {
 		pick = t.ID
 	}
 

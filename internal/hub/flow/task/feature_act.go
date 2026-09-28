@@ -25,40 +25,41 @@ import (
 )
 
 // ClaimContainer assigns one package, starting its first open subtask — or, with none left,
-// holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one.
-func (a *Act) ClaimContainer(project, worker string, c store.Task) (string, bool, error) {
+// holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one. It
+// says nothing to the agent: the hand-over does that once the session is prepared (-> Act.Brief).
+func (a *Act) ClaimContainer(project, worker string, c store.Task) (bool, error) {
 	ps := a.Store.For(project)
 	root := a.Deps.ProjectRoot(project)
 	children, err := ps.OpenSubtasks(c.ID)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	base, err := a.BaseBranch(root)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	ag, ok, err := ps.GetAgent(worker)
 	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
+		return false, fmt.Errorf("agent %s missing: %v", worker, err)
 	}
 	wt := filepath.Join(root, ag.Workspace)
 	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
-		return "", false, err
+		return false, err
 	}
 	if len(children) == 0 {
 		if err := ps.SetHolding(worker, "", c.ID, c.ID,
 			store.ReasonClaimed, "claimed container "+c.ID+" with nothing open under it"); err != nil {
-			return "", false, err
+			return false, err
 		}
 		_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title+" (nothing left — finishing it)")
-		return prompts.DirContainerDone(c.ID), true, nil
+		return true, nil
 	}
 	child := children[0]
 	if err := a.StartSubtask(project, worker, c.ID, child); err != nil {
-		return "", false, err
+		return false, err
 	}
 	_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title)
-	return prompts.DirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
+	return true, nil
 }
 
 // CmdCheckpoint commits the current subtask to the feature branch, closes that

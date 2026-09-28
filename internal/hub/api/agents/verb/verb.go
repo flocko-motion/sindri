@@ -40,7 +40,6 @@ var Catalogue = []Def{
 	{Name: "log", Summary: "record a note on your work: log \"<note>\"", Governed: true},
 	{Name: "prs", Summary: "list pull requests and their status: prs [--limit N]"},
 	{Name: "show", Summary: "read a pull request's diff or a run's output: show <id>"},
-	{Name: "next", Summary: "claim the next task: next", Roles: []string{"worker"}, Governed: true},
 	{Name: "lint", Summary: "run the quality gate: lint [<pr-id>]"},
 	{Name: "submit", Summary: "file what you have for review: submit \"<summary>\"", Roles: []string{"worker"}, Governed: true},
 	{Name: "contribute", Summary: "land an interim contribution mid-task: contribute \"<summary>\"", Roles: []string{"worker"}},
@@ -81,7 +80,6 @@ var (
 	Log            = of("log")
 	PRs            = of("prs")
 	Show           = of("show")
-	Next           = of("next")
 	Lint           = of("lint")
 	Submit         = of("submit")
 	Contribute     = of("contribute")

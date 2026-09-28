@@ -21,8 +21,9 @@ const (
 )
 
 var idle = flow.State{
-	Name:  Idle,
-	Title: "Reviewer holding no pull request",
+	WhenIdle: flow.LetItRest, // nothing has been selected for it yet
+	Name:     Idle,
+	Title:    "Reviewer holding no pull request",
 	About: "Free, so the oldest unclaimed review is its next one — which is also how a review filed " +
 		"while no reviewer was running gets picked up later.",
 	Says: says.NoReviews,
@@ -30,7 +31,8 @@ var idle = flow.State{
 		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ReviewHeld, Reviewing, "it already holds one, however it got there"},
-		{cond.MailWaiting, Mail, "it has mail it has not read, so it is not done"},
+		// BEFORE the claim it refuses, which is the whole of what this standing means.
+		{cond.NotDone, NotDone, "its mail is unread, so it is not done and takes nothing new"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear — it fires before any claim"},
 		// Through the CLEAR, not around it: a review is read whole, so the session is discarded before
 		// the branch arrives rather than by whoever hands it over. Every route passes the same way,
@@ -55,9 +57,10 @@ var idle = flow.State{
 }
 
 var taking = flow.State{
-	Name:   Taking,
-	Title:  "Being handed a pull request",
-	Action: act.TakeReview,
+	WhenIdle: flow.LetItRest, // the hub is handing it a review
+	Name:     Taking,
+	Title:    "Being handed a pull request",
+	Action:   act.TakeReview,
 	About: "The hub is claiming a review for this reviewer and putting the branch in its workspace. " +
 		"The claim comes first, so a session discarded mid-way cannot lose it.",
 	Says: says.Preparing,
@@ -71,8 +74,9 @@ var taking = flow.State{
 }
 
 var reviewing = flow.State{
-	Name:  Reviewing,
-	Title: "Reading a pull request",
+	WhenIdle: flow.Nudge, // it holds a pull request and the verdict is its to reach
+	Name:     Reviewing,
+	Title:    "Reading a pull request",
 	About: "The reviewer holds one pull request whose branch sits in its one workspace. A PR that " +
 		"settles while it is reading releases the hold: a verdict on it now decides nothing.",
 	Says: says.Reviewing,
@@ -97,9 +101,10 @@ var reviewing = flow.State{
 }
 
 var dropping = flow.State{
-	Name:   Dropping,
-	Title:  "Releasing an overtaken review",
-	Action: act.DropReview,
+	WhenIdle: flow.LetItRest, // the hub is releasing the review
+	Name:     Dropping,
+	Title:    "Releasing an overtaken review",
+	Action:   act.DropReview,
 	About: "The pull request this reviewer held was merged, scrapped or withdrawn before it gave a " +
 		"verdict. The hold is released and the reviewer is told, rather than left to produce a " +
 		"verdict that would overwrite the outcome.",
@@ -113,7 +118,7 @@ var dropping = flow.State{
 
 // Flow is the reviewer's whole map.
 var Flow = []flow.State{
-	idle, mail, taking, reviewing, dropping, launching, stopping, clearing, escalated, retired,
+	idle, notDone, taking, reviewing, dropping, launching, stopping, clearing, escalated, retired,
 }
 
 // Start is where a reviewer with no state stored begins.

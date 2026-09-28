@@ -63,6 +63,9 @@ type Service struct {
 	launchMu sync.Mutex             // guards launch
 	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 
+	askMu sync.Mutex           // guards asks
+	asks  map[lcKey]*LaunchAsk // a human's launch request awaiting the machine (see launchask.go)
+
 	lcMu      sync.Mutex                // guards lifecycle
 	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
 
@@ -85,10 +88,14 @@ func (f observerFunc) Observe(project, name string) observe.Observation { return
 func New(st *store.Store, deps Deps, agentCh *channel.Server) *Service {
 	return &Service{
 		store: st, deps: deps, agentCh: agentCh,
+		// No idle rule: the harness reads a situation for what a session RUNS — its model, its tier —
+		// and never asks whether an agent has stopped doing anything. That question belongs to the
+		// sweep, which is handed the flows' own declaration (-> agent.NudgesWhenIdle).
 		sit: situation.NewGatherer(st, observerFunc(func(project, name string) observe.Observation {
 			return deps.Observation(project, name)
-		})),
+		}), nil),
 		launch:    map[string]*safeBuffer{},
+		asks:      map[lcKey]*LaunchAsk{},
 		lifecycle: map[lcKey]lifecycleIntent{},
 	}
 }

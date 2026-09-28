@@ -52,7 +52,7 @@ type Caller struct {
 	Project   string // the repo (repoTag) the caller belongs to
 	Agent     string
 	Role      string // "worker" | "reviewer"
-	HasTask   bool   // a worker holding work (a leaf task OR a container) hides "next"
+	HasTask   bool   // a worker holding work (a leaf task OR a container), which opens submit
 	Container string // the feature (parent task) it holds, if any: shows "checkpoint" alongside submit
 	// SubtasksOpen: the held feature still has children to work, which is what holds "submit" back —
 	// a feature goes up when its last subtask is checkpointed, not when a human decides to cut it.
@@ -206,7 +206,7 @@ func notHere(name string, s Standing) string {
 	}
 	if len(s.Verbs) == 0 {
 		return fmt.Sprintf("%s is not available where you are (%s), and nothing else is either — "+
-			"run `sindri` to see where you stand.", name, s.State)
+			"wait; the hub moves you on and says so.", name, s.State)
 	}
 	return fmt.Sprintf("%s is not available where you are (%s). Available here: %s.",
 		name, s.State, strings.Join(s.Verbs, ", "))

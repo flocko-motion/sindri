@@ -626,11 +626,10 @@ func TestGitDropClearsADirtyEditWithNothingToRecord(t *testing.T) {
 	}
 }
 
-// TestBaseBranchWarnsOnceAboutAnUnconfiguredReference is defect C: with no `reference:` set, every
-// agent measures against whatever the human happens to have checked out in the main working copy,
-// silently. That deserves at least a warning, logged once per repo rather than on every call —
-// baseBranch runs on nearly every git/PR verb, and a line per call would drown out everything else.
-func TestBaseBranchWarnsOnceAboutAnUnconfiguredReference(t *testing.T) {
+// TestAnUnpinnedReferenceIsNotAComplaint: the branch checked out in the main working copy IS the
+// reference when no `reference:` pins one. That is a setting, not an omission, so resolving it says
+// nothing — the Repos pane names which branch is in effect and how, which is where that belongs.
+func TestAnUnpinnedReferenceIsNotAComplaint(t *testing.T) {
 	a, _, _, root := gitEngine(t)
 
 	r, w, err := os.Pipe()
@@ -640,20 +639,18 @@ func TestBaseBranchWarnsOnceAboutAnUnconfiguredReference(t *testing.T) {
 	orig := os.Stderr
 	os.Stderr = w
 
-	if _, err := a.BaseBranch(root); err != nil {
-		t.Fatalf("baseBranch: %v", err)
-	}
-	if _, err := a.BaseBranch(root); err != nil {
-		t.Fatalf("baseBranch (second call): %v", err)
+	branch, err := a.BaseBranch(root)
+	if err != nil {
+		t.Fatalf("BaseBranch: %v", err)
 	}
 	w.Close()
 	os.Stderr = orig
 	out, _ := io.ReadAll(r)
 
-	if got := strings.Count(string(out), "no `reference:` configured"); got != 1 {
-		t.Errorf("warned %d time(s) across two calls, want exactly 1 (deduped by repo root): %q", got, out)
+	if branch == "" {
+		t.Error("an unpinned repo still has a reference — whatever the main checkout is on")
 	}
-	if !strings.Contains(string(out), root) {
-		t.Errorf("the warning should name which repo it's about, got %q", out)
+	if len(out) != 0 {
+		t.Errorf("resolving a working configuration must say nothing, got %q", out)
 	}
 }

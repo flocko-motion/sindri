@@ -49,20 +49,33 @@ func (b *Box) Deliver(project, name, text string, d Delivery) error {
 	if !d.Push || name == api.SenderUser {
 		return nil
 	}
-	// The hub's lifetime, not the caller's: a push must land whether or not whoever triggered it is
-	// still there. `pushed` means typed, submitted and not contradicted by the pane (-> api.Mail.History).
+	// A push BEHIND mail does not make the caller wait. The mailbox already holds the message, so the
+	// push is the optional half — and it can take as long as the pane does: one holding an unsent line
+	// blocks until that clears, which left the TUI sitting on "saving…" while a user's answer to an
+	// escalation went nowhere. The announcement retries until it lands (-> NudgeMailWaiting).
+	if d.Mail {
+		b.pushes.Add(1)
+		go func() {
+			defer b.pushes.Done()
+			b.push(ps, project, name, text, mailID)
+		}()
+		return nil
+	}
+	// A push with no mail behind it IS the message, so it stays on this call and its failure is the
+	// answer: swallowed, it reads as delivered — NudgeMailWaiting announced hepti's mailbox off that
+	// nil once, and never again.
+	return b.push(ps, project, name, text, mailID)
+}
+
+// push types one message at an agent and records what happened to the mail row behind it. `pushed`
+// means typed, submitted and not contradicted by the pane (-> api.Mail.History).
+func (b *Box) push(ps *store.ProjectStore, project, name, text string, mailID int64) error {
 	if err := b.deps.Push(project, name, text); err != nil {
 		_ = ps.LogMail(mailID, store.MailPushFailed, err.Error())
 		// Said whatever the class. Three consecutive failures to one agent left no trace of WHY
 		// anywhere — its log records the text as inject-skipped or inject-unconfirmed, never the reason.
 		fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
-		// A push with no mail behind it IS the message, so a swallowed failure reads as delivered —
-		// NudgeMailWaiting announced hepti's mailbox off this nil once, and never again. The real cause,
-		// not a sentinel: mail written absorbs it, and the announcement retries until it lands.
-		if !d.Mail {
-			return err
-		}
-		return nil
+		return err
 	}
 	if mailID != 0 {
 		_ = ps.LogMail(mailID, store.MailPushLanded, "")

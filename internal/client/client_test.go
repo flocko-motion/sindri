@@ -130,7 +130,7 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 		t.Fatalf("worker commands: %v", err)
 	}
 	wn := cmdNames(wc)
-	for _, want := range []string{"status", "next"} {
+	for _, want := range []string{"status", "task"} {
 		if !has(wn, want) {
 			t.Fatalf("idle worker surface missing %q: %v", want, wn)
 		}

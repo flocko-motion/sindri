@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -64,7 +65,8 @@ func TestLogStateDetailCarriesWhatChanged(t *testing.T) {
 func TestStateLogNewestFirstAndLimit(t *testing.T) {
 	p := openTmpProject(t)
 	for i := 0; i < 5; i++ {
-		if err := p.LogState("brokkr", ReasonAdvanced, "step"); err != nil {
+		// Distinct: a row repeating the one before it is deliberately not appended (-> LogPass).
+		if err := p.LogState("brokkr", ReasonAdvanced, fmt.Sprintf("step %d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,7 +96,7 @@ func TestStateLogNewestFirstAndLimit(t *testing.T) {
 func TestStateLogCapsPerAgent(t *testing.T) {
 	p := openTmpProject(t)
 	for i := 0; i < stateLogCap+10; i++ {
-		if err := p.LogState("brokkr", ReasonStatus, "tick"); err != nil {
+		if err := p.LogState("brokkr", ReasonStatus, fmt.Sprintf("tick %d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -259,5 +261,64 @@ func TestPhaseSinceStampsOnlyARealChange(t *testing.T) {
 	moved, _ := p.GetState("brokkr")
 	if moved.PhaseSince == "" {
 		t.Errorf("a real phase change must stamp PhaseSince, got %+v", moved)
+	}
+}
+
+// TestPassesCannotEvictHistory is thrain's five minutes: a prod re-running every two seconds pushed
+// its whole claim chain past a shared cap, leaving three rows of history in five hundred. The two
+// classes are trimmed against their own budgets, so a burst of passes costs the agent nothing.
+func TestPassesCannotEvictHistory(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.LogState("brokkr", ReasonClaimed, "claimed sd-1"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < passLogCap*3; i++ {
+		if err := p.LogPass("brokkr", "started", "p-1", fmt.Sprintf("prod %d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := p.StateLog("brokkr", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var history, passes int
+	for _, e := range all {
+		if e.Reason == string(ReasonClaimed) {
+			history++
+		}
+		if e.Reason == "started" {
+			passes++
+		}
+	}
+	if history != 1 {
+		t.Errorf("the claim must survive any number of passes, got %d rows of history in %d", history, len(all))
+	}
+	if passes != passLogCap {
+		t.Errorf("passes should be held to their own budget, got %d want %d", passes, passLogCap)
+	}
+}
+
+// TestARepeatedRowIsNotAppended: a spell of the same thing happening says what one row says, and
+// repeating it is how a history comes to hold nothing but the last few minutes of a loop.
+func TestARepeatedRowIsNotAppended(t *testing.T) {
+	p := openTmpProject(t)
+	for i := 0; i < 50; i++ {
+		if err := p.LogPass("brokkr", "outcome", "p-1", "prod: nothing"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := p.StateLog("brokkr", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("fifty identical rows should read as one, got %d", len(all))
+	}
+	// A DIFFERENT row still lands, and the one after that repeats nothing.
+	if err := p.LogPass("brokkr", "outcome", "p-1", "prod: done"); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ = p.StateLog("brokkr", 0); len(all) != 2 {
+		t.Errorf("a row that says something new must be appended, got %d", len(all))
 	}
 }

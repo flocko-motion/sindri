@@ -32,6 +32,16 @@ type (
 // Stay is the target of a verb that leaves the agent where it is.
 const Stay = machine.Stay
 
+// What a still screen means, spelled the way a flow file spells everything else it declares.
+type WhenIdle = machine.WhenIdle
+
+const (
+	// LetItRest: the agent waits on somebody else here, so a screen that has stopped is correct.
+	LetItRest = machine.LetItRest
+	// Nudge: the agent is the one expected to move, so a screen that has stopped is a fault.
+	Nudge = machine.Nudge
+)
+
 // Orphaned is the built-in exit every acting state needs: this hub never started that action, so a
 // previous one died holding it.
 type Orphaned = machine.Orphaned
@@ -131,10 +141,6 @@ type World struct {
 	// FirstAsleep: of the stopped agents of this role that could take the waiting work, this is the
 	// one to bring back. A fleet-wide choice made per agent, so one wake starts one pod.
 	FirstAsleep bool
-	// TierMismatch: the work waiting for this agent is rated for a model other than the one running
-	// under it. Read here rather than asked by a condition, because which model a tier deserves is
-	// the hub's policy and whether two ids name one model is the backend's own knowledge.
-	TierMismatch bool
 }
 
 // Verdict is a rejection standing against one piece of work: what the reviewer said, and how many

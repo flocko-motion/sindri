@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sindri flow debug</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/dagre.min.js"></script>
+<script src="vendor/cytoscape-dagre.js"></script>
+<style>
+:root {
+  --bg: #fafafa; --panel: #ffffff; --ink: #1f2328; --muted: #656d76; --line: #d0d7de;
+  --active: #fde68a; --active-edge: #b45309; --would: #2563eb; --holds: #15803d;
+  --hl: #c026d3; --sel: #0969da; --bad: #b42318; --bad-bg: #fef3f2; --chip: #eef1f4;
+  --in-sel: #dc2626; --out-sel: #16a34a;
+  --node: #ffffff; --edge: #6e7781; --label-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Contrast first: text near white, secondary text a light grey, lines visible on every surface. */
+    --bg: #22272e; --panel: #2d333b; --ink: #f4f6f8; --muted: #c5ccd4; --line: #768390;
+    --node: #3a414b; --edge: #a8b3bf; --label-bg: #22272e;
+    --active: #8a6a14; --active-edge: #ffd166; --would: #6cb6ff; --holds: #57d364;
+    --hl: #f0a8ff; --sel: #6cb6ff; --bad: #ff938a; --bad-bg: #4a2323; --chip: #3a414b;
+    --in-sel: #ff6b61; --out-sel: #57d364;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; } /* the page is a fixed frame; only the side panes scroll */
+body { background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif;
+  display: grid; grid-template-rows: auto auto 1fr; }
+/* Rows pinned: the banner is display:none when quiet, and an unpinned main would slide into its auto row. */
+header { grid-row: 1; }
+#banner { grid-row: 2; }
+main { grid-row: 3; }
+header { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
+  border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 14px; margin: 0 8px 0 0; }
+header .spacer { flex: 1; }
+button, select, input { font: inherit; color: inherit; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; }
+button { cursor: pointer; }
+button[aria-pressed="true"] { background: var(--chip); font-weight: 600; }
+#live { color: var(--muted); font-size: 12px; }
+#banner { display: none; padding: 6px 10px; background: var(--bad-bg); color: var(--bad);
+  border-bottom: 1px solid var(--bad); white-space: pre-wrap; }
+#banner.on { display: block; }
+main { display: grid; grid-template-columns: 250px 1fr 390px; min-height: 0; }
+aside, section { min-height: 0; overflow: auto; background: var(--panel); }
+#left { border-right: 1px solid var(--line); padding: 8px; }
+#left input { width: 100%; margin-bottom: 8px; }
+.repo { margin: 10px 0 4px; font-weight: 600; color: var(--muted); font-size: 12px; }
+.agent { display: flex; justify-content: space-between; gap: 6px; padding: 4px 6px;
+  border-radius: 5px; cursor: pointer; }
+.agent:hover { background: var(--chip); }
+.agent.sel { background: var(--chip); outline: 1px solid var(--sel); }
+.agent .role { color: var(--muted); font-size: 11px; }
+.agent .status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+#graph { position: relative; background: var(--bg); overflow: hidden; } /* cytoscape pans itself; a scrollbar here resizes its canvas into overflowing again */
+#cy { position: absolute; inset: 0; }
+#empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+#right { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; border-radius: 0; padding: 8px 14px; background: transparent; }
+.tabs button[aria-selected="true"] { border-bottom: 2px solid var(--sel); font-weight: 600; }
+.pane { overflow: auto; padding: 10px; min-height: 0; }
+.pane[hidden] { display: none; }
+h2 { font-size: 14px; margin: 0 0 4px; }
+h3 { font-size: 12px; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.sub { color: var(--muted); margin-bottom: 6px; }
+table.kv { border-collapse: collapse; width: 100%; }
+table.kv td { padding: 2px 6px 2px 0; vertical-align: top; }
+table.kv td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
+code { font-size: 12px; background: var(--chip); padding: 0 4px; border-radius: 3px; }
+#exportPanel { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 20; }
+#exportPanel[hidden] { display: none; }
+#exportPanel .sheet { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px;
+  width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: grid; gap: 8px; overflow: auto; }
+#exportPanel ol { margin: 0; padding-left: 20px; }
+#exportPanel p { margin: 0; }
+#exportCode { width: 100%; height: 340px; font: 12px/1.45 ui-monospace, monospace; white-space: pre; resize: vertical; tab-size: 8; }
+.row-buttons { display: flex; gap: 8px; align-items: center; }
+.row-buttons .spacer { flex: 1; }
+a.jump { color: var(--sel); text-decoration: none; }
+a.jump:hover code { outline: 1px solid var(--sel); }
+.chip { display: inline-block; padding: 0 6px; border-radius: 9px; background: var(--chip); font-size: 11px; }
+.yes { color: var(--holds); font-weight: 600; }
+.no { color: var(--muted); }
+ul.plain { margin: 0; padding-left: 16px; }
+#histFilter { width: 100%; margin-bottom: 8px; }
+details.pass { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+details.pass > summary { padding: 4px 8px; cursor: pointer; list-style-position: inside; }
+.row { padding: 3px 8px; border-top: 1px solid var(--line); font-size: 12px; }
+.lone { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+.row .ts { color: var(--muted); margin-right: 6px; }
+.row .reason { font-weight: 600; margin-right: 6px; }
+.row.move { cursor: pointer; }
+.row.move:hover { background: var(--chip); }
+.row.picked { outline: 2px solid var(--hl); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sindri flow debug</h1>
+  <label>Kind <select id="kind"><option value="agent">agents</option></select></label>
+  <button id="pause" aria-pressed="false" title="Stop following the hub">Pause</button>
+  <button id="relayout" title="Forget dragged positions and lay the graph out again">Re-layout</button>
+  <button id="focus" title="Centre the active state">Focus active</button>
+  <button id="dagre" class="dev" hidden title="Lay the graph out from scratch, ignoring the checked-in default">Dagre layout</button>
+  <button id="export" class="dev" hidden title="Export this arrangement as the checked-in default">Export layout</button>
+  <span class="spacer"></span>
+  <span id="live">connecting…</span>
+</header>
+<div id="banner" role="alert"></div>
+<div id="exportPanel" hidden role="dialog" aria-labelledby="exportTitle">
+  <div class="sheet">
+    <h2 id="exportTitle">Export the <span id="exportRole"></span> layout</h2>
+    <p>This is the arrangement on screen now, as the checked-in default every viewer gets until they
+      drag their own. To ship it:</p>
+    <ol>
+      <li>Replace the <b>whole</b> of <code id="exportFile"></code> with the code below.</li>
+      <li>Run <code>go test ./internal/hub/flow/agent/</code> — it fails on any name that is not a
+        state of this flow — and <code>brokkr lint</code>.</li>
+      <li>Rebuild the hub. Your own dragged positions still win in this browser: <b>Re-layout</b>
+        drops them to show the default.</li>
+    </ol>
+    <p class="sub">Every declared state is included, in declaration order, coordinates rounded. A state
+      added to the flow later has no entry and is placed by dagre until the next export. Start a
+      fresh arrangement with <b>Dagre layout</b>.</p>
+    <textarea id="exportCode" readonly spellcheck="false" aria-label="layout.go"></textarea>
+    <div class="row-buttons">
+      <button id="exportCopy">Copy to clipboard</button>
+      <span id="exportCopied" class="sub"></span>
+      <span class="spacer"></span>
+      <span class="sub">into <code id="exportFile2"></code></span>
+      <button id="exportClose">Close</button>
+    </div>
+  </div>
+</div>
+<main>
+  <aside id="left">
+    <input id="filter" type="search" placeholder="Filter agents">
+    <div id="agents"></div>
+  </aside>
+  <section id="graph"><div id="cy"></div><div id="empty">Pick an agent on the left.</div></section>
+  <aside id="right">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tabDetails" aria-selected="true">Details</button>
+      <button role="tab" id="tabHistory" aria-selected="false">State history</button>
+    </div>
+    <div class="pane" id="details"></div>
+    <div class="pane" id="history" hidden>
+      <input id="histFilter" type="search" placeholder="Filter history (reason, detail, pass)">
+      <div id="histList"></div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+
+// ---- state ----------------------------------------------------------------------------------
+const S = {
+  kind: "agent",
+  board: [],          // agent rows from the board
+  sel: null,          // {project, id, role}
+  selRow: "",         // the selected agent's board row, serialised, for the live trigger
+  graphKey: "",       // "agent/<role>" of the graph drawn
+  graph: null,        // api.FlowGraph
+  reading: null,      // api.SubjectFlow
+  picked: null,       // {type: "node"|"edge", id}
+  pickedRow: null,    // history row id whose edge is highlighted
+  collapsed: new Set(),
+  paused: false,
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---- errors are shown, never swallowed ------------------------------------------------------
+function fail(msg) { $("banner").textContent = msg; $("banner").classList.add("on"); }
+function clearFail() { $("banner").classList.remove("on"); }
+
+async function getJSON(path) {
+  let resp;
+  try { resp = await fetch(path); } catch (e) { throw new Error(`${path}: the hub did not answer (${e.message})`); }
+  const text = await resp.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (_) { /* reported below */ }
+  if (!resp.ok) throw new Error(`${path}: ${body && body.error ? body.error : resp.status + " " + resp.statusText}`);
+  if (body === null) throw new Error(`${path}: the hub answered with no JSON`);
+  return body;
+}
+
+// ---- positions, per viewer and per graph ----------------------------------------------------
+const posKey = () => `sindri-flow-pos:${S.graphKey}`;
+function loadPos() { try { return JSON.parse(localStorage.getItem(posKey()) || "{}"); } catch (_) { return {}; } }
+function savePos() {
+  const out = {};
+  cy.nodes().forEach((n) => { out[n.id()] = n.position(); });
+  try { localStorage.setItem(posKey(), JSON.stringify(out)); } catch (_) { /* storage off: positions just don't persist */ }
+}
+function forgetPos() { try { localStorage.removeItem(posKey()); } catch (_) { /* nothing stored */ } }
+
+// ---- the graph ------------------------------------------------------------------------------
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// Sized off the label's own lines: cytoscape deprecated sizing a node by "label".
+const labelLines = (n) => String(n.data("label") || "").split("\n");
+const nodeWidth = (n) => Math.min(180, Math.max(76, ...labelLines(n).map((l) => l.length * 7.8))) + 22;
+const nodeHeight = (n) => labelLines(n).length * 17 + 18;
+const cy = cytoscape({
+  container: $("cy"),
+  style: [
+    { selector: "node", style: {
+      shape: "round-rectangle", label: "data(label)", "text-valign": "center", "text-wrap": "wrap",
+      "text-max-width": 150, width: nodeWidth, height: nodeHeight, "font-size": 13,
+      color: css("--ink"), "background-color": css("--node"), "border-width": 1.5, "border-color": css("--line") } },
+    { selector: "node.start", style: { "font-weight": "bold" } },
+    { selector: "node.ghost", style: { "border-style": "dashed", color: css("--muted") } },
+    { selector: "node.would", style: { "border-width": 5, "border-style": "double", "border-color": css("--would") } },
+    { selector: "node.active", style: { "background-color": css("--active"), "border-width": 3, "border-color": css("--active-edge") } },
+    { selector: "node:selected", style: { "overlay-color": css("--sel"), "overlay-opacity": 0.25, "overlay-padding": 6 } },
+    { selector: "edge", style: {
+      width: 1.5, "curve-style": "bezier", "target-arrow-shape": "triangle", "arrow-scale": 0.9,
+      "line-color": css("--edge"), "target-arrow-color": css("--edge"), label: "data(label)",
+      "font-size": 11, "text-wrap": "wrap", color: css("--muted"), "text-background-color": css("--label-bg"),
+      "text-background-opacity": 0.85, "text-background-padding": 2, "text-rotation": "autorotate",
+      "loop-direction": "-45deg", "loop-sweep": "-60deg" } },
+    { selector: "edge.dim", style: { opacity: 0.5 } },
+    // Orphaned: a dead hub's leftover, so a shadow at every level of emphasis short of the reader's own.
+    { selector: "edge.orphaned", style: { "line-style": "dotted", opacity: 0.5 } },
+    { selector: "edge.orphaned.dim", style: { opacity: 0.25 } },
+    { selector: "edge.exit", style: { color: css("--ink"), "font-weight": "bold" } },
+    { selector: "edge.holds", style: { width: 4, "line-color": css("--holds"), "target-arrow-color": css("--holds"), color: css("--holds") } },
+    { selector: "edge.next", style: { width: 6, "arrow-scale": 1.4, "target-arrow-shape": "triangle-backcurve", "source-arrow-shape": "circle", "source-arrow-color": css("--holds") } },
+    { selector: "edge.hl", style: { width: 5, "line-color": css("--hl"), "target-arrow-color": css("--hl"), color: css("--hl"), opacity: 1 } },
+    // A selected node's own edges, over every other mark: in red, out green (a loop is out).
+    { selector: "edge.in-sel, edge.out-sel", style: { width: 3, opacity: 1, "z-index": 9, color: "#ffffff",
+      "text-background-color": "#1f2328", "text-background-opacity": 0.9, "font-weight": "bold" } },
+    { selector: "edge.in-sel", style: { "line-color": css("--in-sel"), "target-arrow-color": css("--in-sel") } },
+    { selector: "edge.out-sel", style: { "line-color": css("--out-sel"), "target-arrow-color": css("--out-sel") } },
+    { selector: "edge:selected", style: { width: 5, "line-color": css("--sel"), "target-arrow-color": css("--sel"),
+      color: css("--sel"), opacity: 1, "z-index": 10 } },
+  ],
+});
+const short = (name) => name.includes("/") ? name.slice(name.indexOf("/") + 1) : name;
+
+function drawGraph(g) {
+  cy.elements().remove();
+  const els = [];
+  const names = new Set(g.states.map((s) => s.name));
+  for (const s of g.states) {
+    els.push({ group: "nodes", data: { id: s.name, label: short(s.name) }, classes: s.name === g.start ? "start" : "" });
+  }
+  // One drawn edge per (from, to): every event taking the same way out rides it, each keeping its
+  // declaration number, since the first that holds is the one taken. Orphaned rides alone — it only
+  // fires for an action a dead hub left behind, so it is drawn apart, as a shadow of the past.
+  for (const s of g.states) {
+    const edges = new Map();
+    s.events.forEach((ev, i) => {
+      const id = edgeOf(s, i);
+      if (!edges.has(id)) edges.set(id, { to: ev.to || s.name, orphaned: ev.kind === "orphaned", members: [] });
+      edges.get(id).members.push(i);
+    });
+    for (const [id, { to, orphaned, members }] of edges) {
+      if (!names.has(to)) {
+        names.add(to);
+        els.push({ group: "nodes", data: { id: to, label: short(to) + "\n(not in this flow)" }, classes: "ghost" });
+      }
+      els.push({ group: "edges", data: { id, source: s.name, target: to, from: s.name, members,
+        label: members.map((i) => `${i + 1}. ${s.events[i].on}`).join("\n") },
+        classes: (orphaned ? "orphaned" : "") + (to === s.name ? " stay" : "") });
+    }
+  }
+  cy.add(els);
+  layout();
+}
+// edgeOf is the drawn edge event i of s rides: its target's, or an orphaned one of its own.
+const edgeId = (from, to, orphaned) => `${from}->${to}${orphaned ? "~orphaned" : ""}`;
+const edgeOf = (s, i) => edgeId(s.name, s.events[i].to || s.name, s.events[i].kind === "orphaned");
+
+// layout places every node: the viewer's own dragged positions win, then the checked-in default
+// (a developer's export), then dagre for whatever neither names. "reset" drops the viewer's own;
+// "dagre" also ignores the default, which is where a developer starts a new arrangement.
+function layout(mode) {
+  if (mode === "reset" || mode === "dagre") forgetPos();
+  const stored = mode ? {} : loadPos();
+  const defaults = mode === "dagre" ? {} : (S.graph.positions || {});
+  cy.layout({ name: "dagre", rankDir: "TB", nodeSep: 40, rankSep: 70, edgeSep: 12, animate: false }).run();
+  cy.nodes().forEach((n) => {
+    const p = stored[n.id()] || defaults[n.id()];
+    if (p) n.position({ x: p.x, y: p.y });
+  });
+  cy.fit(undefined, 30);
+}
+cy.on("dragfree", "node", savePos);
+
+// The reading, painted onto the drawn graph: the active node, its exits numbered and marked, the
+// first holding exit as "next", and where a pass would settle when that is somewhere else.
+function paint() {
+  cy.elements().removeClass("active would exit holds next dim");
+  const r = S.reading;
+  if (!r || !S.graph) return;
+  const active = cy.getElementById(r.state);
+  active.addClass("active");
+  if (r.would && r.would !== r.state) cy.getElementById(r.would).addClass("would");
+  const st = S.graph.states.find((s) => s.name === r.state);
+  if (!st) return;
+  cy.edges().forEach((e) => { if (e.data("from") !== r.state) e.addClass("dim"); });
+  let next = -1;
+  st.events.forEach((_, i) => {
+    const e = cy.getElementById(edgeOf(st, i)).addClass("exit");
+    if (r.holds && r.holds[i]) { e.addClass("holds"); if (next < 0) next = i; }
+  });
+  if (next >= 0) cy.getElementById(edgeOf(st, next)).addClass("next");
+}
+
+// A selected node wears its own edges; anything else selected, or nothing, clears them.
+function markNodeEdges(node) {
+  cy.edges().removeClass("in-sel out-sel");
+  if (!node) return;
+  node.outgoers("edge").addClass("out-sel");
+  node.incomers("edge").not(".out-sel").addClass("in-sel");
+}
+// panIntoView moves the view just enough to bring ele inside it, by a margin — never re-centring,
+// so a jump keeps the arrangement the reader was already looking at.
+function panIntoView(ele) {
+  const m = 30, bb = ele.renderedBoundingBox(), w = cy.width(), h = cy.height();
+  const dx = bb.x1 < m ? m - bb.x1 : bb.x2 > w - m ? (w - m) - bb.x2 : 0;
+  const dy = bb.y1 < m ? m - bb.y1 : bb.y2 > h - m ? (h - m) - bb.y2 : 0;
+  if (dx || dy) cy.animate({ panBy: { x: dx, y: dy }, duration: 200 });
+}
+
+// select is what a click in the details pane does: the same selection a tap on the graph makes.
+function select(id) {
+  const ele = cy.getElementById(id);
+  if (ele.empty()) { fail(`${id} is not drawn in this graph`); return; }
+  cy.elements().unselect();
+  ele.select();
+  S.picked = { type: ele.isNode() ? "node" : "edge", id };
+  markNodeEdges(ele.isNode() ? ele : null);
+  renderDetails();
+  panIntoView(ele);
+}
+$("details").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-sel]");
+  if (!a) return;
+  e.preventDefault();
+  select(a.dataset.sel);
+});
+
+cy.on("tap", "node", (evt) => { S.picked = { type: "node", id: evt.target.id() }; markNodeEdges(evt.target); renderDetails(); showTab("details"); });
+cy.on("tap", "edge", (evt) => { S.picked = { type: "edge", id: evt.target.id() }; markNodeEdges(null); renderDetails(); showTab("details"); });
+cy.on("tap", (evt) => { if (evt.target === cy) { S.picked = null; markNodeEdges(null); renderDetails(); } });
+
+// ---- details pane ---------------------------------------------------------------------------
+const kv = (rows) => `<table class="kv">${rows.filter((r) => r[1] !== undefined && r[1] !== "")
+  .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>`;
+const code = (s) => `<code>${esc(s)}</code>`;
+// jump is a details-pane link to an element on the graph (-> select).
+const jump = (id, text) => `<a href="#" class="jump" data-sel="${esc(id)}"><code>${esc(text)}</code></a>`;
+
+function renderDetails() {
+  const el = $("details");
+  const r = S.reading;
+  if (!S.graph || !r) { el.innerHTML = `<div class="sub">Pick an agent to see its flow.</div>`; return; }
+  if (!S.picked) { el.innerHTML = subjectDetails(r); return; }
+  if (S.picked.type === "node") {
+    const s = S.graph.states.find((x) => x.name === S.picked.id);
+    el.innerHTML = s ? stateDetails(s, r) : `<h2>${esc(S.picked.id)}</h2><div class="sub">Not declared in this flow — an edge leads here from outside it.</div>`;
+    return;
+  }
+  const e = cy.getElementById(S.picked.id);
+  const s = e.nonempty() && S.graph.states.find((x) => x.name === e.data("from"));
+  el.innerHTML = s ? edgeDetails(s, e.data("target"), e.data("members"), r) : "";
+}
+
+function subjectDetails(r) {
+  return `<h2>${esc(r.id)}</h2><div class="sub">${esc(r.kind)} · ${esc(r.variant)} · ${esc(r.project)}</div>` +
+    kv([["stands in", code(r.state)], ["a pass would settle in", code(r.would)]]) +
+    `<h3>Observed</h3>` + factsTable(r) +
+    `<div class="sub" style="margin-top:10px">Select a state or an edge for its declaration.</div>`;
+}
+const factsTable = (r) => kv((r.facts || []).map((f) => [f.name, esc(f.value)]));
+
+function stateDetails(s, r) {
+  const active = s.name === r.state;
+  const tags = [active ? `<span class="chip">active</span>` : "", s.name === r.would && !active ? `<span class="chip">would settle here</span>` : "",
+    s.name === S.graph.start ? `<span class="chip">start</span>` : ""].join(" ");
+  let h = `<h2>${esc(s.name)}</h2><div class="sub">${esc(s.title)} ${tags}</div><p>${esc(s.about)}</p>`;
+  h += kv([
+    ["action", s.action ? code(s.action) + (s.awaits ? " <span class=\"chip\">awaits the subject</span>" : "") : "<span class=\"no\">none — the hub does nothing here</span>"],
+    ["outcomes", (s.outcomes || []).map(code).join(" ")],
+    ["when idle", esc(s.whenIdle)],
+    ["says", s.says ? code(s.says) + (s.tells ? " <span class=\"chip\">told unprompted</span>" : "") : ""],
+  ]);
+  // Grouped by where they lead, as the graph draws them; each event keeps its number, and on the
+  // active state the ones that hold now are marked.
+  const groups = new Map();
+  s.events.forEach((ev, i) => {
+    const id = edgeOf(s, i);
+    if (!groups.has(id)) groups.set(id, { to: ev.to || s.name, members: [] });
+    groups.get(id).members.push(i);
+  });
+  h += `<h3>Exits, in order</h3><ul class="plain">` + [...groups].map(([id, { to, members }]) => {
+    const evs = members.map((i) => {
+      const holds = active && r.holds && r.holds[i] ? ` <span class="yes">holds</span>` : "";
+      return `${i + 1}. ${jump(id, s.events[i].on)}${holds}`;
+    }).join(", ");
+    return `<li>${evs} → ${jump(to, to === s.name ? "(stays)" : to)}</li>`;
+  }).join("") + `</ul>`;
+  if (s.verbs && s.verbs.length) {
+    h += `<h3>Verbs</h3><ul class="plain">` + s.verbs.map((v) => `<li>${code(v.verb)} ${esc(v.why)}</li>`).join("") + `</ul>`;
+  }
+  if (active) h += `<h3>Observed</h3>` + factsTable(r);
+  return h;
+}
+
+// edgeDetails is one drawn edge: the way from one state to another, and every event that takes it.
+function edgeDetails(s, to, members, r) {
+  const first = s.name === r.state && r.holds ? r.holds.findIndex(Boolean) : -1;
+  const n = members.length;
+  let h = `<h2>${esc(short(s.name))} → ${esc(to === s.name ? "(stays)" : short(to))}</h2>` +
+    `<div class="sub">${n} event${n === 1 ? "" : "s"} · of ${s.events.length} exits</div>` +
+    kv([["from", jump(s.name, s.name)], ["to", jump(to, to === s.name ? "(stays)" : to)]]);
+  for (const i of members) {
+    const ev = s.events[i];
+    let now = `<span class="no">not evaluated — only the active state's exits are</span>`;
+    if (s.name === r.state) {
+      if (ev.kind === "outcome") now = `<span class="no">an outcome — it arrives with the action, never read off the world</span>`;
+      else if (r.holds && r.holds[i]) now = `<span class="yes">holds</span>${first === i ? " — the exit a pass would take" : ` — but exit ${first + 1} comes first`}`;
+      else now = `<span class="no">does not hold</span>`;
+    }
+    h += `<h3>${i + 1}. ${esc(ev.on)} <span class="chip">${esc(ev.kind)}</span></h3>` + kv([
+      ["why", esc(ev.why)], ["staleness", ev.within ? esc(ev.within) : ""],
+      ["wakes on", (ev.wake || []).map(code).join(" ")], ["now", now],
+    ]);
+  }
+  return h;
+}
+
+// ---- history pane ---------------------------------------------------------------------------
+function renderHistory() {
+  const list = $("histList");
+  const r = S.reading;
+  if (!r) { list.innerHTML = ""; return; }
+  const q = $("histFilter").value.trim().toLowerCase();
+  const rows = (r.history || []).filter((h) => !q || `${h.reason} ${h.detail} ${h.pass || ""}`.toLowerCase().includes(q));
+  const groups = [];
+  for (const h of rows) { // newest first; one pass's steps are adjacent
+    const last = groups[groups.length - 1];
+    if (h.pass && last && last.pass === h.pass) last.rows.push(h); else groups.push({ pass: h.pass || "", rows: [h] });
+  }
+  list.innerHTML = groups.map((g) => {
+    const body = g.rows.slice().reverse().map(rowHTML).join("");
+    if (!g.pass) return `<div class="lone">${body}</div>`;
+    const moves = g.rows.filter((h) => h.move).map((h) => `${short(h.move.from)} → ${short(h.move.to)}`);
+    const open = S.collapsed.has(g.pass) ? "" : " open";
+    return `<details class="pass" data-pass="${esc(g.pass)}"${open}><summary><b>${esc(g.pass)}</b> ` +
+      `<span class="ts">${esc(g.rows[g.rows.length - 1].ts)}</span> ${esc(moves.join(", "))}</summary>${body}</details>`;
+  }).join("") || `<div class="sub">No history${q ? " matches the filter" : ""}.</div>`;
+}
+function rowHTML(h) {
+  const cls = "row" + (h.move ? " move" : "") + (S.pickedRow === h.id ? " picked" : "");
+  return `<div class="${cls}" data-id="${h.id}"><span class="ts">${esc(h.ts)}</span><span class="reason">${esc(h.reason)}</span>${esc(h.detail)}</div>`;
+}
+$("histList").addEventListener("toggle", (e) => {
+  const p = e.target.dataset && e.target.dataset.pass;
+  if (!p) return;
+  if (e.target.open) S.collapsed.delete(p); else S.collapsed.add(p);
+}, true);
+$("histList").addEventListener("click", (e) => {
+  const rowEl = e.target.closest(".row.move");
+  if (!rowEl) return;
+  const h = S.reading.history.find((x) => String(x.id) === rowEl.dataset.id);
+  if (!h || !h.move) return;
+  cy.edges().removeClass("hl");
+  const from = S.graph.states.find((s) => s.name === h.move.from);
+  const edge = cy.getElementById(edgeId(h.move.from, h.move.to, h.move.on === "orphaned")).filter((ed) =>
+    !!from && ed.data("members").some((i) => from.events[i].on === h.move.on));
+  S.pickedRow = h.id;
+  renderHistory();
+  if (edge.empty()) { fail(`history row ${h.id}: no edge ${h.move.from} —${h.move.on}→ ${h.move.to} in this graph (the flow changed since?)`); return; }
+  clearFail();
+  edge.addClass("hl");
+  cy.animate({ center: { eles: edge }, duration: 250 });
+});
+$("histFilter").addEventListener("input", renderHistory);
+
+// ---- tabs -----------------------------------------------------------------------------------
+function showTab(which) {
+  $("tabDetails").setAttribute("aria-selected", which === "details");
+  $("tabHistory").setAttribute("aria-selected", which === "history");
+  $("details").hidden = which !== "details";
+  $("history").hidden = which !== "history";
+}
+$("tabDetails").onclick = () => showTab("details");
+$("tabHistory").onclick = () => showTab("history");
+
+// ---- the subject list -----------------------------------------------------------------------
+function renderAgents() {
+  const q = $("filter").value.trim().toLowerCase();
+  const byRepo = new Map();
+  for (const a of S.board) {
+    if (q && !`${a.name} ${a.role} ${a.repo} ${a.status}`.toLowerCase().includes(q)) continue;
+    const k = a.repo || a.project;
+    if (!byRepo.has(k)) byRepo.set(k, []);
+    byRepo.get(k).push(a);
+  }
+  $("agents").innerHTML = [...byRepo.keys()].sort().map((repo) => `<div class="repo">${esc(repo)}</div>` +
+    byRepo.get(repo).map((a) => {
+      const sel = S.sel && S.sel.project === a.project && S.sel.id === a.name ? " sel" : "";
+      return `<div class="agent${sel}" data-project="${esc(a.project)}" data-id="${esc(a.name)}" data-role="${esc(a.role)}">` +
+        `<span>${esc(a.name)} <span class="role">${esc(a.role)}</span></span><span class="status">${esc(a.status)}</span></div>`;
+    }).join("")).join("") || `<div class="sub">No agents${q ? " match" : ""}.</div>`;
+}
+$("filter").addEventListener("input", renderAgents);
+$("agents").addEventListener("click", (e) => {
+  const el = e.target.closest(".agent");
+  if (el) pick({ project: el.dataset.project, id: el.dataset.id, role: el.dataset.role });
+});
+
+async function pick(sel) {
+  S.sel = sel; S.picked = null; S.pickedRow = null; S.reading = null;
+  renderAgents();
+  $("empty").style.display = "none";
+  try {
+    const key = `${S.kind}/${sel.role}`;
+    if (key !== S.graphKey) {
+      S.graph = await getJSON(`debug/graph?kind=${encodeURIComponent(S.kind)}&variant=${encodeURIComponent(sel.role)}`);
+      S.graphKey = key;
+      drawGraph(S.graph);
+    }
+    S.selRow = rowOf(S.board);
+    await refresh();
+    focusActive();
+  } catch (e) { fail(e.message); }
+}
+
+async function refresh() {
+  if (!S.sel) return;
+  try {
+    const q = `kind=${encodeURIComponent(S.kind)}&project=${encodeURIComponent(S.sel.project)}&id=${encodeURIComponent(S.sel.id)}`;
+    S.reading = await getJSON(`debug/subject?${q}`);
+    if (S.reading.variant !== S.sel.role) { S.sel.role = S.reading.variant; S.graphKey = ""; return pick(S.sel); } // its role changed under it
+    clearFail();
+    paint(); renderDetails(); renderHistory();
+    $("live").textContent = `${S.paused ? "paused" : "live"} · read ${new Date().toLocaleTimeString()}`;
+  } catch (e) { fail(e.message); }
+}
+function focusActive() {
+  if (!S.reading) return;
+  const n = cy.getElementById(S.reading.state);
+  if (n.nonempty()) cy.animate({ center: { eles: n }, duration: 250 });
+}
+
+// ---- following the hub ----------------------------------------------------------------------
+// The board stream says "something changed" as a whole snapshot; the selected agent's own row
+// changing is the trigger to read it again. A 10s fallback covers world facts the row never shows.
+const rowOf = (agents) => {
+  if (!S.sel) return "";
+  const a = agents.find((x) => x.project === S.sel.project && x.name === S.sel.id);
+  return a ? JSON.stringify(a) : "";
+};
+function follow() {
+  const es = new EventSource("events");
+  es.onopen = () => { clearFail(); $("live").textContent = S.paused ? "paused" : "live"; };
+  es.onmessage = (m) => {
+    let st;
+    try { st = JSON.parse(m.data); } catch (e) { fail(`events: unreadable snapshot (${e.message})`); return; }
+    S.board = st.agents || [];
+    renderAgents();
+    const row = rowOf(S.board);
+    if (row !== S.selRow) { S.selRow = row; if (!S.paused) refresh(); }
+  };
+  es.onerror = () => { $("live").textContent = "stream lost — reconnecting…"; };
+}
+setInterval(() => { if (!S.paused) refresh(); }, 10000);
+
+$("pause").onclick = () => {
+  S.paused = !S.paused;
+  $("pause").setAttribute("aria-pressed", S.paused);
+  $("pause").textContent = S.paused ? "Resume" : "Pause";
+  $("live").textContent = S.paused ? "paused" : "live";
+  if (!S.paused) refresh();
+};
+$("relayout").onclick = () => { if (S.graph) layout("reset"); };
+
+// ---- developer: exporting the arrangement as the checked-in default (?dev) ------------------
+const DEV = new URLSearchParams(location.search).has("dev");
+if (DEV) document.querySelectorAll(".dev").forEach((el) => { el.hidden = false; });
+$("dagre").onclick = () => { if (S.graph) layout("dagre"); };
+$("export").onclick = () => {
+  if (!S.graph) { fail("pick an agent first — the export is of the graph on screen"); return; }
+  const g = S.graph;
+  const names = g.states.map((s) => s.name); // declaration order, so a re-export diffs cleanly
+  const keys = names.map((n) => `"${n}":`);
+  const width = Math.max(...keys.map((k) => k.length));
+  const rows = names.map((n, i) => {
+    const p = cy.getElementById(n).position();
+    return `\t${keys[i].padEnd(width)} {X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}},`;
+  });
+  const pkg = g.layoutPackage;
+  $("exportCode").value = [
+    `// package: ${g.layoutFile.replace(/^internal\//, "").replace(/\/layout\.go$/, "")} / layout`,
+    `// type:    rendering (the ${pkg} flow's default drawing)`,
+    `// job:     where the flow debug view draws each ${pkg} state by default.`,
+    `// limits:  generated — arrange the graph in \`sindri debug flow\` opened with ?dev, then Export layout`,
+    `// and replace this file. A state missing here is placed by dagre; a name that is no state fails a test.`,
+    `package ${pkg}`,
+    ``,
+    `import "github.com/flo-at/sindri/internal/hub/flow/machine"`,
+    ``,
+    `// Layout is the ${pkg} flow's default drawing, by state name.`,
+    `var Layout = machine.Layout{`,
+    ...rows,
+    `}`,
+    ``,
+  ].join("\n");
+  $("exportFile").textContent = g.layoutFile;
+  $("exportFile2").textContent = g.layoutFile;
+  $("exportRole").textContent = g.variant;
+  $("exportCopied").textContent = "";
+  $("exportPanel").hidden = false;
+};
+$("exportCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("exportCode").value); $("exportCopied").textContent = "copied"; }
+  catch (e) { $("exportCode").select(); $("exportCopied").textContent = `the clipboard refused (${e.message}) — the code is selected, copy it by hand`; }
+};
+$("exportClose").onclick = () => { $("exportPanel").hidden = true; };
+$("focus").onclick = focusActive;
+$("kind").onchange = (e) => { S.kind = e.target.value; };
+
+(async () => {
+  try { S.board = (await getJSON("state")).agents || []; renderAgents(); } catch (e) { fail(e.message); }
+  renderDetails();
+  follow();
+})();
+</script>
+</body>
+</html>

@@ -90,7 +90,7 @@ func ReplyPRStillToLand(task, pr string) string {
 func ReplySubmitTaskClosed(task string) string {
 	return fmt.Sprintf("Not submitted: task %s is closed, so there is nothing for a pull request to land into. "+
 		"Your work is committed and your branch keeps it. Do not submit again — if what is on it is still "+
-		"wanted, `sindri escalate` says so; otherwise run `sindri` for new work.", task)
+		"wanted, `sindri escalate` says so; otherwise wait — the hub hands you the next work.", task)
 }
 
 // ReplyNotWorking guards a work verb run in a phase it doesn't apply to. It must name the ACTUAL
@@ -98,7 +98,7 @@ func ReplySubmitTaskClosed(task string) string {
 func ReplyNotWorking(verb, phase, task string) string {
 	switch {
 	case task == "" || phase == "idle":
-		return fmt.Sprintf("Nothing to %s — you have no task. Run `sindri` to pick one up.", verb)
+		return fmt.Sprintf("Nothing to %s — you have no task. The hub hands you one when there is work.", verb)
 	case phase == "submitted":
 		return fmt.Sprintf("Can't %s %s — its PR is under review. Wait for the verdict.", verb, task)
 	case phase == "resolving":
@@ -106,7 +106,7 @@ func ReplyNotWorking(verb, phase, task string) string {
 	case phase == "gating":
 		return fmt.Sprintf("Can't %s %s — its quality gate is queued. Wait for the result.", verb, task)
 	}
-	return fmt.Sprintf("Can't %s %s from phase %q. Run `sindri` for your directive.", verb, task, phase)
+	return fmt.Sprintf("Can't %s %s from phase %q — wait; the hub moves you on and says so.", verb, task, phase)
 }
 
 // ReplyContributed confirms an interim contribution is recorded and gated on the
@@ -184,8 +184,10 @@ func ReplyResolveDirty(state string, inContainer bool) string {
 		return dirty + "Your PR is under review — leave them and wait for the verdict. Note them with `sindri log \"<note>\"`."
 	case "gating":
 		return dirty + "Your quality gate is queued — leave them and wait for the result. Note them with `sindri log \"<note>\"`."
+	case "resolving":
+		return dirty + "Fix the <<<<<<< markers in /workspace to the intended result, then call `sindri resolve`."
 	}
-	return dirty + "Run `sindri` for your directive."
+	return dirty + "Leave them and wait; the hub says when there is something to do with them."
 }
 
 // ReplyResolveConflicts answers `resolve` when conflicts remain to edit.
@@ -208,7 +210,7 @@ func ReplyAlreadyCurrent(base string) string {
 // ReplyReapplyResolved answers `resolve` once a milestone's post-merge reapply conflict is
 // cleared. Unlike ReplyResolvedClean, nothing goes back to a reviewer — the merge already landed.
 func ReplyReapplyResolved() string {
-	return "Resolved. The merge already landed, so there's nothing to resubmit — run `sindri` to carry on."
+	return "Resolved. The merge already landed, so there's nothing to resubmit — carry on with the work you hold."
 }
 
 // ReplyTaskProposed acknowledges a planner's proposed task, pending user approval. nudge is the

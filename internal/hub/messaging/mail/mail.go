@@ -9,6 +9,7 @@ package mail
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
@@ -40,10 +41,23 @@ type Deps interface {
 type Box struct {
 	store *store.Store
 	deps  Deps
+	// lastRefusal is the reason a nudge last failed to land, per agent. Held so a fault that persists
+	// is logged when it STARTS and when it CHANGES, rather than on every sweep or — as it was — never.
+	mu          sync.Mutex
+	lastRefusal map[string]string
+	// pushes counts the sends running behind written mail, so shutdown and a test can wait for them
+	// rather than racing the goroutine that carries them (-> Settle).
+	pushes sync.WaitGroup
 }
 
+// Settle waits for every push started behind written mail. The mailbox is the durable half and does
+// not need it; this is for a caller that must see what the pane was told — a test, or a shutdown.
+func (b *Box) Settle() { b.pushes.Wait() }
+
 // New builds the mailbox over the store it lives in.
-func New(st *store.Store, d Deps) *Box { return &Box{store: st, deps: d} }
+func New(st *store.Store, d Deps) *Box {
+	return &Box{store: st, deps: d, lastRefusal: map[string]string{}}
+}
 
 // qualify writes a sender as "repo/agent", which is what a message crossing repos needs to be
 // answerable — the reply path resolves the bare name again.

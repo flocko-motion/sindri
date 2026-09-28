@@ -309,6 +309,15 @@ func (m *machine[W]) begin(pass, subject string, s State[W], w W, wait bool) {
 		if err != nil {
 			m.record(Entry{Pass: pass, Subject: subject, State: s.Name, Step: StepFailed,
 				Detail: s.Action.Name, Err: err})
+		}
+		if ctx.Err() != nil {
+			return // the subject was moved out from under this action; its answer is about a state it has left
+		}
+		// An outcome moves the subject whether or not the action also reported an error: a doer that
+		// NAMED one has said where the subject belongs, and an error is the reason rather than a
+		// second answer. Dropping it parked an agent inside an acting state with no way out, retried
+		// on every poll, with nothing but the state log to say so.
+		if out.Name == "" {
 			return
 		}
 		m.record(Entry{Pass: pass, Subject: subject, State: s.Name, Step: StepOutcome, Detail: out.Name})
@@ -337,10 +346,9 @@ func (m *machine[W]) landed(pass, subject string, s State[W], out Outcome) {
 // being left is cancelled first: whatever it was doing is no longer what the subject is here for.
 func (m *machine[W]) move(pass, subject string, from State[W], t Transition[W]) {
 	if t.To == Stay {
-		// Something worth acting on that moves nobody. Recorded, so the prod that fired is on the
-		// agent's account, and left where it was.
-		m.record(Entry{Pass: pass, Subject: subject, State: from.Name, Step: StepMoved,
-			Detail: t.On.EventName() + " -> (stays): " + t.Why})
+		// Nothing moved, so nothing is recorded as a move. The ACTION that fired already accounts for
+		// itself (-> begin's started/outcome pair), and a "moved -> (stays)" row on top of it was a
+		// non-event filed under the one word a reader scans this log for.
 		return
 	}
 	m.cancel(subject, pass, "leaving "+from.Name+": "+t.Why)

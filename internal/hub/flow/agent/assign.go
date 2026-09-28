@@ -10,16 +10,17 @@ import (
 	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
-// TierPrefers builds nextUp's tiebreak for one agent: a task whose tier's model matches what it is
-// currently running, so a tie on priority is resolved toward avoiding a model change. "" for agent
-// (a hypothetical role, no one specific to avoid a change for) answers with no preference at all.
-func (a *Act) TierPrefers(project, agent string) func(store.Task) bool {
-	if agent == "" {
+// TierPrefers builds nextUp's tiebreak for one agent: a task whose tier dispatches to the model it
+// is already running, so a tie on priority resolves toward avoiding a switch. It takes that reading
+// rather than fetching one (-> Situation.Model), since the answer cannot change inside a sort and
+// the caller already holds it. "" for on (a hypothetical role, nobody's session to spare) answers
+// with no preference at all.
+func (a *Act) TierPrefers(on string) func(store.Task) bool {
+	if on == "" {
 		return nil
 	}
-	current := a.Harness.Observe(project, agent).Model
 	return func(t store.Task) bool {
-		want, ok := a.Deps.ModelForTier(api.TierOrDefault(t.Tier))
-		return ok && want == current
+		met, known := a.Harness.TierIs(on, api.TierOrDefault(t.Tier))
+		return known && met
 	}
 }

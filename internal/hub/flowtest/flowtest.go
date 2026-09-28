@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/idle"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	"github.com/flo-at/sindri/internal/hub/flow/topic"
 	"github.com/flo-at/sindri/internal/hub/world/situation"
@@ -321,8 +322,21 @@ func (d *Hub) ContextUsage(_, _ string) (int, int, string, bool) {
 // CurrentModel answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) CurrentModel(_, _ string) string { return d.Model }
 
+// defaultTierModels mirrors the wired backend's own mapping. A fixture that says nothing about
+// tiers still gets the three the hub really dispatches to, because putting a session on its work's
+// model is a STEP of every claim now rather than a branch a test opts into.
+var defaultTierModels = map[string]string{
+	"junior": "claude-haiku-4-5",
+	"mid":    "claude-sonnet-5",
+	"senior": "claude-opus-5",
+}
+
 // ModelForTier answers as a hub would, recording the ask where a test can read it.
 func (d *Hub) ModelForTier(tier string) (string, bool) {
+	if d.TierModels == nil {
+		m, ok := defaultTierModels[tier]
+		return m, ok
+	}
 	m, ok := d.TierModels[tier]
 	return m, ok
 }
@@ -338,6 +352,35 @@ func (d *Hub) ModelMatches(want, detected string) bool {
 func (d *Hub) SetModel(_ context.Context, _, name, model string) error {
 	d.ModelSet = append(d.ModelSet, name+"="+model)
 	return d.SetModelErr
+}
+
+// TierIs joins the fake's two halves the way the real harness does, so a test that sets TierModels
+// reads the answer the hub would give rather than one this double invented.
+func (d *Hub) TierIs(on, tier string) (met, known bool) {
+	want, ok := d.ModelForTier(tier)
+	if !ok {
+		return false, false
+	}
+	return d.ModelMatches(want, on), true
+}
+
+// SetTier puts the session on the tier's model as the real harness does: nothing happens when it is
+// already there, so ModelSet reads as the switches that actually landed. A fixture that says nothing
+// about what its session runs (Model "") is making no case about models and gets no switch. An
+// unknown tier is refused, which is what the real one does rather than run the work on whatever the
+// session already held.
+func (d *Hub) SetTier(ctx context.Context, project, name, tier string) error {
+	if d.Model == "" {
+		return nil
+	}
+	want, known := d.ModelForTier(tier)
+	if !known {
+		return fmt.Errorf("no model is mapped to tier %q", tier)
+	}
+	if d.ModelMatches(want, d.Model) {
+		return nil
+	}
+	return d.SetModel(ctx, project, name, want)
 }
 
 // HoldsNothing answers as a hub would, recording the ask where a test can read it.
@@ -376,7 +419,7 @@ func Core(t *testing.T, d *Hub) (*core.Core, *store.ProjectStore) {
 	}
 	c := &core.Core{
 		Store: st, Deps: d, Harness: d,
-		Sit:      situation.NewGatherer(st, d),
+		Sit:      situation.NewGatherer(st, d, idle.Rule),
 		Lifetime: t.Context(),
 		Mail:     mail.New(st, d),
 		Flow:     d,
@@ -390,7 +433,7 @@ func Core(t *testing.T, d *Hub) (*core.Core, *store.ProjectStore) {
 func Over(st *store.Store, d *Hub) *core.Core {
 	return &core.Core{
 		Store: st, Deps: d, Harness: d,
-		Sit:      situation.NewGatherer(st, d),
+		Sit:      situation.NewGatherer(st, d, idle.Rule),
 		Lifetime: context.Background(),
 		Mail:     mail.New(st, d),
 		Flow:     d,

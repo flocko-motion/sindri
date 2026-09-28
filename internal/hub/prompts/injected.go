@@ -44,7 +44,7 @@ const MsgUnretired = "[hub] You're back in service — the user has un-retired y
 func MsgStalled(task string, idleFor time.Duration) string {
 	return fmt.Sprintf("[hub] You still hold %s and have been idle for %s. Two ways out and no third: "+
 		"finish it, or `sindri escalate \"<what needs deciding>\"` where nothing at all can go on "+
-		"without the user. Run `sindri` for your directive and get back on it.",
+		"without the user.",
 		task, idleFor.Round(time.Minute))
 }
 
@@ -90,14 +90,22 @@ func MsgTaskGainedChild(parent, child string, promoted bool) string {
 	}
 	return fmt.Sprintf("[hub] %s gained a child, %s, so what you hold is now a FEATURE rather than a "+
 		"single task — same branch, nothing of yours lost. You take the new work on too, and it goes "+
-		"up as ONE pull request covering the whole of it. Run `sindri` for the subtask to work, "+
-		"`sindri checkpoint \"<summary>\"` to end each one, and `sindri submit \"<summary>\"` only "+
+		"up as ONE pull request covering the whole of it. The hub hands you each subtask in its turn; "+
+		"`sindri checkpoint \"<summary>\"` ends one, and `sindri submit \"<summary>\"` goes up only "+
 		"when none are left. Read the new work first: `sindri task %s`.", parent, child, child)
 }
 
 // MsgTaskCancelled: the task was closed under the worker, and the hub already reset the worktree.
 func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when it hands you your next task.", id)
+}
+
+// MsgTaskUnassigned: a human took the task back and put it on the backlog. Says the work still
+// exists, unlike a cancellation — somebody else may pick it up, so "stop" here means stop, not undo.
+func MsgTaskUnassigned(id string) string {
+	return fmt.Sprintf("[hub] Task %s was taken back by a human and returned to the backlog — stop working on "+
+		"it. It is not cancelled: it may be handed to somebody else. Don't clean up your workspace; the sindri "+
+		"hub will reset it for you when it hands you your next task.", id)
 }
 
 // MsgSubmitTaskClosed tells an author its submission found no task to land into. A fact about the
@@ -207,7 +215,7 @@ func ReplyNoSelfVerdict(prID, verb string) string {
 
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the
 // agent's actual situation is rather than reporting a success that did not happen.
-const ReplyNothingToRevoke = "Nothing to withdraw — you have no pull request out. Run `sindri` for your current directive."
+const ReplyNothingToRevoke = "Nothing to withdraw — you have no pull request out."
 
 // ReplyRevoked confirms a withdrawal and says where it leaves the agent: back on the same branch,
 // with the work it had already submitted still on it.

@@ -54,6 +54,9 @@ var declaredRuntimeQueriers = map[string]string{
 	// `agent stats`: an explicit, user-requested snapshot, never a per-render board probe. Scoped to
 	// the function alone — state.go's board read (State) must carry none of these (-> boardread_test.go).
 	"internal/hub/state.go#AllStats": "AllStats — the explicit `agent stats` diagnostic",
+	// `sindri coauthor` checks the one pod it is about to attach to: the watchdog holds a dead pod
+	// "up" for downStrikes sweeps, and an exec into it fails where a relaunch would repair it.
+	"internal/ui/cli/coauthor.go#podRunning": "checked immediately before attaching, to relaunch a pod the board still reads live",
 }
 
 // agentProbeMethods are agent.Service's own liveness/clients probes — a container exec apiece, and
@@ -72,17 +75,17 @@ var declaredAgentProbers = map[string]string{
 	"internal/hub/harness/runtime.go": "the probe mechanism itself — these methods call each other here",
 	"internal/hub/harness/lifecycle.go": "the launch-wait loop — a bounded one-shot poll for a pod it " +
 		"just started, not a tick",
-	// SetModel acts on the one agent making (or receiving) the request — the assignment
-	// gate and an explicit human model change, neither a sweep over the roster.
+	// chooseModel acts on the one agent making (or receiving) the request — a preparation step for
+	// work already selected, or an explicit human model change, neither a sweep over the roster. The
+	// reading decides whether the session has to be told at all, so it is part of the change.
 
-	"internal/hub/harness/model.go#SetModel": "checked immediately before an explicit model change",
+	"internal/hub/harness/model.go#chooseModel": "checked immediately before an explicit model change",
 	// The fleet.Deps/agent.Deps seam itself: AgentAlive here IS the pass-through
 	// fleet.Deps.AgentAlive is documented to be, not a caller of it.
 	"internal/hub/wiring.go": "the fleet.Deps/agent.Deps seam — AgentAlive here is the wiring, not a caller",
 	// Each below acts on ONE named agent a specific request already identified — never a roster sweep
 	// (-> fleet.Deps.AgentAlive's own doc: "for a caller needing the answer as of now, never a tick").
 	"internal/hub/workflow/planner.go": "a plan assignment / an edit note, each to the one agent named",
-	"internal/hub/workflow/task.go":    "UnassignTask, checked against the one agent holding the task",
 	"internal/hub/workflow/scrap.go":   "ScrapPR, checked against the one reviewer holding the review",
 	// Explicit, user-requested diagnostics: `agent info`'s HTTP endpoints, the CLI command itself, and
 	// the TUI's detail-view fetch — each fired once per invocation, never on a tick or a render.

@@ -42,6 +42,26 @@ type Observation struct {
 // Seen reports whether anything has looked at this agent yet.
 func (o Observation) Seen() bool { return !o.TakenAt.IsZero() }
 
+// ModelInUse is what this session is ACTUALLY running: the model detected off its live transcript
+// while the pod is up, and the recorded choice only when nothing live is there to disagree. The one
+// reading anything decides a model on.
+//
+// A choice recorded and never injected is not a model a session runs. Reading it as one left a
+// worker retiering every twelve seconds for four days: each switch reported success because the
+// record already agreed, and the session it never reached went on answering as the old model.
+func (o Observation) ModelInUse(recorded string) string {
+	return ModelInUse(recorded, o.Model, o.Up)
+}
+
+// ModelInUse is that same choice for a caller holding the two readings loose rather than as an
+// observation — the probe path, which takes them itself.
+func ModelInUse(recorded, detected string, up bool) string {
+	if up && detected != "" {
+		return detected
+	}
+	return recorded
+}
+
 // AtPrompt reports the session sitting at an empty prompt. An observation about the SCREEN: whether
 // that means the agent is idle — free to be handed work — depends on what it holds, and is the
 // orchestrator's to say.

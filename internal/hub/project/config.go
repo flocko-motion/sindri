@@ -1,8 +1,8 @@
 // package: hub/project / config
 // type:    logic (what a repo says about itself)
 // job:     load a registered repo's .sindri/config.yaml and answer what the hub acts on — the
-// architecture-doc path an agent's brief points at, the quality gate a submit needs, and the
-// startup advice about a repo that has named neither.
+// architecture-doc path an agent's brief points at, the quality gate a submit needs, the branch
+// they all work against, and the startup advice about a repo that has named none of them.
 // limits:  reading and reporting. Validation is internal/config's, and containerfile and
 // review_prompt are read at their own call sites.
 package project
@@ -14,6 +14,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/world/reference"
 )
 
 // DocState is a repo's architecture-doc situation; it crosses the wire, so it is
@@ -83,6 +84,7 @@ func (s *Service) DocState(root string) DocState {
 	}
 	st := DocState{Doc: cfg.Architecture, Set: cfg.ArchitectureSet}
 	st.Gate, st.GateOK, st.GateAdvice = gateState(root, cfg.Verify)
+	st.Reference, st.ReferencePinned, st.ReferenceAdvice = referenceState(root)
 	if _, serr := os.Stat(filepath.Join(root, st.Doc)); serr == nil {
 		st.Readable = true
 		return st
@@ -102,4 +104,16 @@ func gateState(root, verify string) (gate string, ok bool, advice string) {
 	// Declared is configured. Statting it as a repo-relative file called `make check` a missing
 	// script: the gate is a COMMAND, and only running it answers whether it works (-> repo.Gate).
 	return verify, true, ""
+}
+
+// referenceState reports the branch agents work against, asking the same resolver the claim and
+// submit paths ask (-> world/reference), so the pane can never name a branch the hub won't use.
+func referenceState(root string) (branch string, pinned bool, advice string) {
+	branch, pinned, err := reference.Resolve(root)
+	if err != nil {
+		// Pinned survives the error: a `reference:` naming a branch nobody created is a different
+		// fault from a main checkout sitting on none, and only the flag tells them apart.
+		return "", pinned, err.Error()
+	}
+	return branch, pinned, ""
 }

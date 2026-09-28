@@ -100,7 +100,7 @@ func TestEscalatingHoldsTheWorkVerbsAndKeepsTheReads(t *testing.T) {
 	const q = "drop the two callers or keep both?"
 	h, _ := escalatedWorker(t, q)
 
-	for _, verb := range []string{"submit", "contribute", "next", "checkpoint"} {
+	for _, verb := range []string{"submit", "contribute", "checkpoint"} {
 		reason := blockedFor(t, h, "dvalin", verb)
 		if reason == "" {
 			t.Errorf("%s must be held back while escalated", verb)
@@ -381,10 +381,15 @@ func TestResumingAnAgentTellsIt(t *testing.T) {
 	got := unread[0].Body
 	// The question comes back with it: the agent may have been cleared or restarted since raising it,
 	// and "you may carry on" alone leaves it guessing what was settled.
-	for _, want := range []string{"one column or two?", "one column, ship it", "sindri"} {
+	for _, want := range []string{"one column or two?", "one column, ship it", "Carry on"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the notice is missing %q:\n%s", want, got)
 		}
+	}
+	// The notice IS the dispatch — the agent holds its work and has just been unblocked, so sending
+	// it to ask what to do would be a round trip for what these words already say.
+	if strings.Contains(got, "`sindri`") {
+		t.Errorf("the notice sends the agent to ask for what it was just told:\n%s", got)
 	}
 	if unread[0].Sender != api.SenderUser {
 		t.Errorf("sender = %q; the user cleared it, and provenance is stated", unread[0].Sender)

@@ -163,28 +163,28 @@ func (a *Act) HealSplit(project, name string) bool {
 	// The PR goes with the feature. Left standing it binds the agent to a tree it no longer holds:
 	// AwaitingPR treats an unsettled PR as held work, so the directive kept sending sudri back to
 	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.
-	a.settleReleasedPR(ps, project, name, st.Container, held)
+	a.settleReleasedPR(ps, project, name, st.Container, "its feature went to "+held+", who is working inside it")
 	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
 	_ = a.Harness.Say(project, name, prompts.MsgHierarchyTaken(st.Container, held), mail.MailAndPush)
 	return true
 }
 
-// settleReleasedPR closes an agent's unsettled PR against a feature taken off it — scrapped, since
-// nobody is going to land a branch for a tree somebody else now owns. The branch is untouched.
-func (a *Act) settleReleasedPR(ps *store.ProjectStore, project, name, container, held string) {
+// settleReleasedPR scraps an agent's unsettled PR against work taken off it, telling why. Left
+// standing it binds the agent to what it no longer holds: AwaitingPR reads one as held work.
+func (a *Act) settleReleasedPR(ps *store.ProjectStore, project, name, held, why string) {
 	prs, err := ps.PRs()
 	if err != nil {
 		return
 	}
 	for _, pr := range prs {
-		if pr.Agent != name || pr.Task != container || !api.PROpen(pr) {
+		if pr.Agent != name || pr.Task != held || !api.PROpen(pr) {
 			continue
 		}
-		pr.Status, pr.Feedback = "scrapped", "the feature went to "+held+", who is working inside it"
+		pr.Status, pr.Feedback = "scrapped", why
 		if perr := ps.PutPR(pr); perr != nil {
 			continue
 		}
-		a.pr().ReleaseReviewers(project, pr.ID, "its feature changed hands")
-		_ = ps.LogPR(pr.ID, "scrapped", "released with "+container)
+		a.pr().ReleaseReviewers(project, pr.ID, why)
+		_ = ps.LogPR(pr.ID, "scrapped", "released with "+held)
 	}
 }

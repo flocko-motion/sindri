@@ -131,8 +131,28 @@ func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	defer f.mu.Unlock()
 	return *f.tokens, 1_000_000, "claude-opus-5", true
 }
-func (f fakeAgent) ModelWindow(string) (int, bool)     { return 0, false }    // not this test's concern
-func (f fakeAgent) ModelForTier(string) (string, bool) { return "", false }   // not this test's concern
+
+// The three tiers and their windows, as the real backend answers them: putting a session on its
+// work's model is a STEP of every claim now, so a backend that recognised no tier would fail the
+// preparation of every fixture rather than stay out of its way.
+func (f fakeAgent) ModelWindow(model string) (int, bool) {
+	_, known := fakeTierModels[model]
+	return 1_000_000, known
+}
+
+func (f fakeAgent) ModelForTier(tier string) (string, bool) {
+	for m, t := range fakeTierModels {
+		if t == tier {
+			return m, true
+		}
+	}
+	return "", false
+}
+
+var fakeTierModels = map[string]string{
+	"claude-haiku-4-5": "junior", "claude-sonnet-5": "mid", "claude-opus-5": "senior",
+}
+
 func (f fakeAgent) ModelMatches(want, got string) bool { return want == got } // not this test's concern
 func (f fakeAgent) ToolRunning(string) bool            { return false }       // not this test's concern
 func (f fakeAgent) InputPending(string) bool           { return false }       // nobody is typing in these fixtures
@@ -165,7 +185,9 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: ".worktrees/dvalin"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "waiting work", Status: "open", Priority: "P1"}); err != nil {
+	// Rated for the model this fake session already runs, so the preparation's model step is the
+	// no-op it should be here and this fixture stays a case about CLEARING alone.
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "waiting work", Status: "open", Priority: "P1", Tier: "senior"}); err != nil {
 		t.Fatal(err)
 	}
 	flowtest.Place(t, ps, store.AgentState{Agent: "dvalin", Phase: "idle"})

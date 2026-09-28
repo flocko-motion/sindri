@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -197,4 +198,68 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestAPushThatDoesNotLandSaysSo is the two hours this cost: thrain's pane held an unsent line, so
+// every push failed, the nudge returned false without a word, and the mail it was announcing sat
+// unread while the agent's own session reported it was doing nothing wrong.
+func TestAPushThatDoesNotLandSaysSo(t *testing.T) {
+	deps := &stubDeps{pushErr: errors.New("the pane is holding an unsent line")}
+	b, ps := idleAgentWithMail(t, deps)
+
+	if b.NudgeMailWaiting("proj", "dvalin") {
+		t.Fatal("a push that did not land is not an announcement")
+	}
+
+	events, err := ps.Events("dvalin", 10)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var found string
+	for _, e := range events {
+		if e.Type == "nudge-failed" {
+			found = e.Payload
+		}
+	}
+	if found == "" {
+		t.Fatal("a refusal must leave a reason behind — this one was the whole of the fault")
+	}
+	if !contains(found, "unsent line") {
+		t.Errorf("the reason must carry what the harness said, got %q", found)
+	}
+}
+
+// TestAStandingFaultIsSaidOnceNotEverySweep: the sweep retries every twenty seconds, so a condition
+// that persists would bury itself in copies. Said when it starts, and again when it changes.
+func TestAStandingFaultIsSaidOnceNotEverySweep(t *testing.T) {
+	deps := &stubDeps{pushErr: errors.New("the pane is holding an unsent line")}
+	b, ps := idleAgentWithMail(t, deps)
+
+	b.NudgeMailWaiting("proj", "dvalin")
+	b.NudgeMailWaiting("proj", "dvalin")
+	b.NudgeMailWaiting("proj", "dvalin")
+
+	events, _ := ps.Events("dvalin", 20)
+	n := 0
+	for _, e := range events {
+		if e.Type == "nudge-failed" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("logged %d times across three sweeps, want 1", n)
+	}
+
+	deps.pushErr = errors.New("the session is signed out")
+	b.NudgeMailWaiting("proj", "dvalin")
+	events, _ = ps.Events("dvalin", 20)
+	n = 0
+	for _, e := range events {
+		if e.Type == "nudge-failed" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("a fault that CHANGED must be said again: logged %d, want 2", n)
+	}
 }

@@ -162,19 +162,23 @@ func hasNav(s string) bool {
 // boxChrome is what Claude draws AROUND its input box, so a chevron followed by only this is empty.
 const boxChrome = " \t│╭╮╰╯─"
 
-// InputPending reports unsent text in the input box, which send-keys would APPEND to and submit.
-// The LAST chevron is the box; a form's options carry the same one, and answering one is the point.
+// InputPending reports unsent text in the input box, which send-keys would APPEND to and submit. The
+// LAST chevron is the box, and the screen comes WITH its escapes: an empty box carries a faint hint,
+// and that faintness is the only thing telling it from typing.
 func (c Claude) InputPending(screen string) bool {
-	if c.DetectState(screen) == agent.Blocked {
+	if c.DetectState(agent.Plain(screen)) == agent.Blocked {
 		return false
 	}
 	lines := strings.Split(paneTail(screen, promptTail), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		if !promptLine.MatchString(lines[i]) {
+		if !promptLine.MatchString(agent.Plain(lines[i])) {
 			continue
 		}
-		_, after, _ := strings.Cut(lines[i], "❯")
+		_, after, _ := strings.Cut(agent.Plain(faint.ReplaceAllString(lines[i], "")), "❯")
 		return strings.TrimLeft(after, boxChrome) != ""
 	}
 	return false // no input box on screen at all: a shell, a transcript view, a pane mid-boot
 }
+
+// faint matches one dim run — where Claude draws its placeholder and a human never types.
+var faint = regexp.MustCompile(`\x1b\[2m[^\x1b]*(?:\x1b\[(?:0|22)m)?`)

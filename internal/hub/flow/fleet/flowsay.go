@@ -42,8 +42,8 @@ func (e *Engine) speak(w flow.World, s flow.State) (string, error) {
 		return prompts.DirNoReviews, nil
 	case says.Preparing:
 		return prompts.DirBusy(s.Name), nil
-	case says.Mail:
-		return prompts.DirMailWaiting, nil
+	case says.NotDone:
+		return prompts.DirNotDone, nil
 	case says.Stalled:
 		return prompts.DirStalled(w.Task, w.StillFor), nil
 	case says.FeatureDone:

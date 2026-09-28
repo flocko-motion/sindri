@@ -18,15 +18,17 @@ const Stalled = "worker/stalled"
 
 // stalled: it holds work and has stopped doing it.
 var stalled = flow.State{
-	Name:   Stalled,
-	Title:  "Stalled over its work",
-	Action: act.Prod,
+	WhenIdle: flow.Nudge, // it holds work and has stopped — the prod is what this state is FOR
+	Name:     Stalled,
+	Title:    "Stalled over its work",
+	Action:   act.Prod,
 	About: "The worker holds work and its screen has stopped changing past the dwell — a pane frozen " +
 		"mid-turn keeps SAYING it is working for ever, so stillness rather than the word is the " +
 		"evidence. It is PRODDED, not relieved: a stall is an agent that needs waking, not one that " +
 		"has failed, and the work stays its own.",
 	Says: says.Stalled,
 	Events: flow.Events{
+		{cond.HoldsNothing, Idle, "it holds neither a task nor a feature, so it is not at work"},
 		{act.Done, flow.Stay, "prodded; still where it was"},
 		{act.Nothing, flow.Stay, "already prodded for this spell"},
 		{cond.Moving, Working, "the screen is changing again"},

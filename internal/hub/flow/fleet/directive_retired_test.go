@@ -12,7 +12,7 @@ import (
 // route into a claim on the worker's own map — so it holds whichever way the work would have
 // arrived: the agent asking, or the hub deciding on its own beat.
 func TestRetiredWorkerIsHandedNothing(t *testing.T) {
-	e, ps, c := retireFixture(t)
+	e, ps, _ := retireFixture(t)
 	flowtest.Retire(t, ps, "dvalin")
 
 	e.Look("proj", "dvalin")
@@ -25,14 +25,6 @@ func TestRetiredWorkerIsHandedNothing(t *testing.T) {
 		t.Errorf("the task should stay open for another worker, got %q", task.Status)
 	}
 	// And it is TOLD, rather than left blocking on a queue it is no longer served from.
-	var out strings.Builder
-	if code, err := e.CmdNext(c, nil, &out); err != nil || code != 0 {
-		t.Fatalf("CmdNext: code=%d err=%v", code, err)
-	}
-	if !strings.Contains(out.String(), "retired") {
-		t.Errorf("a retired worker should be told why it gets nothing: %q", out.String())
-	}
-	// The blocking path answers at once too — waiting forever is what "no tasks" would have meant.
 	d, err := e.AgentDirective(context.Background(), "proj", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
@@ -45,14 +37,14 @@ func TestRetiredWorkerIsHandedNothing(t *testing.T) {
 // TestUnretiredWorkerIsServedAgain: winding down is reversible, and the refusal goes with the flag —
 // nothing about the agent or the backlog was consumed while it was set.
 func TestUnretiredWorkerIsServedAgain(t *testing.T) {
-	e, ps, c := retireFixture(t)
+	e, ps, _ := retireFixture(t)
 	flowtest.Retire(t, ps, "dvalin")
-	var out strings.Builder
-	if _, err := e.CmdNext(c, nil, &out); err != nil {
+	d, err := e.AgentDirective(context.Background(), "proj", "dvalin")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "retired") {
-		t.Fatalf("setup: expected the retirement refusal, got %q", out.String())
+	if !strings.Contains(d, "retired") {
+		t.Fatalf("setup: expected the retirement refusal, got %q", d)
 	}
 
 	ag, _, _ := ps.GetAgent("dvalin")
@@ -60,11 +52,10 @@ func TestUnretiredWorkerIsServedAgain(t *testing.T) {
 	if err := ps.PutAgent(ag); err != nil {
 		t.Fatal(err)
 	}
-	out.Reset()
-	if _, err := e.CmdNext(c, nil, &out); err != nil {
+	if d, err = e.AgentDirective(context.Background(), "proj", "dvalin"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "retired") {
-		t.Errorf("back in service, it must not still be refused: %q", out.String())
+	if strings.Contains(d, "retired") {
+		t.Errorf("back in service, it must not still be refused: %q", d)
 	}
 }

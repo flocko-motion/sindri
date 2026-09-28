@@ -52,6 +52,11 @@ type Situation struct {
 	// the display has stood still, measured when this was gathered so every rule reads one figure.
 	observe.Observation
 	StillFor time.Duration
+	// Model is what this agent's session is actually running, joining the observation's raw reading
+	// with the roster's recorded choice (-> observe.Observation.ModelInUse). It SHADOWS the embedded
+	// reading deliberately: every rule about an agent's model reads the joined one, and the raw
+	// transcript figure stays reachable as Observation.Model for whoever wants the evidence itself.
+	Model string
 
 	// The roster row — what a human has decided about this agent.
 	Role       string
@@ -86,7 +91,13 @@ type Situation struct {
 	WaitingOnRun  bool // queued behind the fleet's shared run gate, not idling on its own account
 
 	Pool Pool
+
+	// idleRule says what a still screen means here; handed in, since the flows import this package.
+	idleRule IdleRule
 }
+
+// IdleRule says, per phase, whether doing nothing is a fault (-> machine.State.WhenIdle).
+type IdleRule func(phase string) (after time.Duration, nudge bool)
 
 // Gatherer assembles situations. One per hub, holding the store and the observer so a caller passes
 // nothing but an identity.
@@ -94,11 +105,12 @@ type Gatherer struct {
 	store *store.Store
 	obs   Observer
 	clock func() time.Time // nil = time.Now; a test pins it to measure a dwell exactly
+	idle  IdleRule
 }
 
-// NewGatherer builds one over the hub's store and its observer.
-func NewGatherer(st *store.Store, obs Observer) *Gatherer {
-	return &Gatherer{store: st, obs: obs}
+// NewGatherer builds one over the hub's store, its observer, and the flows' idle rule.
+func NewGatherer(st *store.Store, obs Observer, idle IdleRule) *Gatherer {
+	return &Gatherer{store: st, obs: obs, idle: idle}
 }
 
 // now is the clock every dwell in one gather is measured against, held so a test can pin it.
@@ -171,11 +183,13 @@ func (g *Gatherer) in(project, name string, pool Pool) (Situation, error) {
 	obs := g.obs.Observe(project, name)
 	s := Situation{
 		Project: project, Name: name, Observation: obs, StillFor: obs.StillFor(g.now()),
-		Role: a.Role, Retired: a.Retired, ClearArmed: a.ClearArmed, Stopped: a.Stopped,
+		Model: obs.ModelInUse(a.Model),
+		Role:  a.Role, Retired: a.Retired, ClearArmed: a.ClearArmed, Stopped: a.Stopped,
 		StartAsked: a.StartAsked, StopAsked: a.StopAsked,
 		Phase: st.Phase, InPhase: since(st.PhaseSince, g.now()), Task: st.Task,
 		Container: st.Container, Branch: st.Branch,
 		Escalation: st.Escalation, LastNudge: st.LastNudge, Pool: pool,
+		idleRule: g.idle,
 	}
 	if !ok {
 		return s, nil // not on the roster: an identity answer, and every rule below reads as "nothing"

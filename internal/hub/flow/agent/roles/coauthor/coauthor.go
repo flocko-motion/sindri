@@ -15,8 +15,9 @@ import (
 const Collab = "coauthor/collab"
 
 var collab = flow.State{
-	Name:  Collab,
-	Title: "Working with the user",
+	WhenIdle: flow.LetItRest, // the user types here, and silence between turns is the ordinary case
+	Name:     Collab,
+	Title:    "Working with the user",
 	About: "A coauthor works directly with the user in the shared checkout. There is no task queue " +
 		"behind it and nothing the hub is waiting for — it is never empty-handed, because its " +
 		"session is the seat somebody is sitting in. It TELLS NOTHING on arrival: six lifecycle " +
@@ -26,7 +27,6 @@ var collab = flow.State{
 	Says: says.Coauthor,
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
-		{cond.MailWaiting, Mail, "it has mail it has not read"},
 		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear"},
 		{cond.StartAsked, Launching, "a human asked for this pod"},
@@ -49,7 +49,7 @@ var collab = flow.State{
 }
 
 // Flow is the coauthor's whole map.
-var Flow = []flow.State{collab, mail, launching, stopping, clearing, escalated, retired}
+var Flow = []flow.State{collab, launching, stopping, clearing, escalated, retired}
 
 // Start is where a coauthor with no state stored begins.
 const Start = Collab

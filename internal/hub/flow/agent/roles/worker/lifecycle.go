@@ -17,7 +17,7 @@ const (
 	Launching = "worker" + lifecycle.LaunchingIn
 	Stopping  = "worker" + lifecycle.StoppingIn
 	Clearing  = "worker" + lifecycle.ClearingIn
-	Mail      = "worker" + lifecycle.MailIn
+	NotDone   = "worker" + lifecycle.NotDoneIn
 	Escalated = "worker" + lifecycle.EscalatedIn
 	Retired   = "worker" + lifecycle.RetiredIn
 )
@@ -29,10 +29,13 @@ var (
 	stopping  = lifecycle.Stopping(Stopping, Idle)
 )
 
-// clearing leads into the hand-over it was taken for, and back to idle when it could not happen.
-var clearing = lifecycle.Clearing(Clearing, Assigning, Idle)
+// clearing is the HUMAN's armed clear and nothing else — the clear that prepares a session for work
+// is a step of the claim chain (-> session.go's preparing). Both ends rest at Idle, which re-decides:
+// a feature holder is sent back to its subtask loop from there, exactly as the pod states are.
+var clearing = lifecycle.Clearing(Clearing, Idle, Idle)
 
-var mail = lifecycle.Mail(Mail, Idle, flow.Offers{
+// notDone: holding nothing, and not available for anything, because its mail is unread.
+var notDone = lifecycle.NotDone(NotDone, Idle, flow.Offers{
 	{Verb: verb.Task, Why: "read the backlog"},
 	{Verb: verb.Escalate, Why: "stop on a question"},
 })

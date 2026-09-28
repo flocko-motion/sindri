@@ -17,6 +17,7 @@ type stubDeps struct {
 	up        bool
 	noWake    bool
 	pushFails bool     // up, but the keystrokes do not land — a session that will not take them
+	pushErr   error    // the reason it will not take them, for a test about what gets reported
 	pushed    []string // who a push was typed at
 	texts     []string // what each push said
 	notices   int
@@ -24,6 +25,9 @@ type stubDeps struct {
 }
 
 func (d *stubDeps) Push(project, name, text string) error {
+	if d.pushErr != nil {
+		return d.pushErr
+	}
 	if !d.up || d.pushFails {
 		return errNoSuchAnywhere(name)
 	}

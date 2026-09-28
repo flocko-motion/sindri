@@ -11,6 +11,7 @@ package task
 import (
 	"fmt"
 	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/prompts"
 	ownedpkg "github.com/flo-at/sindri/internal/hub/world/owned"
 	"path/filepath"
@@ -109,8 +110,10 @@ func (a *Act) CreateTask(project string, s TaskSpec) (string, error) {
 	return id, nil
 }
 
-// UnassignTask releases a task in a project back to the backlog and clears it from
-// whatever agent held it. Refused if that agent is currently alive and working.
+// UnassignTask releases a task in a project back to the backlog and clears it from whatever agent
+// held it. A live holder is taken off it too: the human asked for the task back, and a refusal that
+// hands them a chore ("stop or delete it first") leaves the backlog reading a lie until they do it.
+// So this does the necessary work instead — ESC, tell the agent, scrap the PR it can no longer land.
 func (a *Act) UnassignTask(project, id string) error {
 	ps := a.Store.For(project)
 	roster, _ := ps.Roster()
@@ -119,9 +122,6 @@ func (a *Act) UnassignTask(project, id string) error {
 		if st.Task != id {
 			continue
 		}
-		if a.Harness.Probe(project, ag.Name).Up {
-			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", ag.Name, id)
-		}
 		// A container holder rests back onto its FEATURE, not fully idle: unassigning one subtask
 		// does not mean the feature it lives under is done (sd-5ef393 — the same shape as
 		// FinishTask's own fix).
@@ -129,6 +129,14 @@ func (a *Act) UnassignTask(project, id string) error {
 		_ = ps.SetHolding(ag.Name, "", branch, held, store.ReasonFreed, "unassigned: "+id)
 		_ = ps.Log(ag.Name, "unassign", id)
 		a.announceHolding(project, ag.Name)
+		a.settleReleasedPR(ps, project, ag.Name, id, "its task was unassigned and is back on the backlog")
+		// ESC first, so the notice lands on an idle prompt rather than queuing behind the work it is
+		// stopping. Only the interrupt needs the agent up; the delivery is made either way, since
+		// mail is precisely what reaches one that is down (-> pr.FinishTask, the same shape).
+		if a.Harness.Observe(project, ag.Name).Up {
+			_ = a.Harness.Interrupt(project, ag.Name)
+		}
+		_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskUnassigned(id), mail.MailAndPush)
 	}
 	if err := a.pr().SetStatus(project, id, "open"); err != nil {
 		return err
@@ -259,41 +267,89 @@ func (a *Act) CommentBudget(project string) (aim, ceiling float64) {
 	return lint.AimFor(ceiling), ceiling
 }
 
-// ClaimLeaf claims one standalone task for a worker, branching on it.
-func (a *Act) ClaimLeaf(project, worker string, t store.Task) (string, bool, error) {
+// Brief is what a worker is told about the work it now holds — a subtask of a feature, a feature
+// with nothing left open under it, or a standalone task on its own branch. Rendered from the row at
+// HAND-OVER time rather than by whatever claimed the work, so the agent hears the same words
+// however it came to hold them, and a claim carries no undelivered message.
+func (a *Act) Brief(project, worker string, aim, ceiling float64) (string, error) {
+	ps := a.Store.For(project)
+	st, err := ps.GetState(worker)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case st.Container != "" && st.Task != "":
+		return prompts.DirContainerWorking(st.Container, st.Task, aim, ceiling), nil
+	case st.Container != "":
+		return prompts.DirContainerDone(st.Container), nil
+	case st.Task == "":
+		return "", fmt.Errorf("worker %q holds nothing, so there is nothing to hand over", worker)
+	}
+	t, ok, err := ps.GetTask(st.Task)
+	if err != nil || !ok {
+		return "", fmt.Errorf("worker %q holds task %q, which is not in the backlog: %v", worker, st.Task, err)
+	}
+	return prompts.DirClaimed(st.Task, t.Title, st.Branch, a.Deps.ArchitectureDoc(project)), nil
+}
+
+// HeldTier is the rating of the unit a worker holds — what the session is prepared FOR, read after
+// the claim rather than from the backlog it came out of, since by then it is no longer waiting.
+func (a *Act) HeldTier(project, worker string) (string, error) {
+	ps := a.Store.For(project)
+	st, err := ps.GetState(worker)
+	if err != nil {
+		return "", err
+	}
+	held := st.Task
+	if held == "" {
+		held = st.Container
+	}
+	if held == "" {
+		return "", fmt.Errorf("worker %q holds nothing, so no rating says which model it wants", worker)
+	}
+	t, ok, err := ps.GetTask(held)
+	if err != nil || !ok {
+		return "", fmt.Errorf("worker %q holds %q, which is not in the backlog: %v", worker, held, err)
+	}
+	return api.TierOrDefault(t.Tier), nil
+}
+
+// ClaimLeaf claims one standalone task for a worker, branching on it. It says nothing to the agent:
+// the hand-over does that, once the session behind the claim has been prepared (-> Brief).
+func (a *Act) ClaimLeaf(project, worker string, t store.Task) (bool, error) {
 	ps := a.Store.For(project)
 	root := a.Deps.ProjectRoot(project)
 	base, err := a.BaseBranch(root)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	ag, ok, err := ps.GetAgent(worker)
 	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
+		return false, fmt.Errorf("agent %s missing: %v", worker, err)
 	}
 	wt := filepath.Join(root, ag.Workspace)
 	branch := t.ID
 	if err := a.pr().SetStatus(project, t.ID, "in_progress"); err != nil {
-		return "", false, err
+		return false, err
 	}
 	_ = a.RefreshTask(project, t.ID)
 	// Lay the new branch on a CLEAN base: leftover WIP from a cancelled task would bleed in.
 	// Reset at claim time, not at cancel — the agent may work on after the push.
 	if err := git.CheckoutDetachedClean(wt, base); err != nil {
-		return "", false, err
+		return false, err
 	}
 	if err := git.CreateBranch(wt, branch, base); err != nil {
-		return "", false, err
+		return false, err
 	}
 	// A claim is what earns the right to speak to the user, so the note grant is given here and
 	// REPLACES whatever was left (-> store.GrantNotes).
 	if err := ps.GrantNotes(worker, prompts.NotesPerClaim); err != nil {
-		return "", false, err
+		return false, err
 	}
 	if err := ps.SetHolding(worker, t.ID, branch, "", store.ReasonClaimed, "claimed "+t.ID); err != nil {
-		return "", false, err
+		return false, err
 	}
 	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)
 	a.announceHolding(project, worker)
-	return prompts.DirClaimed(t.ID, t.Title, branch, a.Deps.ArchitectureDoc(project)), true, nil
+	return true, nil
 }

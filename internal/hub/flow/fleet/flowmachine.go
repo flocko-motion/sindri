@@ -89,16 +89,17 @@ func (e *Engine) WakeRuns(t machine.Topic) {
 // the loop on (-> Reconciling).
 func (e *Engine) newFlow(lifetime context.Context, beat time.Duration) (machine.Machine[flow.World], error) {
 	return machine.New(lifetime, machine.Config[flow.World]{
-		States:   agentflow.All,
-		Start:    agentflow.StartFor("worker"),
-		Gather:   e.gatherSubject,
-		Stored:   e.storedState,
-		Move:     e.moveState,
-		Do:       e.doers(),
-		Subjects: e.subjects,
-		Default:  flow.DefaultEvery,
-		Tick:     beat,
-		Record:   passRecorder{e},
+		States:     agentflow.All,
+		Superseded: agentflow.Superseded,
+		Start:      agentflow.StartFor("worker"),
+		Gather:     e.gatherSubject,
+		Stored:     e.storedState,
+		Move:       e.moveState,
+		Do:         e.doers(),
+		Subjects:   e.subjects,
+		Default:    flow.DefaultEvery,
+		Tick:       beat,
+		Record:     passRecorder{e},
 	})
 }
 

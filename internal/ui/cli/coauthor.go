@@ -9,6 +9,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -33,7 +34,7 @@ func NewCoauthorCmd() *cobra.Command {
 			"to leave it running; run `sindri coauthor` again to reattach, or `sindri tui` in " +
 			"another terminal to add more agents.",
 		Args: cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !term.IsTerminal(int(os.Stdout.Fd())) {
 				return fmt.Errorf("sindri coauthor requires an interactive terminal")
 			}
@@ -55,10 +56,10 @@ func NewCoauthorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensureCoauthorAlive(cl, proj, name); err != nil {
+			cname := container.AgentContainer(root, name)
+			if err := ensureCoauthorAlive(cmd.Context(), cl, proj, name, cname); err != nil {
 				return err
 			}
-			cname := container.AgentContainer(root, name)
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
 			// Report the coauthor to herdr for the pairing session, same as every other
 			// attach path — a coauthor is an agent too. No-op outside a herdr pane.
@@ -96,16 +97,20 @@ func ensureCoauthor(cl *client.HTTP, proj string) (string, error) {
 // tmux session is live, so the attach lands on a running pod. The first launch
 // also builds the agent image, which can take a few minutes (Launch blocks for
 // it); a coauthor that's already running is reattached without relaunching.
-func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
+func ensureCoauthorAlive(ctx context.Context, cl *client.HTTP, proj, name, pod string) error {
 	st, err := cl.State()
 	if err != nil {
 		return err
 	}
-	// Not-yet-observed counts as needing a launch: the agent was created moments ago and the
-	// watchdog only looks every couple of seconds, so this is the ordinary state of a coauthor
-	// created by the line above. Reading it as "already running" skips the launch and attaches
-	// to a pod that was never started.
-	if api.AgentNeedsLaunch(statusOf(st, proj, name)) {
+	status := statusOf(st, proj, name)
+	running := true
+	if !api.AgentNotUp(status) {
+		running = podRunning(ctx, pod)
+	}
+	if !running {
+		fmt.Fprintf(os.Stderr, "the hub reads %s as %s, but container %s is not running — relaunching it\n", name, status, pod)
+	}
+	if coauthorNeedsLaunch(status, running) {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
 		if err := cl.Launch(name, false, false, 0, 0, os.Stderr); err != nil {
 			return err
@@ -123,6 +128,21 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 		return nil // a running phase (collab/idle/…): the session is alive
 	}
 	return fmt.Errorf("%s did not become ready in time", name)
+}
+
+// coauthorNeedsLaunch decides whether the attach must launch first. Not-yet-observed counts: a
+// coauthor created one line earlier has not been swept yet. So does a live word over a pod that is
+// not running: the watchdog holds "up" for downStrikes sweeps, so a pod that died moments ago (or
+// exited with the host) still reads live, and attaching to it fails with "container state improper".
+func coauthorNeedsLaunch(status string, podRunning bool) bool {
+	return api.AgentNeedsLaunch(status) || (!api.AgentNotUp(status) && !podRunning)
+}
+
+// podRunning asks the runtime directly, immediately before an attach: the board's word lags a death.
+func podRunning(ctx context.Context, pod string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return container.RunningContext(ctx, pod)
 }
 
 // statusOf returns the named agent's status word from a board snapshot, or "".

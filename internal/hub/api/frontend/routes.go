@@ -15,6 +15,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/api/serve"
+	"github.com/flo-at/sindri/internal/hub/harness"
 )
 
 // AgentReq is the body for POST /agents; it crosses the wire, so it is
@@ -144,6 +145,15 @@ func Handler(h Hub) http.Handler {
 		evs, err := h.StateLog(h.AgentReq(r, name), name)
 		serve.WriteJSON(w, evs, err)
 	})
+	// Starts the flow debug view's own loopback listener, which carries its reads (-> debugview).
+	mux.HandleFunc("POST /debug/serve", func(w http.ResponseWriter, r *http.Request) {
+		var req api.DebugServeReq
+		if !serve.Decode(w, r, &req) {
+			return
+		}
+		url, err := h.DebugServe(req.Port)
+		serve.WriteJSON(w, api.DebugServeResp{URL: url}, err)
+	})
 	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
 		lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
 		if lines <= 0 {
@@ -243,21 +253,37 @@ func Handler(h Hub) http.Handler {
 		w.Header().Set("Trailer", "X-Sindri-Error")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fw := serve.Flushing(w)
-		// Recorded before the launch runs, so a client that drops mid-build leaves "asked for, and not
-		// yet done" as a fact the machine reads and finishes. The launch itself stays HERE: a human
-		// watching an image build must see it, and doLaunch has nowhere to stream.
+		fail := func(err error) {
+			fmt.Fprintf(fw, "error: %v\n", err)
+			w.Header().Set("X-Sindri-Error", err.Error())
+		}
+		// The request, not the act, as with stop: the machine's launching state starts the pod, and
+		// settling the agent here answers after it has. The ask carries this caller's options into
+		// that launch and streams its output back, so an image build is still watched live.
 		project := h.AgentReq(r, req.Name)
+		ask := h.Agents().AskLaunch(project, req.Name,
+			harness.LaunchOpts{Shell: req.Shell, Debug: req.Debug, Cols: req.Cols, Lines: req.Lines}, fw)
+		defer h.Agents().Withdraw(project, req.Name, ask)
 		if err := h.AgentFlow().AskStart(project, req.Name); err != nil {
-			fmt.Fprintf(fw, "error: %v\n", err)
-			w.Header().Set("X-Sindri-Error", err.Error())
+			fail(err)
 			return
 		}
-		if err := h.Agents().Launch(serve.Detached(r), project, req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
-			fmt.Fprintf(fw, "error: %v\n", err)
-			w.Header().Set("X-Sindri-Error", err.Error())
+		h.AgentFlow().Settle(project, req.Name)
+		if ran, err := ask.Result(); ran {
+			if err != nil {
+				fail(err)
+			}
 			return
 		}
-		h.AgentFlow().AnswerPodRequest(project, req.Name) // this call was the request; nothing is left to do
+		// No launch took the request: the pod was already up, or where the agent stands does not
+		// answer a start. The second is said, and the request taken back rather than left to fire later.
+		if h.Agents().AgentAlive(serve.Detached(r), project, req.Name) {
+			fmt.Fprintf(fw, "%s is already running.\n", req.Name)
+			return
+		}
+		h.AgentFlow().AnswerPodRequest(project, req.Name)
+		fail(fmt.Errorf("%s was not started: it stands in %s, which does not answer a start",
+			req.Name, h.Fleet().Standing(project, req.Name).State))
 	})
 	mux.HandleFunc("POST /agent/rebuild", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

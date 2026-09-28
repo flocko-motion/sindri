@@ -267,6 +267,27 @@ func TestInputPendingSeesSomebodyMidSentence(t *testing.T) {
 			name:   "no input box at all",
 			screen: "$ ls\nREADME.md\n",
 		},
+		// Captured from a freshly started agent, escapes and all. An empty box is NOT empty: Claude
+		// draws a hint in it, and the only thing separating that from typing is that it is FAINT.
+		// Every case above is a hand-written plain string, so none of them could express this — and
+		// read as typing, it held every push to every new agent until a human cleared a box that had
+		// nothing in it.
+		{
+			name:   "the placeholder in an empty box is not somebody typing",
+			screen: "\x1b[37m────────\x1b[39m\n\x1b[39m❯ \x1b[2mTry \"edit <filepath> to...\"\x1b[0m\n\x1b[37m────────\x1b[39m",
+		},
+		{
+			name:   "typing, in a pane captured with its escapes",
+			screen: "\x1b[37m────────\x1b[39m\n\x1b[39m❯ restart the hub and try again\n\x1b[37m────────\x1b[39m",
+			want:   true,
+		},
+		{
+			// Typed over the hint: Claude drops the placeholder the moment a key lands, so anything
+			// left un-faint is theirs.
+			name:   "typing beside faint chrome",
+			screen: "\x1b[39m❯ \x1b[2m\x1b[0mdrop the second caller\n",
+			want:   true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := (Claude{}).InputPending(tc.screen); got != tc.want {

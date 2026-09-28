@@ -15,7 +15,6 @@ const (
 	Launching = "coauthor" + lifecycle.LaunchingIn
 	Stopping  = "coauthor" + lifecycle.StoppingIn
 	Clearing  = "coauthor" + lifecycle.ClearingIn
-	Mail      = "coauthor" + lifecycle.MailIn
 	Escalated = "coauthor" + lifecycle.EscalatedIn
 	Retired   = "coauthor" + lifecycle.RetiredIn
 )
@@ -29,11 +28,6 @@ var (
 
 // Its clear leads back to the seat it shares: there is no queue behind it to hand anything over.
 var clearing = lifecycle.Clearing(Clearing, Collab, Collab)
-
-var mail = lifecycle.Mail(Mail, Collab, flow.Offers{
-	{Verb: verb.Task, Why: "read the backlog"},
-	{Verb: verb.Escalate, Why: "stop on a question"},
-})
 
 // A coauthor lands nothing through the hub — it commits with git itself — so an escalation shuts
 // nothing but leaves the question on the record for the user sitting with it.

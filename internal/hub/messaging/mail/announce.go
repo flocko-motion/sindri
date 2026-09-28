@@ -8,7 +8,10 @@ package mail
 
 import (
 	"fmt"
+	"log"
 	"time"
+
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // ReannounceAfter is how long unread mail waits before the agent is told again. A BACKSTOP over the
@@ -23,28 +26,55 @@ const ReannounceAfter = 5 * time.Minute
 func (b *Box) NudgeMailWaiting(project, name string) bool {
 	ps := b.store.For(project)
 	unannounced, unread, err := ps.UnannouncedMail(name, time.Now().Add(-ReannounceAfter))
-	if err != nil || unannounced == 0 {
+	if err != nil {
+		return b.refused(ps, name, "reading the mailbox failed: "+err.Error())
+	}
+	if unannounced == 0 {
+		b.settled(name) // nothing waiting: whatever was wrong before is over
 		return false
 	}
-	// Parked stays exempt: retirement and a full context are states the hub itself put the agent in
-	// and told it to wait in, and "hands off every automatic behaviour" is the whole of what retiring
-	// means. Holding work is NOT such a state, which is the distinction this used to miss.
-	if !b.deps.Reachable(project, name) {
-		return false
-	}
-	if !b.deps.MayWake(project, name) {
+	// Two conditions the hub PUT the agent in, so neither is a failure and neither is logged as one.
+	// Parked stays exempt: retirement and a full context are states the hub told the agent to wait
+	// in, and "hands off every automatic behaviour" is the whole of what retiring means. Holding work
+	// is NOT such a state, which is the distinction this used to miss.
+	if !b.deps.Reachable(project, name) || !b.deps.MayWake(project, name) {
 		return false
 	}
 	// The whole unread count, not just the new part. Ungated: this push IS the exit from a refusing
 	// state (escalated, waiting on exactly this answer), not news of more work.
 	if err := b.Deliver(project, name, MsgMailWaiting(unread), PushOnly); err != nil {
-		return false
+		// THE one that went unseen for two hours: a pane holding an unsent line takes no push, so
+		// this failed every sweep, silently, while the mail it was announcing sat unread.
+		return b.refused(ps, name, fmt.Sprintf("%d unread message(s) and the push does not land: %v", unread, err))
 	}
 	if err := ps.MarkMailAnnounced(name); err != nil {
-		return false
+		return b.refused(ps, name, "the announcement could not be recorded: "+err.Error())
 	}
+	b.settled(name)
 	_ = ps.Log(name, "nudge", fmt.Sprintf("%d unread message(s) waiting, %d newly announced", unread, unannounced))
 	return true
+}
+
+// refused records why a nudge did not land and answers false, so every branch out of NudgeMailWaiting
+// leaves a reason behind. Once per reason: the sweep retries every twenty seconds, so logging each
+// attempt would bury the fault in copies of itself — and saying nothing lost it entirely.
+func (b *Box) refused(ps *store.ProjectStore, name, why string) bool {
+	b.mu.Lock()
+	said := b.lastRefusal[name] == why
+	b.lastRefusal[name] = why
+	b.mu.Unlock()
+	if !said {
+		log.Printf("hub: mail for %s is not being announced: %s", name, why)
+		_ = ps.Log(name, "nudge-failed", why)
+	}
+	return false
+}
+
+// settled forgets an agent's last refusal, so the same fault returning is reported again.
+func (b *Box) settled(name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.lastRefusal, name)
 }
 
 // MsgMailWaiting wakes an agent that has stopped asking. Push-only, like every wake: what must be read

@@ -34,7 +34,7 @@ func DirMail(msgs []store.Mail) string {
 // ReplyNoMail answers `mail` with an empty mailbox. It says what the mailbox IS, since "no messages"
 // alone reads as a fault to an agent that was told to check.
 const ReplyNoMail = "No unread messages. Anything you must read is kept here until you do, so an " +
-	"empty mailbox means nothing is waiting — run `sindri` for your next action."
+	"empty mailbox means nothing is waiting."
 
 // ReplyMailRead closes a pick-up by settling relevance, which is the one thing a stored message
 // cannot settle for itself: nothing expires, so a message is delivered whenever it is read and the

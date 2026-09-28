@@ -51,10 +51,18 @@ type Harness interface {
 	Stop(ctx context.Context, project, name string) error
 	// Container names an agent's box.
 	Container(project, name string) string
-	// ModelMatches is the BACKEND's own knowledge of its models: whether two ids name one. Here
-	// rather than on Deps because only the thing running the session knows it — the hub's POLICY
-	// about models, which model a difficulty tier deserves, sits on Deps instead (-> tasks.md 3.2).
-	ModelMatches(want, detected string) bool
+	// TierIs answers the whole model question in one call: is `on` — what an agent's session is
+	// actually running (-> Situation.Model) — the model this tier dispatches to? known=false for a
+	// tier the backend does not recognise, and nothing may act on met then.
+	//
+	// One call because two were worse. Which model a tier deserves and whether two ids name one
+	// model used to sit on opposite sides of this seam, so every caller joined them itself: three
+	// did, against three different readings of what the agent was running, and one of those readings
+	// was a record that could be a switch nobody had landed.
+	TierIs(on, tier string) (met, known bool)
+	// SetTier puts an agent's session on the model that tier dispatches to, blocking as SetModel
+	// does. The caller names the RATING of the work coming, never the model.
+	SetTier(ctx context.Context, project, name, tier string) error
 }
 
 // Deps is the seam back into the rest of the hub: the project's facts, the board, the task thread.
@@ -78,9 +86,6 @@ type Deps interface {
 	Escalate(project, name, question string) (task string, err error)
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
-	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised. POLICY, unlike
-	// the two model questions on Harness: which model a tier deserves is the hub's to decide.
-	ModelForTier(tier string) (model string, ok bool)
 }
 
 // Flows is the re-decision seam: a subject that CHANGED the world tells the machines whose states
@@ -149,10 +154,6 @@ type Core struct {
 
 	// gates are the submit path's quality validators, installed by the composition root (-> WithGates).
 	gates []Gate
-
-	// refWarn remembers which repo roots have already been warned about an unconfigured reference
-	// (-> BaseBranch), so a call on every submit does not spam the log with the same finding.
-	refWarn refFallbackWarn
 }
 
 // PlannerBranch is a planner's standing branch, where it drafts openspec and ships it. Exported

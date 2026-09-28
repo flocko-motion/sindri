@@ -29,6 +29,9 @@ type Machine[W any] interface {
 	// nothing written. For a caller that must agree with the machine WITHOUT waiting for its next
 	// pass: the alternative is a second copy of the rules, and a second copy is what drifts.
 	Would(subject string) (State[W], error)
+	// Weigh is where a subject stands and which of that state's events hold now, in declaration
+	// order — the first true one is the edge a pass would take. Nothing written.
+	Weigh(subject string) (State[W], []bool, error)
 	// States is the declared flow, in registration order — the map, printable.
 	States() []State[W]
 	Close() error
@@ -52,6 +55,10 @@ type Config[W any] struct {
 	Do map[string]Doer[W]
 	// Subjects lists everything the machine watches.
 	Subjects func() []string
+	// Superseded maps a state this flow NO LONGER declares to the declared one that replaces it. A
+	// subject's stored state outlives the map that wrote it, so every removal needs a destination
+	// here or the rows naming it resolve to nothing and the subject is stranded.
+	Superseded map[string]string
 	// Default is the poll cadence for a state that declares no Every of its own.
 	Default time.Duration
 	// Tick is how often the engine looks for subjects whose poll has come due. ZERO runs no loop at
@@ -147,6 +154,14 @@ func (m *machine[W]) check() error {
 			return err
 		}
 	}
+	for gone, to := range m.cfg.Superseded {
+		if _, still := m.states[gone]; still {
+			return fmt.Errorf("machine: %q is declared AND listed as superseded — a live state has no replacement", gone)
+		}
+		if _, ok := m.states[to]; !ok {
+			return fmt.Errorf("machine: %q is superseded by %q, which is not declared", gone, to)
+		}
+	}
 	return nil
 }
 
@@ -212,11 +227,24 @@ func (m *machine[W]) standing(subject string) (State[W], time.Time, error) {
 	if name == "" {
 		name = m.cfg.Start
 	}
-	s, ok := m.states[name]
-	if !ok {
-		return State[W]{}, since, fmt.Errorf("machine: %s stands in %q, which is not declared", subject, name)
+	if s, ok := m.states[name]; ok {
+		return s, since, nil
 	}
-	return s, since, nil
+	// A name the map no longer has is STALE DATA, not a fault in the subject: the flow was edited
+	// under a row an older one wrote. Stranding it fails every call that subject makes for as long
+	// as the row stands, which is how deleting one state took a worker off the board entirely.
+	to, listed := m.cfg.Superseded[name]
+	why := "the state it stood in was replaced by " + to
+	if !listed {
+		// Nobody said where this one went, so the start is the only safe answer — and saying so is
+		// the point: the omission is a missing Superseded entry, not something to swallow.
+		to, why = m.cfg.Start, "the state it stood in is no longer declared, and nothing says what replaced it"
+	}
+	m.record(Entry{Subject: subject, State: name, Step: StepMoved, Detail: name + " -> " + to + ": " + why})
+	if err := m.cfg.Move(subject, name, to, why); err != nil {
+		return State[W]{}, since, fmt.Errorf("machine: %s stands in %q, which is not declared, and it could not be moved to %q: %w", subject, name, to, err)
+	}
+	return m.states[to], time.Now(), nil
 }
 
 // gate is one subject's pass lock, made on first use.

@@ -513,7 +513,7 @@ func (c *HTTP) RejectTask(id, comment string) error {
 	return c.post("/task/reject", api.RejectReq{ID: id, Feedback: comment})
 }
 
-// UnassignTask releases a task back to the backlog (refused if a live agent holds it).
+// UnassignTask releases a task back to the backlog, taking a live holder off it as well.
 func (c *HTTP) UnassignTask(id string) error {
 	return c.post("/task/unassign", api.RejectReq{ID: id})
 }
@@ -552,6 +552,13 @@ func (c *HTTP) Log(name string) ([]api.Event, error) {
 func (c *HTTP) StateLog(name string) ([]api.StateEvent, error) {
 	var out []api.StateEvent
 	return out, c.get("/agent/states?agent="+url.QueryEscape(name), &out)
+}
+
+// DebugServe asks the hub to serve the flow debug view on 127.0.0.1:port (0: the hub picks), and
+// returns its URL — the running one if it is already served.
+func (c *HTTP) DebugServe(port int) (string, error) {
+	var out api.DebugServeResp
+	return out.URL, c.postResult("/debug/serve", api.DebugServeReq{Port: port}, &out)
 }
 
 // Repos lists every registered repo (the registry overview / TUI switcher source).

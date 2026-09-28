@@ -180,9 +180,10 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Clients: l.clients, Container: pod, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
 			ContextTokens: l.tokens, ContextWindow: l.window, Escalation: st.Escalation,
-			// The transcript sees a model switched by hand inside Claude Code before the roster does,
-			// so the detected one wins while the agent is up — both readings off the same sample.
-			Model:      harness.ModelInUse(a.Model, l.model, l.up),
+			InputPending: l.inputPending,
+			// Joined once, where every rule reads it from (-> situation.Situation.Model): the transcript
+			// sees a model switched by hand inside Claude Code before the roster does.
+			Model:      sit.Model,
 			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}

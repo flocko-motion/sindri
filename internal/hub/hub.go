@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/idle"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/workspace"
 	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
@@ -28,6 +29,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/api/agents/channel"
+	"github.com/flo-at/sindri/internal/hub/api/debugview"
 	"github.com/flo-at/sindri/internal/hub/api/serve"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/flow/fleet"
@@ -67,6 +69,7 @@ type Hub struct {
 	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
 	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
 	tools *toolskew
+	debug *debugview.Server // the flow debug view, idle until asked for (internal/hub/debugflow.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -133,7 +136,7 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	h.agentCh = channel.New(h.store, agentchanDeps{h})
 	// Before agents and wf, which both ask it: the observer behind it reads h.watch and h.agents at
 	// CALL time, so neither has to exist yet.
-	h.sit = situation.NewGatherer(h.store, hubHarness{h})
+	h.sit = situation.NewGatherer(h.store, hubHarness{h}, idle.Rule)
 	h.agents = harness.New(h.store, agentDeps{h}, h.agentCh)
 	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, hubHarness{h}, h.mail, spec.Source{}, github.Source{}).
 		Gated(spec.Source{}).
@@ -158,6 +161,7 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// A one-shot startup comparison, not a loop: the pod image only changes on a rebuild, not tick
 	// by tick. Needs only h.store (via Deliver), so nothing above it is a real dependency.
 	h.tools = newToolskew(h, hostVersions, podManifest)
+	h.debug = debugview.New(h)
 	return h, nil
 }
 
@@ -217,6 +221,7 @@ func (h *Hub) Close() error {
 	h.ticks.close()
 	// status has no loop of its own to stop — watchdog.close() above already ended what drove it.
 	h.agentCh.CloseAll()
+	h.debug.Close()
 	h.endLife()
 	serve.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()

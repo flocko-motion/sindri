@@ -30,7 +30,7 @@ func (a *Act) CmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 		fmt.Fprintln(out, prompts.ReplyNoSuchPR(args[0]))
 		return 1, nil
 	case errors.Is(err, core.ErrNoOpenPRs):
-		fmt.Fprintln(out, "Nothing is up for review here, so there is nothing to approve. Run `sindri` for your next move.")
+		fmt.Fprintln(out, "Nothing is up for review here, so there is nothing to approve.")
 		return 1, nil
 	case err != nil:
 		return 1, err

@@ -377,7 +377,7 @@ func (m model) taskGated() bool {
 	return ok && !api.DoneStatus(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
-// unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.
+// unassignTaskCmd returns the task to the backlog; the hub takes any holder off it, live or not.
 func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "unassigning " + id + "…"

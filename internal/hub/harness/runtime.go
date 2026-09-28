@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -43,6 +44,10 @@ type Observation struct {
 	// ToolRunning is whether the pane itself shows a tool call still in flight — a shell that has not
 	// returned prints nothing, so Digest alone cannot tell this apart from a frozen turn (-> watchdog.record).
 	ToolRunning bool
+	// InputPending is a line typed into the input box and never sent. It stops EVERY push to this
+	// agent (-> waitForAnEmptyBox), so it is carried to the board: the only way to find out used to
+	// be capturing the pane by hand, and one sat unnoticed for two hours holding up a user's answer.
+	InputPending bool
 }
 
 // runtimeMemo memoises Observe's reading per agent key, TTL-bound. A Service field, not a package
@@ -71,11 +76,17 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 	s.runtimeMemo.mu.Unlock()
 
 	var obs Observation
-	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
+	// WITH escapes, and one capture still: an empty input box carries a FAINT placeholder, and that
+	// is the only thing telling it from something a human typed (-> agentport.InputPending). Every
+	// other reading takes the stripped text, the digest included — so a colour-only repaint no longer
+	// reads as the screen changing.
+	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, true)...)...)
 	if err == nil {
-		obs.Runtime = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
-		obs.Digest = fmt.Sprintf("%x", sha256.Sum256(out))
-		obs.ToolRunning = agentport.ToolRunning(string(out))
+		plain := agentport.Plain(string(out))
+		obs.Runtime = agentport.Runtime(plain) // shared classifier: board + herdr agree
+		obs.Digest = fmt.Sprintf("%x", sha256.Sum256([]byte(plain)))
+		obs.ToolRunning = agentport.ToolRunning(plain)
+		obs.InputPending = agentport.InputPending(string(out))
 	}
 	s.runtimeMemo.mu.Lock()
 	if s.runtimeMemo.at == nil {
@@ -139,26 +150,25 @@ func (s *Service) SampleContext(project, name string) (tokens, window int, model
 // recognised — the check a chosen model must pass before an agent is started on it.
 func (s *Service) ModelWindow(model string) (int, bool) { return agentport.ModelWindow(model) }
 
-// ModelForTier resolves tier to the model it dispatches to, via the wired backend.
-func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
-
 // ModelMatches reports whether detected is want, via the wired backend — not always a bare
 // equality (-> agentport.Agent.ModelMatches).
 func (s *Service) ModelMatches(want, detected string) bool {
 	return agentport.ModelMatches(want, detected)
 }
 
-// ModelInUse picks between the two readings of what an agent runs: the one detected off its
-// transcript while it is up — a human may change the model by hand, which the transcript sees first
-// — and the recorded choice otherwise, all there is for an agent that is not running.
+// TierIs reports on — what a session is actually running (-> observe.Observation.ModelInUse) — being
+// the model tier dispatches to. known=false for a tier this backend does not recognise, and nothing
+// may act on met then.
 //
-// A function, not a probe: the board already holds both readings from the watchdog's own sample
-// (-> hub/watchdog.go), which taking them here again would cost per render, per connected client.
-func ModelInUse(recorded, detected string, up bool) string {
-	if up && detected != "" {
-		return detected
+// The join lives here because splitting it did not hold. Which model a tier deserves and whether two
+// ids name one model were each reachable on their own, so three callers made the join themselves,
+// and they did not all make it against the same reading of what the agent runs.
+func (s *Service) TierIs(on, tier string) (met, known bool) {
+	want, ok := agentport.ModelForTier(tier)
+	if !ok {
+		return false, false
 	}
-	return recorded
+	return agentport.ModelMatches(want, on), true
 }
 
 // CurrentModel is the model name is effectively running, taking both readings itself. For a caller
@@ -169,7 +179,7 @@ func (s *Service) CurrentModel(ctx context.Context, project, name string) string
 	if up {
 		_, _, detected, _ = s.ContextUsage(project, name)
 	}
-	return ModelInUse(s.recordedModel(project, name), detected, up)
+	return observe.ModelInUse(s.recordedModel(project, name), detected, up)
 }
 
 // recordedModel is the model the roster says an agent was started on, "" if it cannot be read.

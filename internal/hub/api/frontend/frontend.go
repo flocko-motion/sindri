@@ -66,6 +66,9 @@ type Hub interface {
 	HandleEvents(w http.ResponseWriter, r *http.Request)
 	HandleChatEvents(w http.ResponseWriter, r *http.Request)
 	ChatView() (api.ChatView, error)
+
+	// DebugServe starts the flow debug view's loopback listener and returns its URL.
+	DebugServe(port int) (string, error)
 }
 
 // globalRoutes are the only control endpoints valid without a repo context: the board reads,
@@ -78,6 +81,8 @@ var globalRoutes = map[string]bool{
 	"/repos": true, "/repo": true, "/repo/forget": true, "/repo/color": true,
 	// Orphan removal targets a container by its (globally-unique) name, not a repo.
 	"/orphan/remove": true,
+	// Starting the flow debug view concerns the hub, not a repo.
+	"/debug/serve": true,
 }
 
 // RequireProject rejects a repo-scoped request that arrives without an X-Sindri-Project header

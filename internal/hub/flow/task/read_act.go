@@ -81,10 +81,10 @@ func replyNoSuchTask(c registry.Caller, home, id string) string {
 	if c.Project == api.GlobalProject && home == api.GlobalProject {
 		return fmt.Sprintf("This backlog carries no %s. As a pooled reviewer you read the backlog of the "+
 			"repo whose PR you hold, and you hold none right now, so the shared backlog is all that is in "+
-			"reach; a repo's tasks arrive with the PR you are handed. Run `sindri` for your next move.", id)
+			"reach; a repo's tasks arrive with the PR you are handed.", id)
 	}
 	return fmt.Sprintf("This backlog carries no %s — the id is unknown here, which is an ordinary answer "+
-		"and settles it. Run `sindri` for the work you hold, or `sindri task list` to see what exists.", id)
+		"and settles it. `sindri task list` shows what exists.", id)
 }
 
 // CmdTasks is the read surface over the backlog, scoped to the caller's job: a planner or
@@ -195,7 +195,7 @@ func (a *Act) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, er
 			r.ID, r.Status, dash(r.Approval), dash(r.Priority), who, strings.Repeat("  ", r.Depth), r.Title, note)
 	}
 	if bounded && shown == 0 && asContext == 0 {
-		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
+		fmt.Fprintln(out, "You hold no task. The hub hands you one when there is work.")
 		return 0, nil
 	}
 	// Counted over what the caller may READ, not the whole store: a worker's summary that quoted the
@@ -266,7 +266,7 @@ func (a *Act) WorkerTaskView(c registry.Caller, tasks []store.Task, out io.Write
 		held = st.Task // …else the single task
 	}
 	if held == "" {
-		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
+		fmt.Fprintln(out, "You hold no task. The hub hands you one when there is work.")
 		return 0, nil
 	}
 	root, ok, err := ps.GetTask(held)
@@ -274,7 +274,7 @@ func (a *Act) WorkerTaskView(c registry.Caller, tasks []store.Task, out io.Write
 		return 1, err
 	}
 	if !ok {
-		fmt.Fprintf(out, "You hold %s, but it is no longer in the backlog. Run `sindri` for your current directive.\n", held)
+		fmt.Fprintf(out, "You hold %s, but it is no longer in the backlog. The hub will move you on.\n", held)
 		return 0, nil
 	}
 

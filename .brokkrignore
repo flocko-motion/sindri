@@ -1,0 +1,2 @@
+# Vendored third-party JS for the flow debug view, embedded as shipped (cytoscape, dagre, cytoscape-dagre).
+internal/hub/api/debugview/assets/vendor/**

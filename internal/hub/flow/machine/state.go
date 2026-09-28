@@ -98,6 +98,18 @@ type Offer struct {
 	Why  string
 }
 
+// WhenIdle says what a still screen MEANS where the subject stands — correct in one state, a fault
+// in the next. The zero value is neither, so a state that never considered it is refused.
+type WhenIdle uint8
+
+const (
+	IdleUndeclared WhenIdle = iota
+	// LetItRest: it waits on somebody else here — a verdict, a queue, a human, work not yet arrived.
+	LetItRest
+	// Nudge: it is the one expected to move, so a screen that has stopped is a fault worth prodding.
+	Nudge
+)
+
 // State is one state of a flow, DECLARED rather than coded around. The struct reads as that state's
 // documentation: what the hub is doing here, everything that can move the subject out, what it may
 // type, and what it is told if it asks.
@@ -115,6 +127,10 @@ type State[W any] struct {
 	// SUBJECT is the actor and no action spoke on the way in: the alternative is asking it to ask,
 	// a round trip whose answer the hub already holds.
 	Tells bool
+	// NudgeAfter is how long a still screen is tolerated before the prod, zero taking the flow's own
+	// dwell — longer where a pause is ordinary, so nothing nudges an agent that is merely thinking.
+	WhenIdle   WhenIdle
+	NudgeAfter time.Duration
 	// Events is everything that moves the subject out: the action's outcomes and the world's
 	// conditions, in one list, each with where it leads.
 	Events []Transition[W]

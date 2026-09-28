@@ -6,6 +6,10 @@
 package arch
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -46,7 +50,6 @@ func TestParentIsStatedAsTheDefaultShape(t *testing.T) {
 func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 	for _, s := range []string{
 		prompts.DirWorking("td-1", 1.5, 2.0),
-		prompts.DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		prompts.DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		prompts.ReplyResolveDirty("working", false),
 		prompts.ReplyResolveDirty("working", true),
@@ -64,5 +67,60 @@ func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 				t.Errorf("advice puts %q on the agent — it contributes or submits, the hub commits: %q", bad, s)
 			}
 		}
+	}
+}
+
+// asksForItsDirective matches the bare `sindri` ask — the no-arg call that answers where an agent
+// stands. A pointer at a NAMED verb (`sindri submit`, `sindri task list`) carries no match, because
+// naming a verb tells the agent what to do rather than sending it to find out.
+var asksForItsDirective = regexp.MustCompile("[Rr]un `sindri`")
+
+// directiveAskAllowed is the one place the ask belongs: mail is read when the AGENT chooses, so
+// telling it that mail is waiting and leaving the timing to it is the whole point of the message.
+var directiveAskAllowed = map[string]bool{
+	filepath.Join("internal", "hub", "messaging", "mail", "announce.go"): true,
+}
+
+// TestNothingTellsAnAgentToAskForItsDirective: the hub dispatches. It selects, prepares and
+// instructs, so it is holding the answer at the moment it speaks — and a reply that sends the agent
+// to fetch it costs a call and a turn for something already in hand. Worse, the fetch can be lost:
+// a pane interrupted between the two leaves the agent waiting on a hub that believes it dispatched.
+// Where there is something to do, the hub says it; where there is not, it says nothing.
+func TestNothingTellsAnAgentToAskForItsDirective(t *testing.T) {
+	root := moduleRoot(t)
+	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if vocabSkipDirs[d.Name()] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		if directiveAskAllowed[rel] {
+			return nil
+		}
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			if asksForItsDirective.MatchString(line) {
+				t.Errorf("%s:%d tells an agent to ask for what the hub is holding: %q",
+					rel, i+1, strings.TrimSpace(line))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking internal: %v", err)
 	}
 }

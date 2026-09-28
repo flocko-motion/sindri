@@ -502,15 +502,21 @@ func TestWorkerStandaloneTaskShowsInFull(t *testing.T) {
 	}
 }
 
-// TestWorkerWithNoTaskIsToldWhatToDo: an idle worker gets the one next step, not an empty view.
+// TestWorkerWithNoTaskIsToldWhatToDo: an idle worker is told it holds nothing AND that waiting is
+// the whole of its job here — the hub dispatches, so being sent to ask for work would be a round
+// trip for an answer the hub pushes on its own.
 func TestWorkerWithNoTaskIsToldWhatToDo(t *testing.T) {
 	a, c := workerEngine(t, nil, "", "")
 	var out bytes.Buffer
 	if _, err := a.CmdTasks(c, nil, &out); err != nil {
 		t.Fatalf("CmdTasks: %v", err)
 	}
-	if got := out.String(); !strings.Contains(got, "no task") || !strings.Contains(got, "`sindri`") {
-		t.Errorf("expected a pointer to picking work up, got: %q", got)
+	got := out.String()
+	if !strings.Contains(got, "no task") || !strings.Contains(got, "hub hands you one") {
+		t.Errorf("an idle worker should be told it holds nothing and that the hub brings work, got: %q", got)
+	}
+	if strings.Contains(got, "`sindri`") {
+		t.Errorf("nothing sends a worker to ask for what the hub dispatches: %q", got)
 	}
 }
 

@@ -95,6 +95,9 @@ func (m model) repoItems() []metaItem {
 	for _, l := range archLines(m.state.RepoDocs[tag]) {
 		items = append(items, metaItem{text: l})
 	}
+	for _, l := range refLines(m.state.RepoDocs[tag]) {
+		items = append(items, metaItem{text: l})
+	}
 	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("enter switch · E config · D forget")})
 	return items
 }
@@ -167,6 +170,25 @@ func gateLines(st api.RepoDocState) []string {
 	}
 	return []string{"", stWarn.Render(warnGlyph + " no quality gate"),
 		dimStyle.Render("nothing can be submitted from this repo — press E and set `verify` (usually `make check`)")}
+}
+
+// refLines renders the branch agents work against. Following the main checkout is a repo in good
+// shape, so it gets the marker archLines gives a defaulted doc; the fault is having no branch to
+// follow, which leaves every claim, submit and merge with nothing to measure against.
+func refLines(st api.RepoDocState) []string {
+	switch {
+	case st.Reference != "" && st.ReferencePinned:
+		return []string{"ref:    " + st.Reference}
+	case st.Reference != "":
+		return []string{"ref:    " + st.Reference + dimStyle.Render("  (main checkout)")}
+	case st.ReferenceAdvice == "":
+		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
+	case st.ReferencePinned:
+		return []string{"", stWarn.Render(warnGlyph + " reference branch missing"),
+			dimStyle.Render("`reference` names a branch this repo doesn't have — press E to fix it, or create the branch")}
+	}
+	return []string{"", stWarn.Render(warnGlyph + " no reference branch"),
+		dimStyle.Render("the main checkout is on no branch — check one out there and every agent has something to work from")}
 }
 
 // openColorChoice opens a picker of colour swatches for a repo: "default" (the

@@ -41,7 +41,7 @@ func gatherFixture(t *testing.T) (*Gatherer, *store.ProjectStore) {
 	if err := ps.UpsertTask(store.Task{ID: "sd-1", Title: "waiting work", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	return NewGatherer(st, &countingObserver{}), ps
+	return NewGatherer(st, &countingObserver{}, nil), ps
 }
 
 // TestARosterIsJudgedOnOneReadOfTheBacklog is the containment paying for itself: the claimable pool

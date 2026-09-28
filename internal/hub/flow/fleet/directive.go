@@ -19,14 +19,21 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if st, err := e.Store.For(project).GetState(name); err == nil && st.Task == "" && st.Container == "" {
 		_ = e.taskAct().SyncTasks(project) // best-effort: the cached set answers if a source is unreachable
 	}
-	beforeModel := e.Harness.Observe(project, name).Model
+	beforeModel, err := e.modelOn(project, name)
+	if err != nil {
+		return "", err
+	}
 	dir, err := e.directive(ctx, project, name)
 	if err != nil {
 		return "", err
 	}
 	// A model switch narrates and restarts the agent inline, with no distinct text to spot in dir —
 	// only the model actually changing under this call says so.
-	retiered := e.Harness.Observe(project, name).Model != beforeModel
+	afterModel, err := e.modelOn(project, name)
+	if err != nil {
+		return "", err
+	}
+	retiered := afterModel != beforeModel
 	if prompts.Deferring(dir) || retiered {
 		return dir, nil
 	}
@@ -37,6 +44,17 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	// The branch warning goes ahead of the role text: an agent that cannot submit needs that before
 	// it writes anything further, whatever its role would otherwise have said.
 	return preamble + e.prAct().RebaseNotice(project, name) + dir, nil
+}
+
+// modelOn is what this agent's session runs, through the one reading everything else decides on
+// (-> situation.Situation.Model) — so "did the model change under this call" and "does the work
+// waiting want another one" cannot answer from two different figures.
+func (e *Engine) modelOn(project, name string) (string, error) {
+	sit, err := e.Sit.Of(project, name)
+	if err != nil {
+		return "", err
+	}
+	return sit.Model, nil
 }
 
 // directive is the no-arg `sindri` answer: where the agent stands, in its own words, and what it may

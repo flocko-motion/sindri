@@ -112,7 +112,6 @@ func TestRunServiceIsAdvertisedWithAnEvaluableRule(t *testing.T) {
 func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 	for _, s := range []string{
 		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirReview("pr-td-1", "td-1", "a task", "dwalin", ""),
 	} {
 		if !strings.Contains(s, "sindri run") {
@@ -138,7 +137,6 @@ func TestTheFinishRuleRidesEveryHandOverOfWork(t *testing.T) {
 		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
 		DirWorking("td-1", 1.5, 2.0),
 		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 		DirReview("pr-td-1", "td-1", "a task", "dwalin", ""),
@@ -181,7 +179,6 @@ func TestToolingBlockReachesEveryRoleThatReceivesWork(t *testing.T) {
 	// mid-task — exactly when the repeated directive, not the claim, is re-served.
 	for _, s := range []string{
 		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 	} {
 		if strings.Contains(s, "mcp__gopls__go_") {
 			t.Errorf("a claim-moment directive should not repeat the tooling block: %q", s)
@@ -260,7 +257,6 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		SystemPrompt("eitri", "worker", "", ""),
 		SystemPrompt("dvalin", "reviewer", "", ""),
 		DirWorking("td-1", 1.5, 2.0),
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 		MsgMilestoneRejected("td-EPIC", "user"),
@@ -375,7 +371,6 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 // contribute for a branch worth sharing early; submit is held back until the last subtask.
 func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 		ReplySubtasksRemain("td-EPIC", "td-2", 3),
@@ -391,7 +386,6 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	// Where a feature's advice DOES name submit, it must be about the whole branch — never something
 	// to do per subtask, which is the confusion the checkpoint flow exists to prevent.
 	for _, s := range []string{
-		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "never per subtask") {

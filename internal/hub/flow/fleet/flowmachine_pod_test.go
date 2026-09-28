@@ -192,6 +192,28 @@ func TestAWaitingReviewNeverWakesAWorker(t *testing.T) {
 	}
 }
 
+// TestAHumansStartIsCarriedOutByTheMachineAlone is `sindri coauthor` on a pod that died under a
+// coauthor sitting in collab. The /launch route used to launch as well as ask, and the machine,
+// answering the same ask, launched a second time: each one's rm tore down the other's pod mid-run.
+// The route only asks now, so the one launch there is has to come from the machine.
+func TestAHumansStartIsCarriedOutByTheMachineAlone(t *testing.T) {
+	d := &flowtest.Hub{Root: t.TempDir(), DownAgents: map[string]bool{"nyi": true}}
+	e, ps, _ := podFleet(t, d, store.Agent{Name: "nyi", Role: "coauthor", Workspace: "."})
+	flowtest.Place(t, ps, store.AgentState{Agent: "nyi", Phase: "collab"})
+
+	if err := e.roleAct().AskStart("repo", "nyi"); err != nil {
+		t.Fatal(err)
+	}
+	e.Look("repo", "nyi")
+
+	if len(d.Started) != 1 || d.Started[0] != "nyi" {
+		t.Errorf("started = %v, want nyi's pod brought up exactly once, by its machine", d.Started)
+	}
+	if ag, _, _ := ps.GetAgent("nyi"); ag.StartAsked {
+		t.Error("a request left standing brings the agent back into the state that answers it, for ever")
+	}
+}
+
 // TestAHumansStopIsCarriedOutByTheMachine: a request rather than a flag, because the agent may
 // already be in whatever state a flag would claim — and the machine is what acts on it.
 func TestAHumansStopIsCarriedOutByTheMachine(t *testing.T) {

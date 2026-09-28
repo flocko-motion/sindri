@@ -26,6 +26,8 @@ func (a *Act) AskStop(project, name string) error { return a.askPod(project, nam
 // askPod writes one of the two requests and announces it. It performs nothing: the machine's own
 // launching and stopping states do that, and a request left standing is read again on the agent's
 // next beat — which is what makes "asked for, and not yet done" survive a hub that died between.
+// It has the pod looked at first: the standing observation holds a dead pod "up" for a few sweeps,
+// and the machine would answer the request from that.
 func (a *Act) askPod(project, name string, start bool) error {
 	ps := a.Store.For(project)
 	ag, ok, err := ps.GetAgent(name)
@@ -44,6 +46,7 @@ func (a *Act) askPod(project, name string, start bool) error {
 		what = "start"
 	}
 	_ = ps.Log(name, what+"-asked", "a human asked for this pod")
+	a.Harness.Probe(project, name)
 	a.Deps.Notify()
 	a.Flow.Wake(project, name, topic.AgentParked)
 	return nil

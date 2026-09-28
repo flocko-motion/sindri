@@ -21,8 +21,9 @@ const (
 )
 
 var idle = flow.State{
-	Name:  Idle,
-	Title: "Planner at rest",
+	WhenIdle: flow.LetItRest, // nothing has been selected for it yet
+	Name:     Idle,
+	Title:    "Planner at rest",
 	About: "A planner never grabs a backlog task. Work reaches it as a conversation, so at rest it " +
 		"is pointed at whatever the user has already said rather than at a queue. It is TOLD that on " +
 		"arrival: a planner reaches this state with a session somebody just emptied, and asking it to " +
@@ -32,7 +33,6 @@ var idle = flow.State{
 	Events: flow.Events{
 		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.HoldsBacklogWork, Disowning, "a backlog task is on its row, and a planner holds none"},
-		{cond.MailWaiting, Mail, "it has mail it has not read, so it is not done"},
 		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear"},
 		{cond.StartAsked, Launching, "a human asked for this pod"},
@@ -56,8 +56,9 @@ var idle = flow.State{
 }
 
 var planning = flow.State{
-	Name:  Planning,
-	Title: "Planning with the user",
+	WhenIdle: flow.Nudge, // the conversation is its work, and a quiet screen mid-plan is a plan that stopped
+	Name:     Planning,
+	Title:    "Planning with the user",
 	About: "The planner has work in hand — a brief it was given, or a conversation it is inside. " +
 		"The hub waits on nothing from it and has nothing to add until it ships or declares itself idle.",
 	Says: says.Planning,
@@ -85,8 +86,9 @@ var planning = flow.State{
 }
 
 var submitted = flow.State{
-	Name:  Submitted,
-	Title: "Planner waiting on a verdict",
+	WhenIdle: flow.LetItRest, // a reviewer owes the verdict
+	Name:     Submitted,
+	Title:    "Planner waiting on a verdict",
 	About: "The planner shipped its spec edits as a pull request, and that PR IS the review — there " +
 		"is nothing else to ask anyone to read.",
 	Says: says.AwaitVerdict,
@@ -107,9 +109,10 @@ var submitted = flow.State{
 
 // disowning: a backlog task ended up on a planner's row, which is a claim nobody should have made.
 var disowning = flow.State{
-	Name:   Disowning,
-	Title:  "Letting go of a backlog task",
-	Action: act.Disown,
+	WhenIdle: flow.LetItRest, // the hub is putting the work back
+	Name:     Disowning,
+	Title:    "Letting go of a backlog task",
+	Action:   act.Disown,
 	About: "A planner's work arrives as a conversation, so a backlog task on its row is an invalid " +
 		"claim however it got there. The task goes back to the backlog and the planner goes back to " +
 		"resting — noticed by the planner's own map wherever it stands, rather than by a sweep that " +
@@ -125,7 +128,7 @@ var disowning = flow.State{
 
 // Flow is the planner's whole map.
 var Flow = []flow.State{
-	idle, planning, submitted, disowning, mail, launching, stopping, clearing, escalated, retired,
+	idle, planning, submitted, disowning, launching, stopping, clearing, escalated, retired,
 }
 
 // Start is where a planner with no state stored begins.

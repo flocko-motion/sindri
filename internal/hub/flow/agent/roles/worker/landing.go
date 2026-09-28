@@ -21,9 +21,10 @@ const (
 
 // promoting: the leaf it holds has grown children, so it holds a feature.
 var promoting = flow.State{
-	Name:   Promoting,
-	Title:  "Taking on work its task gained",
-	Action: act.Promote,
+	WhenIdle: flow.LetItRest, // the hub is taking the children on
+	Name:     Promoting,
+	Title:    "Taking on work its task gained",
+	Action:   act.Promote,
 	About: "The task this worker holds gained children while it was working, so its unit of work is " +
 		"a FEATURE now. It takes the new work on rather than being stranded in front of it — and the " +
 		"promotion happens on the one path that resumes an agent inside a feature, so nothing ends " +
@@ -39,9 +40,10 @@ var promoting = flow.State{
 
 // rebasing: a milestone of its own landed, so its standing branch is behind.
 var rebasing = flow.State{
-	Name:   Rebasing,
-	Title:  "Catching up with its own milestone",
-	Action: act.Rebase,
+	WhenIdle: flow.LetItRest, // the hub is moving its branch
+	Name:     Rebasing,
+	Title:    "Catching up with its own milestone",
+	Action:   act.Rebase,
 	About: "An interim pull request this worker filed merged, and its standing branch is behind the " +
 		"base that merge moved. The branch is RESET onto it rather than rebased, keeping whatever is " +
 		"mid-edit: a squashed merge makes the old commits unrecognisable, and discarding uncommitted " +

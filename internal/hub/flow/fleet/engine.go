@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/hub/core"
 	"github.com/flo-at/sindri/internal/hub/flow"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/idle"
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 	flowpr "github.com/flo-at/sindri/internal/hub/flow/pr"
 	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
@@ -80,7 +81,7 @@ func New(lifetime context.Context, st *store.Store, deps Deps, hn Harness, box *
 	e := &Engine{
 		Core: &core.Core{
 			Store: st, Deps: deps, Harness: hn,
-			Sit: situation.NewGatherer(st, hn), Lifetime: lifetime, Sources: sources, Mail: box,
+			Sit: situation.NewGatherer(st, hn, idle.Rule), Lifetime: lifetime, Sources: sources, Mail: box,
 			Pre: core.Preflight{Seen: map[string]string{}},
 		},
 	}

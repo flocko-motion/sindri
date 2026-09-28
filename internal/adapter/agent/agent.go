@@ -8,6 +8,7 @@ package agent
 
 import (
 	"io"
+	"regexp"
 )
 
 // State is what the agent tool is doing now, not sindri's workflow phase.
@@ -102,6 +103,14 @@ func DetectState(screen string) State { return active.DetectState(screen) }
 
 // InputPending reports somebody's unsent text sitting in the pane's input box, via the wired backend.
 func InputPending(screen string) bool { return active.InputPending(screen) }
+
+// ansi matches any SGR escape. Stripping is the port's, not a backend's: reading a pane as the text
+// it renders is what every terminal-driven tool needs, whichever one is wired.
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Plain is a captured pane with its escapes removed — what the screen SAYS, for every rule that
+// matches on words rather than on how they are drawn.
+func Plain(screen string) string { return ansi.ReplaceAllString(screen, "") }
 
 // Runtime is the single source of the "working"|"blocked"|"idle"|"signed-out" word every reader
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.

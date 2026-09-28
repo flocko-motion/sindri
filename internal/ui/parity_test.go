@@ -38,6 +38,8 @@ var oneSided = map[string]string{
 		"`task delete --prs`, which the hub applies server-side",
 	"StateLog": "a debug instrument for diagnosing a puzzling status (`agent states`), not a " +
 		"user-facing behaviour — nothing on the board reads it (sd-a72056)",
+	"DebugServe": "opens the flow debug view in a browser (`debug flow`) — a debug instrument like " +
+		"StateLog, and one whose whole surface is a web page, which a terminal screen cannot host",
 }
 
 // TestEveryClientMethodIsReachableFromBothFrontEnds enforces ARCHITECTURE.md:42. A method only one

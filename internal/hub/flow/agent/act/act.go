@@ -16,20 +16,35 @@ var (
 	Nothing = flow.Outcome{Name: "nothing"} // there was nothing to do
 	Failed  = flow.Outcome{Name: "failed"}  // it did not work, and the reason is the agent's brief
 	Queued  = flow.Outcome{Name: "queued"}  // handed to a queue; somebody else answers
-	Held    = flow.Outcome{Name: "held"}    // refused for now by a rule, not an error
 	Stale   = flow.Outcome{Name: "stale"}   // what it was working from moved, so what it produced describes nothing
 )
 
-// PickWork looks for the best-rated unit the backlog would hand this agent, and claims it. The claim
-// comes FIRST, so holding the work protects it while the session preparation behind it runs.
-var PickWork = &flow.Action{Name: "pick-work", Outcomes: []flow.Outcome{Done, Nothing, Held}}
+// PickWork looks for the best-rated unit the backlog would hand this agent, and claims it. It SAYS
+// nothing: the hub selects, then prepares the session, and only then instructs (-> HandOver), so the
+// claim holds the work while the preparation behind it runs and the agent hears once.
+var PickWork = &flow.Action{Name: "pick-work", Outcomes: []flow.Outcome{Done, Nothing, Failed}}
 
-// PickSubtask moves a feature holder onto its feature's next open child.
-var PickSubtask = &flow.Action{Name: "pick-subtask", Outcomes: []flow.Outcome{Done, Nothing}}
+// PickSubtask moves a feature holder onto its feature's next open child. It says nothing either, for
+// the same reason: a child is selected, prepared for, and then handed over.
+var PickSubtask = &flow.Action{Name: "pick-subtask", Outcomes: []flow.Outcome{Done, Nothing, Failed}}
+
+// HandOver tells an agent what it holds. The LAST step of the chain, so nothing is ever said into a
+// session still being prepared — and the only step the agent itself sees.
+var HandOver = &flow.Action{Name: "hand-over", Outcomes: []flow.Outcome{Done, Failed}}
+
+// Deliver serves an agent's unread mail INTO its session. The hub holds the messages and the agent
+// is at an empty prompt, so waiting for it to come and fetch them waits for ever: reading is the
+// only way out of not-done, and an idle agent has no reason to run anything.
+var Deliver = &flow.Action{Name: "deliver", Outcomes: []flow.Outcome{Done, Nothing, Failed}}
 
 // Clear discards the agent's session and waits for the reading to fall — the clear having HAPPENED,
-// where a sleep only assumes it.
+// where a sleep only assumes it. This is the clear a HUMAN arms, and nothing runs behind it.
 var Clear = &flow.Action{Name: "clear", Outcomes: []flow.Outcome{Done, Failed}}
+
+// Prepare is the same reset as a step of a selection, and it is a separate action because a failure
+// means something else here: the model switch behind it types `/model`, which on cached history
+// opens a dialog that swallows whatever follows — the agent's own brief.
+var Prepare = &flow.Action{Name: "prepare", Outcomes: []flow.Outcome{Done, Failed}}
 
 // Retier switches the model under the agent for the tier of the work it is being handed. The switch
 // clears the session on its way through.
@@ -85,7 +100,7 @@ var Disown = &flow.Action{Name: "disown", Outcomes: []flow.Outcome{Done, Failed}
 
 // All is every declared action, for the check that each has an implementation.
 var All = []*flow.Action{
-	PickWork, PickSubtask, Clear, Retier, Yield, Release,
+	PickWork, PickSubtask, Prepare, Retier, HandOver, Deliver, Clear, Yield, Release,
 	Interview, Submit, TakeReview, DropReview, Prod, Promote, Rebase,
 	Launch, Stop, Disown,
 }

@@ -285,14 +285,23 @@ func (s Situation) stalled() bool {
 	if s.TurnCutOff() {
 		return s.StillFor >= RetryDwell
 	}
-	if s.AwaitingHuman() || s.SignedOut() || s.WaitingOnRun || s.StillFor < StallDwell {
+	if s.AwaitingHuman() || s.SignedOut() || s.WaitingOnRun {
 		return false
 	}
-	// The states where the AGENT is the actor and holds something to act on. "submitted" and
-	// "gating" exist to wait; reviewing does not — a reviewer with a PR is meant to be reading it —
-	// and answering a verdict or a conflict is work exactly as the first round was.
-	return Standing(s.Phase, "working", "reworking", "resolving", "reviewing") ||
-		(s.Container != "" && !Standing(s.Phase, "submitted", "gating"))
+	// The STATE says whether doing nothing is a fault here, because only it knows whose move it is.
+	// Read rather than listed: a list kept beside the maps is a second account of them, and the
+	// states it forgot were exactly the ones an agent could stop in unnoticed.
+	if s.idleRule == nil {
+		return false // nothing declared the rule, so nothing is claimed about a quiet screen
+	}
+	after, nudge := s.idleRule(s.Phase)
+	if !nudge {
+		return false
+	}
+	if after == 0 {
+		after = StallDwell
+	}
+	return s.StillFor >= after
 }
 
 // needsUser reports a state only a human resolves, read off the very word the board shows, so the

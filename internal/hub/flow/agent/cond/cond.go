@@ -55,15 +55,9 @@ var TaskGone = of("task-gone", flow.Soon, []flow.Topic{topic.TaskClosed, topic.H
 var WorkAvailable = of("work-available", flow.Soon, []flow.Topic{topic.TaskAvailable, topic.TaskApproved},
 	func(w flow.World) bool { return w.HasNext && w.Up })
 
-// SessionInTheWay: work waits and the session still holds the last unit. Work arrives WHOLE, so that
-// unit is context to drop. Fill > 0 because a clear typed into an empty session never lands.
-var SessionInTheWay = of("session-in-the-way", flow.Soon, []flow.Topic{topic.TaskAvailable, topic.SessionRead},
-	func(w flow.World) bool { return w.Up && w.Fill > 0 && (w.HasNext || len(w.Subtasks) > 0) })
-
-// TierMismatch: the work waiting is rated for another model, so the switch comes before the
-// hand-over — it restarts the session on its way through.
-var TierMismatch = of("tier-mismatch", flow.Soon, []flow.Topic{topic.TaskAvailable},
-	func(w flow.World) bool { return w.TierMismatch && w.Up && (w.HasNext || len(w.Subtasks) > 0) })
+// Preparing a session asks nothing here: clearing it and putting it on the work's model are STEPS
+// of the claim chain (-> roles/worker), each a no-op when there is nothing to do. As conditions read
+// from a resting state they were a way back into preparation — a circle, twelve seconds a lap.
 
 // BetweenSubtasks: it holds a feature and no child of it — a LEAF BOUNDARY, whatever it was doing
 // before. An agent left "working" with nothing in hand is one the board shows as busy and the
@@ -75,6 +69,11 @@ var BetweenSubtasks = of("between-subtasks", flow.Soon, []flow.Topic{topic.TaskC
 // whose work does not come from the backlog, noticed by the agent holding it.
 var HoldsBacklogWork = of("holds-backlog-work", flow.Soon, []flow.Topic{topic.TaskAvailable, topic.HoldingChanged},
 	func(w flow.World) bool { return w.Task != "" || w.Container != "" })
+
+// HoldsNothing: neither a task nor a feature is on this agent's row. Read by the states that mean an
+// agent AT work, where one resumed from an escalation raised before any claim sat with empty hands.
+var HoldsNothing = of("holds-nothing", flow.Soon, []flow.Topic{topic.TaskClosed, topic.HoldingChanged},
+	func(w flow.World) bool { return w.Task == "" && w.Container == "" })
 
 // HoldsFeature: it holds a container task, so it is inside the subtask loop rather than a leaf one.
 var HoldsFeature = of("holds-feature", flow.Blocking, []flow.Topic{topic.HoldingChanged},
@@ -198,18 +197,17 @@ var ReviewWaiting = of("review-waiting", flow.Soon, []flow.Topic{topic.ReviewFil
 		return w.ReviewingPR == "" && w.ReviewWaiting && w.Up && w.AtPrompt() && w.Allowed().Assign == ""
 	})
 
-// --- mail, and standing still ---
+// --- being done, and standing still ---
 
-// MailWaiting: the agent has messages it has not read. Unread mail means it is not DONE, and an
-// agent that is not done is not prepared for new work — which is what stops a clear landing on top
-// of something nobody has seen.
-// Up as well: a stopped agent reads nothing, and the mail state would hold it past its own launch.
-var MailWaiting = of("mail-waiting", flow.Soon, []flow.Topic{topic.MailArrived},
+// NotDone: it holds nothing and has mail it has not read. HAVING mail is no standing — that is true
+// in any state; being unavailable BECAUSE of it is. Up too: a stopped pod reads nothing.
+var NotDone = of("not-done", flow.Soon, []flow.Topic{topic.MailArrived},
 	func(w flow.World) bool { return w.Unread > 0 && w.Up })
 
-// MailRead: nothing is waiting in the mailbox.
-var MailRead = of("mail-read", flow.Soon, []flow.Topic{topic.MailArrived},
-	func(w flow.World) bool { return w.Unread == 0 })
+// Settled: the mailbox is empty AND the agent is back at its prompt. Emptying it is not enough —
+// delivering starts a turn, and moving on mid-turn clears the session under the message being read.
+var Settled = of("settled", flow.Soon, []flow.Topic{topic.MailArrived, topic.SessionRead},
+	func(w flow.World) bool { return w.Unread == 0 && w.AtPrompt() })
 
 // Stalled: the agent holds work and its screen has stopped changing. A pane frozen mid-turn keeps
 // SAYING "working" for ever, so stillness rather than the word is the evidence.
@@ -283,11 +281,11 @@ var LaunchOverdue = of("launch-overdue", flow.Soon, nil,
 var All = []flow.Condition{
 	Retired, BackInService, ClearArmed, Escalated, Resolved,
 	TaskGone, WorkAvailable,
-	HoldsFeature, HoldsBacklogWork, SessionInTheWay, TierMismatch, BetweenSubtasks, FeatureGone, TreeSplit, SubtaskReady, SubtasksGated, FeatureFinished,
+	HoldsFeature, HoldsBacklogWork, HoldsNothing, BetweenSubtasks, FeatureGone, TreeSplit, SubtaskReady, SubtasksGated, FeatureFinished,
 	NotRejected, Rejected, OwnPRRejected, OwnPROpen, AwaitingContribution, PRSettled, MergeConflicted,
 	GainedChildren, MilestoneLanded, NoConflict,
 	SubmitAsked, NoSubmitAsked, GateRefused, ReviewHeld, ReviewOvertaken, ReviewDone, ReviewWaiting,
-	MailWaiting, MailRead, Stalled, Moving,
+	NotDone, Settled, Stalled, Moving,
 	SessionGone, SessionUp, InConversation, ConversationOver,
 	NeededWhileAsleep, AsleepHolding, StartAsked, StopAsked, Reclaimable, LaunchOverdue,
 }

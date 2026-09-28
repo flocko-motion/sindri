@@ -72,8 +72,8 @@ func TestUnassignTaskPreservesAHeldContainer(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "brokkr", Role: "worker", Workspace: ".worktrees/brokkr"}); err != nil {
 		t.Fatal(err)
 	}
-	// Down (not alive): UnassignTask refuses a live holder, so the crashed-mid-feature case is the
-	// one worth pinning — a stale claim under a held container must still keep the container.
+	// Down (not alive): the crashed-mid-feature case — a stale claim under a held container must
+	// still keep the container. A LIVE holder is pinned separately (-> TestUnassignTaskTakesALiveHolderOffIt).
 	flowtest.Place(t, ps, store.AgentState{Agent: "brokkr", Task: "td-sub", Container: "td-feature", Branch: "td-feature", Phase: "working"})
 	a := newActWith2(t, st, &flowtest.Hub{Root: root, Down: true})
 

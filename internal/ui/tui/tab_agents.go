@@ -256,7 +256,13 @@ func observationLine(a api.AgentView) string {
 	if a.Clients > 0 {
 		parts = append(parts, fmt.Sprintf("%d attached", a.Clients))
 	}
-	return strings.Join(parts, ", ")
+	line := strings.Join(parts, ", ")
+	// Last and in its own colour: it is the one thing here that BLOCKS the hub, so it must not read
+	// as another figure in a dim row.
+	if a.InputPending {
+		line += ", " + stWarn.Render(warnGlyph+" a line is waiting unsent — no push lands until it clears")
+	}
+	return line
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.

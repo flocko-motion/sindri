@@ -54,15 +54,6 @@ func (h *Hub) bindings() map[string]binding {
 		"prs": {usage: "list pull requests and their status — your own if you're a worker, the whole project " +
 			"otherwise; the 10 most recent active ones, `--limit N` to widen", run: h.PRFlow().CmdListPRs},
 		"show": {usage: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", run: h.wf.CmdShow},
-		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
-		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
-		"next": {usage: "pick up the next task", run: h.wf.CmdNext,
-			blocked: agentflow.HeldByEscalation("next", func(c registry.Caller) string {
-				if c.HasTask {
-					return "You already hold work — run `sindri` to be told what to do with it."
-				}
-				return ""
-			})},
 		// Through the workflow, not inline here: the gate builds and tests, so it goes through the run
 		// queue with every other one (-> fleet.CmdLint).
 		"lint": {usage: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", run: h.PRFlow().CmdLint},
@@ -279,8 +270,8 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		// what may run: the per-command closures below it survive only for the questions no state can
 		// answer, and never re-derive one.
 		Standing: h.wf.Standing(project, name),
-		// Holding a task or a collaborative container hides "next" and shows "submit" (a container
-		// swaps in "checkpoint"); an idle worker gets the reverse.
+		// Holding a task or a collaborative container is what opens the verbs that ACT on one —
+		// "submit", or "checkpoint" inside a container — and what makes "comment" mean something.
 		HasTask:      !situation.Standing(s.Phase, "idle") || s.Container != "",
 		Container:    s.Container,
 		SubtasksOpen: subtasksOpen,

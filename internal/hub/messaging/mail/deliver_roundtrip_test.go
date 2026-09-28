@@ -26,6 +26,7 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 		MailAndPush.From("reviewer")); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
+	b.Settle() // the push runs behind the written mail; this reads what it recorded
 	unread, err := ps.UnreadMail("dvalin")
 	if err != nil || len(unread) != 1 {
 		t.Fatalf("the message must be waiting, got %+v (err %v)", unread, err)

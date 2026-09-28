@@ -425,6 +425,11 @@ func (p *ProjectStore) DeleteAgent(name string) error {
 	if _, err := p.s.db.Exec(`DELETE FROM chat_members WHERE project=? AND name=?`, p.project, name); err != nil {
 		return fmt.Errorf("delete agent chat membership %s/%s: %w", p.project, name, err)
 	}
+	// And the state row: OpenLeaves hides every task named on ANY of them, while the board reads
+	// holders off the ROSTER — so work left behind is unclaimable and shown unassigned at once.
+	if _, err := p.s.db.Exec(`DELETE FROM agent_state WHERE project=? AND agent=?`, p.project, name); err != nil {
+		return fmt.Errorf("delete agent state %s/%s: %w", p.project, name, err)
+	}
 	return nil
 }
 

@@ -53,10 +53,14 @@ func (x hubHarness) Observe(project, name string) observe.Observation {
 	return x.h.observed(project, name)
 }
 
-// Probe takes a FRESH look where Observe reports the standing one — for a caller that needs the
-// answer as of now. Under the hub's lifetime, since fleet.Harness carries no context of its own.
+// Probe takes a FRESH look where Observe reports the standing one, through the observer, so what
+// the caller acts on is what the machine and the board read next.
 func (x hubHarness) Probe(project, name string) observe.Observation {
-	o := x.h.observed(project, name)
+	if x.h.watch != nil {
+		x.h.watch.lookNow(project, name)
+		return x.h.observed(project, name)
+	}
+	o := x.h.observed(project, name) // on the way up, before the observer exists
 	o.Up = x.h.agents.AgentAlive(x.h.lifetime, project, name)
 	o.TakenAt = time.Now()
 	return o
@@ -83,7 +87,7 @@ func (x hubHarness) Interrupt(project, name string) error {
 // the launching or stopping state. That cancellation is the bound on a launch a runtime never
 // answers, in place of a sweep watching the intent from outside.
 func (x hubHarness) Start(ctx context.Context, project, name string) error {
-	return x.h.agents.Launch(ctx, project, name, false, false, 0, 0, io.Discard)
+	return x.h.agents.Start(ctx, project, name)
 }
 
 func (x hubHarness) Stop(ctx context.Context, project, name string) error {
@@ -92,8 +96,10 @@ func (x hubHarness) Stop(ctx context.Context, project, name string) error {
 
 func (x hubHarness) Container(project, name string) string { return x.h.container(project, name) }
 
-func (x hubHarness) ModelMatches(want, detected string) bool {
-	return x.h.agents.ModelMatches(want, detected)
+func (x hubHarness) TierIs(on, tier string) (met, known bool) { return x.h.agents.TierIs(on, tier) }
+
+func (x hubHarness) SetTier(ctx context.Context, project, name, tier string) error {
+	return x.h.agents.SetTier(ctx, project, name, tier)
 }
 
 // agentDeps adapts the hub to agent.Deps.
@@ -271,8 +277,4 @@ func (d workflowDeps) Escalate(project, name, question string) (string, error) {
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps
-}
-
-func (d workflowDeps) ModelForTier(tier string) (string, bool) {
-	return d.h.agents.ModelForTier(tier)
 }

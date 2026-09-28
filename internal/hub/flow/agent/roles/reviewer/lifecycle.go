@@ -16,7 +16,7 @@ const (
 	Launching = "reviewer" + lifecycle.LaunchingIn
 	Stopping  = "reviewer" + lifecycle.StoppingIn
 	Clearing  = "reviewer" + lifecycle.ClearingIn
-	Mail      = "reviewer" + lifecycle.MailIn
+	NotDone   = "reviewer" + lifecycle.NotDoneIn
 	Escalated = "reviewer" + lifecycle.EscalatedIn
 	Retired   = "reviewer" + lifecycle.RetiredIn
 )
@@ -30,10 +30,6 @@ var (
 // branch arrives rather than by whoever hands it over.
 var clearing = lifecycle.Clearing(Clearing, Taking, Idle)
 
-var mail = lifecycle.Mail(Mail, Idle, flow.Offers{
-	{Verb: verb.Escalate, Why: "stop on a question"},
-})
-
 // The verbs an escalated reviewer keeps: everything but the verdict. One stopped on a question still
 // reads the diff and the task, and still says what it has found.
 var escalated = lifecycle.Escalated(Escalated, Reviewing, flow.Offers{
@@ -42,6 +38,12 @@ var escalated = lifecycle.Escalated(Escalated, Reviewing, flow.Offers{
 	{Verb: verb.Fyi, Why: "one note to the user"},
 	{Verb: verb.Run, Why: "queue a slow build or test"},
 	{Verb: verb.Git, Why: "read the diff"},
+})
+
+// notDone: free of any review, and not taking one, because its mail is unread.
+var notDone = lifecycle.NotDone(NotDone, Idle, flow.Offers{
+	{Verb: verb.Task, Why: "read the backlog"},
+	{Verb: verb.Escalate, Why: "stop on a question"},
 })
 
 var retired = lifecycle.Retired(Retired, Idle, nil)

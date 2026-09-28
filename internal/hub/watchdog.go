@@ -69,10 +69,13 @@ type liveness struct {
 	clients int
 	// state is what the session said of itself, parsed at THIS boundary — the one place the tool's
 	// word is read (-> observe.ParseState). Nothing downstream sees a string to match against.
-	state   observe.State
-	digest  string // the pane's content hash, so stillness is measurable
-	strikes int    // consecutive failed probes; up is held until downStrikes
-	seen    time.Time
+	state  observe.State
+	digest string // the pane's content hash, so stillness is measurable
+	// inputPending is a line typed into the pane and never sent. It stops every push to this agent,
+	// so it is evidence the board shows rather than something only a hand-taken capture reveals.
+	inputPending bool
+	strikes      int // consecutive failed probes; up is held until downStrikes
+	seen         time.Time
 	// stillSince is when the pane last changed, or last reported a tool call in flight within
 	// toolRunningCap — neither a running shell nor a busy screen is a stall (-> record).
 	stillSince time.Time
@@ -320,23 +323,41 @@ func (w *watchdog) sweep(withProbes bool) {
 }
 
 // probe reads one agent's tmux session and, when up, Claude's state; a failure is a strike only.
-func (w *watchdog) probe(a store.Agent) {
+func (w *watchdog) probe(a store.Agent) { w.read(a, false) }
+
+// lookNow is a probe for a caller about to act on this one agent (-> hubHarness.Probe), and its
+// reading settles at once. The strikes spare the board a contended exec's flicker; a caller acting
+// on the answer has already trusted it, so the machine and the board must see the same.
+func (w *watchdog) lookNow(project, name string) {
+	a, ok, err := w.h.store.For(project).GetAgent(name)
+	if err != nil || !ok {
+		return
+	}
+	w.read(a, true)
+}
+
+// read is one probe of one agent; settle is lookNow's.
+func (w *watchdog) read(a store.Agent, settle bool) {
 	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	defer cancel()
 	cs, ok := w.h.agents.ClientsCtx(ctx, a.Project, a.Name)
 	if !ok {
-		w.record(a, false, 0, harness.Observation{})
+		w.recordReading(a, false, 0, harness.Observation{}, settle)
 		return
 	}
-	obs := w.h.agents.Observe(ctx, a.Project, a.Name)
-	w.record(a, true, len(cs), obs)
+	w.recordReading(a, true, len(cs), w.h.agents.Observe(ctx, a.Project, a.Name), settle)
 }
 
 // record folds one observation in: a success clears strikes, a failure holds the previous state and
 // its counts until downStrikes. No single reading settles anything, whatever its source — a missing
 // pod and a failed probe are both one observation, and a listing can be a moment out of date.
 func (w *watchdog) record(a store.Agent, up bool, clients int, obs harness.Observation) {
-	if w.fold(a, up, clients, obs) {
+	w.recordReading(a, up, clients, obs, false)
+}
+
+// recordReading is record, except that settle folds a failure in as down at once (-> lookNow).
+func (w *watchdog) recordReading(a store.Agent, up bool, clients int, obs harness.Observation, settle bool) {
+	if w.fold(a, up, clients, obs, settle) {
 		w.announce(a.Project, a.Name)
 	}
 }
@@ -353,7 +374,7 @@ func (w *watchdog) announce(project, name string) {
 // fold takes one reading into the record and reports whether the session now reads differently —
 // alive, doing something else, or showing something else. Apart from record so the topic is
 // published with the lock released.
-func (w *watchdog) fold(a store.Agent, up bool, clients int, obs harness.Observation) (moved bool) {
+func (w *watchdog) fold(a store.Agent, up bool, clients int, obs harness.Observation, settle bool) (moved bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
@@ -364,9 +385,10 @@ func (w *watchdog) fold(a store.Agent, up bool, clients int, obs harness.Observa
 	switch {
 	case up:
 		next.strikes = 0
+		next.inputPending = obs.InputPending
 	default:
 		next.strikes = prev.strikes + 1
-		if next.strikes < downStrikes && prev.up {
+		if !settle && next.strikes < downStrikes && prev.up {
 			// Not yet convinced: keep what the last good probe saw.
 			next.up, next.clients, next.state, next.digest = true, prev.clients, prev.state, prev.digest
 		}

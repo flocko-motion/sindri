@@ -110,9 +110,6 @@ func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flo
 			return err
 		}
 		w.Subtasks, w.Gated = children, w.Pool.GatedUnder(w.Container)
-		if len(children) > 0 {
-			w.TierMismatch = e.tierMismatch(w, children[0].Tier)
-		}
 		return nil
 	}
 	if w.Role == "reviewer" {
@@ -133,19 +130,9 @@ func (e *Engine) gatherWork(ps *store.ProjectStore, project, name string, w *flo
 		return err
 	}
 	packages, leaves := without(w.Pool.Packages, spoken), without(w.Pool.Leaves, spoken)
-	w.Next, w.NextIsFeature, w.HasNext = task.NextUp(packages, leaves, e.roleAct().TierPrefers(project, name))
+	w.Next, w.NextIsFeature, w.HasNext = task.NextUp(packages, leaves, e.roleAct().TierPrefers(w.Model))
 	w.Wanted = w.HasNext
-	if w.HasNext {
-		w.TierMismatch = e.tierMismatch(w, w.Next.Tier)
-	}
 	return e.gatherPool(ps, w)
-}
-
-// tierMismatch reports work rated for a model other than the one under the agent. Read here because
-// which model a tier deserves is POLICY and whether two ids name one is the backend's own knowledge.
-func (e *Engine) tierMismatch(w *flow.World, tier string) bool {
-	want, known := e.Deps.ModelForTier(api.TierOrDefault(tier))
-	return known && !e.Harness.ModelMatches(want, w.Model)
 }
 
 // gatherPool answers the two fleet-shaped questions a stopped agent cannot ask for itself: would

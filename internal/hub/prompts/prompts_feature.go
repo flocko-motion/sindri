@@ -8,15 +8,6 @@ package prompts
 
 import "fmt"
 
-// DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing
-// branch, checkpointing between them, and the branch goes up as one PR when they are all done.
-func DirContainerClaimed(container, ctitle, child, childTitle string) string {
-	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
-		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to record it and move to the next subtask. One PR covers the whole feature, so submit "+
-		"once every subtask is checkpointed, never per subtask.%s%s", container, ctitle, child, childTitle, runPointer, FinishNote)
-}
-
 // DirContainerWorking is the working directive inside a feature. Claiming used to be the only place
 // the feature loop named its verb; every later `sindri` fell through to DirWorking and asked for a
 // submit that was held back mid-feature.
@@ -38,6 +29,39 @@ func DirContainerRejected(container, task, feedback string, round int, aim, ceil
 		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
 		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s%s%s%s",
 		container, task, feedback, GeneralizeNote(round), FinishNote, CommentBudgetNote(aim, ceiling), ToolingBlock())
+}
+
+// AskClaimFailed asks the user about work the hub could not claim. The reason comes from outside the
+// flow — git or the store — so it is passed through whole: a claim that keeps failing fails the same
+// way every two seconds, and the first line of it is what says which repo to go and look at.
+func AskClaimFailed(unit string, err error) string {
+	return fmt.Sprintf("I could not claim %s for this agent: %v. Nothing was said into the session and "+
+		"%s is still open, so it goes to whoever is free once this is fixed.", unit, err, unit)
+}
+
+// AskMailUndelivered asks the user about mail that was marked read and then could not be put into
+// the session. The messages ride along whole: they are gone from the mailbox, so this text is the
+// only remaining copy of what the agent was supposed to see.
+func AskMailUndelivered(served string, err error) string {
+	return fmt.Sprintf("I could not deliver this agent's mail into its session: %v. The messages are "+
+		"no longer in its mailbox, so they are reproduced here:\n\n%s", err, served)
+}
+
+// AskPrepareFailed asks the user about a session that could not be emptied for its selected work.
+// Nothing runs past it: `/model` on history that is still there opens a dialog, which eats the brief.
+func AskPrepareFailed(err error) string {
+	return fmt.Sprintf("I could not clear this session for the work selected for it: %v. The work is "+
+		"still selected and nothing has been said into the session. Its pane may be holding an unsent "+
+		"line, or the session may not be answering — `sindri agent pane <name>` shows which.", err)
+}
+
+// AskRetierFailed asks the user about a session that could not be put on its work's model. Typing a
+// line into a pane is not a thing that fails, so one that did is a fault in the harness.
+func AskRetierFailed(tier string, err error) string {
+	return fmt.Sprintf("I could not switch this session to the model %s work runs on: %v. The work "+
+		"is still claimed and nothing has been said into the session. Its pane may be holding an "+
+		"unsent line, or the session may not be answering — `sindri agent pane <name>` shows which.",
+		tier, err)
 }
 
 // DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is
@@ -70,8 +94,8 @@ func ReplySubtasksRemain(container, next string, open int) string {
 func ReplyTaskGrew(id string, children []string) string {
 	return fmt.Sprintf("%s gained work after you picked it up — %s now %s under it, so what you hold "+
 		"is a FEATURE rather than one task, and its PR covers the whole of it. Nothing you have done "+
-		"is lost: you stay on the same branch. Run `sindri` for the subtask, `sindri checkpoint "+
-		"\"<summary>\"` to end each one, and submit when none are left.",
+		"is lost: you stay on the same branch. The hub hands you each subtask in its turn; "+
+		"`sindri checkpoint \"<summary>\"` ends one, and you submit when none are left.",
 		id, FileList(children), plural(len(children), "sits", "sit"))
 }
 
@@ -111,7 +135,7 @@ func ReplyCheckpointedLast(done, container string) string {
 		"whole branch up now with `sindri submit \"<summary>\"`.", done, container)
 }
 
-const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri` for your current directive."
+const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask."
 
 // ReplyCheckpointedClearing answers a checkpoint made while a clear was armed: the feature stays
 // held, the next subtask waits for the empty session.

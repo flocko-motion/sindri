@@ -33,7 +33,7 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 		{"waiting for a verdict on a feature's PR", "submitted", "td-EPIC", "idle", false, past, false},
 		// A finished feature is the worker's to submit, so parking on one is a stall. It was excluded
 		// while only a human could open the milestone PR, and that wait no longer exists.
-		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", false, past, true},
+		{"a feature whose subtasks are all checkpointed", "feature-done", "td-EPIC", "idle", false, past, true},
 		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", false, past, true},
 		{"between assignments, holding nothing", "idle", "", "idle", false, past, false},
 		// ori's case: AssignReview writes "reviewing" and nothing else, so neither of the old disjuncts
@@ -53,6 +53,7 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 		s := Situation{
 			Phase: c.phase, Container: c.container, WaitingOnRun: c.waitingOnRun,
 			Observation: observe.Observation{State: observe.ParseState(c.runtime)}, StillFor: c.stillFor,
+			idleRule: testIdleRule,
 		}
 		if got := s.Allowed().Stalled; got != c.want {
 			t.Errorf("%s: Stalled(%q, %q, %q, %v, %v) = %v, want %v",
@@ -217,4 +218,13 @@ func TestRetirementParksOnlyOnceItHoldsNothing(t *testing.T) {
 	if !done.ParkedByTheHub() {
 		t.Error("with nothing in hand it is finished, which is all retirement ever meant")
 	}
+}
+
+// testIdleRule stands in for the flows' own declaration, which this package cannot import: the maps
+// read the situation, so the situation cannot read them back (-> agent/idle.Rule, handed in at
+// construction). WHICH states nudge is held beside those maps; what this file tests is what the
+// dwell, the screen and the queue then make of it.
+func testIdleRule(phase string) (time.Duration, bool) {
+	return 0, Standing(phase, "working", "reworking", "resolving", "reviewing", "between-subtasks",
+		"feature-done", "not-done", "planning", "interviewing", "stalled")
 }

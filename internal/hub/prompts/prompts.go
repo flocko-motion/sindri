@@ -520,11 +520,12 @@ const runPointer = " If part of it needs a slow build or test, `sindri run \"<co
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
-// DirMailWaiting answers an agent with unread mail. Unread mail means it is NOT DONE, so nothing
-// else is handed to it until the mailbox is empty — which is what this says rather than implies.
-const DirMailWaiting = "You have unread mail, and it is served above this line. Nothing else is " +
-	"handed to you until you have read it: a message you never saw would otherwise be discarded by " +
-	"the reset that prepares you for whatever came next."
+// DirNotDone answers an agent that is holding nothing and taking nothing, because it has unread
+// mail. It says what is UNFINISHED rather than what arrived: the mail is served above this line, and
+// reading it is the whole of what stands between the agent and its next work.
+const DirNotDone = "You are not done: your mail is served above this line and you have not read it. " +
+	"Nothing new is handed to you until you have, because the reset that prepares you for it would " +
+	"discard a message you never saw."
 
 // DirStalled answers an agent that holds work and has stopped moving. It names the work, because an
 // agent that lost the thread needs telling what it was holding before it needs telling to carry on.
@@ -564,10 +565,12 @@ func DirBusy(phase string) string {
 // busyWords names each state the hub acts in, in the agent's own terms. Keyed on the state name, so
 // an agent is told WHICH thing is happening rather than "a moment".
 var busyWords = map[string]string{
-	"worker/assigning":       "Work is being handed to you",
-	"worker/picking-subtask": "Your next subtask is being handed to you",
+	"worker/assigning":       "Work is being claimed for you",
+	"worker/picking-subtask": "Your next subtask is being claimed for you",
+	"worker/preparing":       "Your session is being cleared for the work you have been given",
+	"worker/retiering":       "Your model is being switched for the work you have been given",
+	"worker/handing-over":    "The work you have been given is being handed to you",
 	"worker/clearing":        "Your session is being cleared",
-	"worker/retiering":       "Your model is being switched for the work coming",
 	"worker/submitting":      "Your submission is going through the gate",
 	"worker/releasing":       "The feature you held has landed; letting go of it",
 	"worker/yielding":        "Another agent is inside your tree; handing it over",
@@ -617,7 +620,7 @@ func ReplyEscalationRaised(question, task string) string {
 
 // ReplyResumed confirms an escalation is cleared and sends the agent back to the one loop it has.
 const ReplyResumed = "Resumed — your escalation is cleared and your work verbs are open again. " +
-	"Run `sindri` for your directive."
+	"Carry on with the work you hold."
 
 // The feature loop's strings live in prompts_feature.go, the submit/rebase/resolve set in submitreplies.go.
 
@@ -629,7 +632,7 @@ func MsgResumedByUser(question, answer string) string {
 	if answer != "" {
 		msg += "\n\nTheir answer: " + answer
 	}
-	return msg + "\n\nCarry on from where you stopped — run `sindri` for your directive."
+	return msg + "\n\nCarry on from where you stopped."
 }
 
 // Deferring reports an answer that is a running action speaking (-> DirBusy). It is what tells a

@@ -63,6 +63,22 @@ var All = func() []flow.State {
 	return out
 }()
 
+// Superseded is every state these flows have STOPPED declaring, and where an agent found standing in
+// one belongs now. A stored row outlives the map that wrote it, so a removal without an entry here
+// strands every agent the old map left behind — `worker/mail` did, and `sindri` answered them
+// "cannot reach the hub" from a hub that was running.
+//
+// An entry is a MIGRATION and stays for ever: rows are written by whatever version last touched
+// them, and a hub started against an old database meets them all.
+var Superseded = map[string]string{
+	// Having mail was never a standing — it is true in any state. What replaced it is being NOT DONE
+	// because of it, which only the roles the hub gives work to can be (-> lifecycle.NotDone).
+	"worker/mail":   worker.NotDone,
+	"reviewer/mail": reviewer.NotDone,
+	"planner/mail":  planner.Start,
+	"coauthor/mail": coauthor.Start,
+}
+
 // byName indexes All, for a caller holding a state's name and needing its declaration.
 var byName = func() map[string]flow.State {
 	m := make(map[string]flow.State, len(All))

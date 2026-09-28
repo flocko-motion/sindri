@@ -1,6 +1,6 @@
 // package: hub/flow/agent/roles/lifecycle / lifecycle
 // type:    logic (the states every role shares, built once)
-// job:     build the session and pod lifecycle states — launching, stopping, clearing, mail,
+// job:     build the session and pod lifecycle states — launching, stopping, clearing, not-done,
 // escalated, retired — from each role's own destinations. WHERE one leads differs by role; what can
 // move a subject out of it does not, so the event list is written here and nowhere else.
 // limits:  the shared states. A role's own work states are its own file's (-> roles/<role>).
@@ -12,6 +12,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow/agent/act"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
+	"github.com/flo-at/sindri/internal/hub/flow/machine"
 )
 
 // The suffix each lifecycle state carries. Named so a role spells its own states by joining rather
@@ -20,7 +21,7 @@ const (
 	LaunchingIn = "/launching"
 	StoppingIn  = "/stopping"
 	ClearingIn  = "/clearing"
-	MailIn      = "/mail"
+	NotDoneIn   = "/not-done"
 	EscalatedIn = "/escalated"
 	RetiredIn   = "/retired"
 )
@@ -37,9 +38,10 @@ var note = flow.Offers{{Verb: verb.Log, Why: "record a note"}}
 // was a single missing edge in one of two copies of a hand-written state.
 func Launching(name, resting string) flow.State {
 	return flow.State{
-		Name:   name,
-		Title:  "Being started",
-		Action: act.Launch,
+		WhenIdle: machine.LetItRest, // a pod is coming up
+		Name:     name,
+		Title:    "Being started",
+		Action:   act.Launch,
 		About: "Work this agent's role answers for is waiting and its pod was reclaimed, so the hub " +
 			"is bringing it back. Nothing is claimed until it is up: a claim made against a dead pod " +
 			"erases the very evidence that an agent was needed, which is how a filed review went " +
@@ -60,9 +62,10 @@ func Launching(name, resting string) flow.State {
 // preserved, so the cost of being wrong is the next start's latency and nothing else.
 func Stopping(name, resting string) flow.State {
 	return flow.State{
-		Name:   name,
-		Title:  "Being reclaimed",
-		Action: act.Stop,
+		WhenIdle: machine.LetItRest, // a pod is going away
+		Name:     name,
+		Title:    "Being reclaimed",
+		Action:   act.Stop,
 		About: "This agent has held nothing long enough that its pod is worth taking back. A stop " +
 			"preserves the session, so reclaiming costs only the next start's latency — which is why " +
 			"idleness alone triggers it and memory pressure never does.",
@@ -81,9 +84,10 @@ func Stopping(name, resting string) flow.State {
 // — the hand-over it was taken for; resting is where one that could not happen leaves the agent.
 func Clearing(name, ready, resting string) flow.State {
 	return flow.State{
-		Name:   name,
-		Title:  "Having its session cleared",
-		Action: act.Clear,
+		WhenIdle: machine.LetItRest, // the hub is resetting the session
+		Name:     name,
+		Title:    "Having its session cleared",
+		Action:   act.Clear,
 		About: "A clear was typed into the session and the hub is waiting for the reading to fall — " +
 			"the clear having HAPPENED, where a sleep only assumes it. Whatever comes next arrives " +
 			"whole behind it, so the previous unit is context to drop rather than condense.",
@@ -98,18 +102,28 @@ func Clearing(name, ready, resting string) flow.State {
 	}
 }
 
-// Mail is unread mail, which means the agent is not DONE — and one that is not done is not prepared
-// for anything new, which is what stops a clear landing on top of a message nobody has seen.
-func Mail(name, resting string, alsoAllowed flow.Offers) flow.State {
+// NotDone is an agent holding nothing and taking nothing, because something it was told is still
+// unanswered. Defined by what it REFUSES, so only a role the hub gives work to has one — and mail,
+// which is true of any state, is the reason it holds rather than the thing it is named for.
+func NotDone(name, resting string, alsoAllowed flow.Offers) flow.State {
 	return flow.State{
-		Name:  name,
-		Title: "Mail to read",
-		About: "The agent has unread mail. Unread mail means it is NOT DONE, and an agent that is " +
-			"not done is never prepared for new work. The mail is served with the directive; reading " +
-			"it is the exit.",
-		Says: says.Mail,
+		WhenIdle: machine.Nudge, // the mail is in its session and reading it is what it owes
+		Name:     name,
+		Title:    "Not done yet",
+		About: "The agent holds no work and is not taking any until it has read its mail — so the hub " +
+			"PUTS the mail in its session rather than waiting to be asked for it. Waiting was a " +
+			"deadlock: reading is the only way out, and an agent idle at a prompt asks for nothing. " +
+			"It leaves once the mailbox is empty AND it is back at its prompt, having reacted.",
+		Says:   says.NotDone,
+		Action: act.Deliver,
 		Events: flow.Events{
-			{On: cond.MailRead, To: resting, Why: "the mailbox is empty again"},
+			// Delivering moves nobody: the agent is now REACTING to what landed, and a claim behind
+			// that would clear the session mid-thought — the loss this state exists to prevent.
+			{On: act.Done, To: flow.Stay, Why: "the mail is in its session; it is reading it"},
+			{On: act.Nothing, To: flow.Stay, Why: "nothing left to deliver; it is still finishing"},
+			{On: act.Failed, To: resting, Why: "the mail could not be delivered; a human has the messages"},
+			{On: cond.Settled, To: resting, Why: "the mailbox is empty and it is back at its prompt — done"},
+			{On: cond.SessionGone, To: resting, Why: "the pod went away; nothing here will finish"},
 		},
 		Verbs: append(flow.Offers{
 			{Verb: verb.Mail, Why: "read your mailbox"},
@@ -123,8 +137,9 @@ func Mail(name, resting string, alsoAllowed flow.Offers) flow.State {
 // that role, and those differ; reading, tidying and telling the user anything never do.
 func Escalated(name, back string, alsoAllowed flow.Offers) flow.State {
 	return flow.State{
-		Name:  name,
-		Title: "Escalated",
+		WhenIdle: machine.LetItRest, // the user owes the answer
+		Name:     name,
+		Title:    "Escalated",
 		About: "The agent stopped on a question only the user can answer, and the question is " +
 			"durable: one that evaporates leaves the agent silently stuck. It is repeated on every " +
 			"ask, since an agent relaunched mid-escalation remembers nothing of how it got here.",
@@ -146,8 +161,9 @@ func Escalated(name, back string, alsoAllowed flow.Offers) flow.State {
 // returns it to.
 func Retired(name, resting string, alsoAllowed flow.Offers) flow.State {
 	return flow.State{
-		Name:  name,
-		Title: "Retired",
+		WhenIdle: machine.LetItRest, // wound down, and nothing is expected of it
+		Name:     name,
+		Title:    "Retired",
 		About: "A human wound this agent down: nothing further is assigned to it. Whatever it held " +
 			"it has already finished — retirement is no NEW work, never abandoning what is in hand. " +
 			"Un-retiring pushes a message, so waiting quietly is a kept promise.",
