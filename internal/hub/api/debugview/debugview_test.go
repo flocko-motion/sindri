@@ -2,7 +2,9 @@ package debugview
 
 import (
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,10 +25,21 @@ func (fakeSource) HandleEvents(w http.ResponseWriter, _ *http.Request) {
 	_, _ = io.WriteString(w, "data: {}\n\n")
 }
 
+// freePort is a port nothing holds this moment, so a test never depends on DefaultPort being free.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
 func served(t *testing.T) (*Server, string) {
 	t.Helper()
 	s := New(fakeSource{})
-	url, err := s.Serve(0)
+	url, err := s.startFrom(freePort(t), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,15 +106,42 @@ func TestAnotherHostIsRefused(t *testing.T) {
 	}
 }
 
-// TestServingAgainNamesTheRunningView: asking twice reopens the same URL; asking for another port
-// while one is served is refused and says which port it is on.
-func TestServingAgainNamesTheRunningView(t *testing.T) {
-	s, url := served(t)
-	again, err := s.Serve(0)
-	if err != nil || again != url {
-		t.Errorf("Serve again = %q, %v; want %q", again, err, url)
+// TestTheViewTakesTheFirstFreePortFromItsOwn: the URL stays the same across restarts, so the view
+// binds its first port whenever it can, and the next one up only when that one is held.
+func TestTheViewTakesTheFirstFreePortFromItsOwn(t *testing.T) {
+	first := freePort(t)
+	held, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(first)))
+	if err != nil {
+		t.Skipf("could not hold port %d for the test: %v", first, err)
 	}
-	if _, err := s.Serve(1); err == nil || !strings.Contains(err.Error(), "already served on port") {
-		t.Errorf("Serve on another port = %v, want a refusal naming the running port", err)
+	defer held.Close()
+	s := New(fakeSource{})
+	t.Cleanup(s.Close)
+	url, err := s.startFrom(first, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "http://127.0.0.1:" + strconv.Itoa(first+1) + "/"; url != want {
+		t.Errorf("with %d held the view is at %s, want the next port up, %s", first, url, want)
+	}
+	if s.Where() != url {
+		t.Errorf("Where = %q, want the served URL %q", s.Where(), url)
+	}
+}
+
+// TestNoFreePortIsSaidNotSwallowed: a view that could not bind says why, where hub info reads it.
+func TestNoFreePortIsSaidNotSwallowed(t *testing.T) {
+	first := freePort(t)
+	held, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(first)))
+	if err != nil {
+		t.Skipf("could not hold port %d for the test: %v", first, err)
+	}
+	defer held.Close()
+	s := New(fakeSource{})
+	if _, err := s.startFrom(first, 1); err == nil {
+		t.Fatal("the only port was held, yet the view claims to serve")
+	}
+	if w := s.Where(); !strings.HasPrefix(w, "not served: no free port") {
+		t.Errorf("Where = %q, want the reason it is not served", w)
 	}
 }

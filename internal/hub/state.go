@@ -174,7 +174,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			NeedsUser:  allowed.NeedsUser,
 			ObservedAt: observedAt(sit.TakenAt), StillFor: stillLabel(sit.StillFor),
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status:  status,
+			Status: status, Phase: st.Phase,
 			Runtime: l.state.String(),
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: l.clients, Container: pod, Memory: a.Memory, Retired: a.Retired,
@@ -211,7 +211,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
-		RepoDocs: docs, SpecCLIMissing: repos[selected].specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		RepoDocs: docs, SpecCLIMissing: repos[selected].specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339), DebugView: h.debug.Where(),
 		DefaultMemory: harness.MemoryOrDefault(""),
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
 		// one here would put a process spawn on every board read, and there are many.

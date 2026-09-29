@@ -8,6 +8,20 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow/machine"
 )
 
+// exits is a state's effective exits, its regions' included (-> machine.Exits): what can move an agent
+// out, which its own Events no longer answer alone.
+func exits(s flow.State) []flow.Transition {
+	groups := map[string]flow.Group{}
+	for _, g := range Groups {
+		groups[g.Name] = g
+	}
+	var out []flow.Transition
+	for _, e := range machine.Exits(groups, s) {
+		out = append(out, e.Transition)
+	}
+	return out
+}
+
 // chainOrder is the claim chain in the order the hub runs it: select, prepare, instruct. The two
 // claims share rank 0 because neither leads to the other — a leaf and a subtask are two ways in.
 var chainOrder = map[string]int{
@@ -28,7 +42,7 @@ func TestTheClaimChainOnlyRunsForward(t *testing.T) {
 		if !declared {
 			t.Fatalf("%s is not in the worker's flow — the guard is reading names nothing declares", name)
 		}
-		for _, e := range s.Events {
+		for _, e := range exits(s) {
 			to, inChain := chainOrder[e.To]
 			if !inChain {
 				continue // leaving the chain is how it ends; only a step BACK is the fault
@@ -51,7 +65,7 @@ func TestPreparationIsEnteredByAClaimAlone(t *testing.T) {
 			continue
 		}
 		resting++
-		for _, e := range s.Events {
+		for _, e := range exits(s) {
 			if e.To == Preparing || e.To == Retiering || e.To == HandingOver {
 				t.Errorf("%s rests, yet leads to %s. Preparation follows a claim; reached from rest it "+
 					"is a way back into it", s.Name, e.To)
@@ -71,7 +85,7 @@ func TestEveryChainStepEndsAtTheWork(t *testing.T) {
 		if chainOrder[s.Name] < 1 { // the claims themselves hold nothing yet, so idle is right for them
 			continue
 		}
-		for _, e := range s.Events {
+		for _, e := range exits(s) {
 			if _, isOutcome := e.On.(machine.Outcome); isOutcome {
 				continue
 			}
@@ -127,7 +141,7 @@ func TestNoWorkStateHoldsAnEmptyHandedAgent(t *testing.T) {
 			continue
 		}
 		leads := ""
-		for _, e := range s.Events {
+		for _, e := range exits(s) {
 			if c, ok := e.On.(flow.Condition); ok && c.Name == cond.HoldsNothing.Name {
 				leads = e.To
 			}

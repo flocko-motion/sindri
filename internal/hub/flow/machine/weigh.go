@@ -5,8 +5,9 @@
 // limits:  reading. Nothing is moved, started or recorded; what a view makes of it is the view's.
 package machine
 
-// Weigh is where a subject stands and, per event of that state in declaration order, whether it
-// holds now. An outcome never does: it arrives with its action and is never read off the world.
+// Weigh is where a subject stands and, per effective exit of that state (-> Exits, its groups'
+// included), whether it holds now. An outcome never does: it arrives with its action and is never
+// read off the world.
 func (m *machine[W]) Weigh(subject string) (State[W], []bool, error) {
 	s, since, err := m.standing(subject)
 	if err != nil {
@@ -16,8 +17,9 @@ func (m *machine[W]) Weigh(subject string) (State[W], []bool, error) {
 	if err != nil {
 		return s, nil, err
 	}
-	holds := make([]bool, len(s.Events))
-	for i, t := range s.Events {
+	exits := m.exits[s.Name]
+	holds := make([]bool, len(exits))
+	for i, t := range exits {
 		switch c := t.On.(type) {
 		case Condition[W]:
 			holds[i] = c.Holds != nil && c.Holds(w)

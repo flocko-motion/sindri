@@ -23,6 +23,7 @@ const (
 var idle = flow.State{
 	WhenIdle: flow.LetItRest, // nothing has been selected for it yet
 	Name:     Idle,
+	In:       GroupConversation,
 	Title:    "Planner at rest",
 	About: "A planner never grabs a backlog task. Work reaches it as a conversation, so at rest it " +
 		"is pointed at whatever the user has already said rather than at a queue. It is TOLD that on " +
@@ -31,8 +32,6 @@ var idle = flow.State{
 	Says:  says.Planner,
 	Tells: true,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
-		{cond.HoldsBacklogWork, Disowning, "a backlog task is on its row, and a planner holds none"},
 		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear"},
 		{cond.StartAsked, Launching, "a human asked for this pod"},
@@ -58,13 +57,12 @@ var idle = flow.State{
 var planning = flow.State{
 	WhenIdle: flow.Nudge, // the conversation is its work, and a quiet screen mid-plan is a plan that stopped
 	Name:     Planning,
+	In:       GroupConversation,
 	Title:    "Planning with the user",
 	About: "The planner has work in hand — a brief it was given, or a conversation it is inside. " +
 		"The hub waits on nothing from it and has nothing to add until it ships or declares itself idle.",
 	Says: says.Planning,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
-		{cond.HoldsBacklogWork, Disowning, "a backlog task is on its row, and a planner holds none"},
 		{cond.ConversationOver, Idle, "its session holds nothing, so the plan it was inside is gone with it"},
 		// A planner holds no backlog task, so every moment is a leaf boundary and an armed clear
 		// fires wherever it stands. It lands at rest afterwards on purpose: the conversation it was
@@ -88,12 +86,12 @@ var planning = flow.State{
 var submitted = flow.State{
 	WhenIdle: flow.LetItRest, // a reviewer owes the verdict
 	Name:     Submitted,
+	In:       GroupSeat,
 	Title:    "Planner waiting on a verdict",
 	About: "The planner shipped its spec edits as a pull request, and that PR IS the review — there " +
 		"is nothing else to ask anyone to read.",
 	Says: says.AwaitVerdict,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.PRSettled, Idle, "the proposal landed or was withdrawn"},
 		{cond.OwnPRRejected, Planning, "it came back with feedback to answer"},
 	},

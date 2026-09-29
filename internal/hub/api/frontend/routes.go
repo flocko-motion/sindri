@@ -145,15 +145,6 @@ func Handler(h Hub) http.Handler {
 		evs, err := h.StateLog(h.AgentReq(r, name), name)
 		serve.WriteJSON(w, evs, err)
 	})
-	// Starts the flow debug view's own loopback listener, which carries its reads (-> debugview).
-	mux.HandleFunc("POST /debug/serve", func(w http.ResponseWriter, r *http.Request) {
-		var req api.DebugServeReq
-		if !serve.Decode(w, r, &req) {
-			return
-		}
-		url, err := h.DebugServe(req.Port)
-		serve.WriteJSON(w, api.DebugServeResp{URL: url}, err)
-	})
 	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
 		lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
 		if lines <= 0 {

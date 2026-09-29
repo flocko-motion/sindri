@@ -18,6 +18,7 @@ import (
 // them without a type parameter in sight.
 type (
 	State      = machine.State[World]
+	Group      = machine.Group[World]
 	Transition = machine.Transition[World]
 	Condition  = machine.Condition[World]
 	Action     = machine.Action
@@ -27,6 +28,18 @@ type (
 	Topic      = machine.Topic
 	Events     = []machine.Transition[World]
 	Offers     = []machine.Offer
+)
+
+// Kind is what an exit is in the flow (-> machine.Kind), spelled as a flow file spells the rest.
+type Kind = machine.Kind
+
+const (
+	Progress     = machine.Progress
+	Setback      = machine.Setback
+	Fault        = machine.Fault
+	Intervention = machine.Intervention
+	Upkeep       = machine.Upkeep
+	WorldMoved   = machine.WorldMoved
 )
 
 // Stay is the target of a verb that leaves the agent where it is.

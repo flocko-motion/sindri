@@ -32,7 +32,8 @@ func AgentGraph(role string) (api.FlowGraph, error) {
 	for name, p := range agentflow.LayoutOf(role) {
 		pos[name] = api.FlowPos{X: p.X, Y: p.Y}
 	}
-	return api.FlowGraph{Kind: "agent", Variant: role, Start: start, States: machine.Graph(agentflow.Of(role)),
+	states, groups := machine.Graph(agentflow.Of(role), agentflow.GroupsOf(role))
+	return api.FlowGraph{Kind: "agent", Variant: role, Start: start, States: states, Groups: groups,
 		Positions: pos, LayoutFile: file, LayoutPackage: pkg}, nil
 }
 

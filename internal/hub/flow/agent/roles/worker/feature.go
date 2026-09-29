@@ -26,14 +26,13 @@ const (
 var between = flow.State{
 	WhenIdle: flow.Nudge, // it holds the feature: the next subtask or the submit is its to get on with
 	Name:     Between,
+	In:       GroupFeatureHeld,
 	Title:    "Between subtasks of a feature",
 	About: "The worker holds a feature and none of its children. This is a LEAF BOUNDARY: nothing " +
 		"is half done, so an armed clear fires here and the next subtask is claimed into a fresh " +
 		"session.",
 	Says: says.FeatureGated,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
-		{cond.HoldsNothing, Idle, "the feature it was working through is no longer on its row"},
 		{cond.TreeSplit, Yielding, "another agent is working inside its tree — the container holder yields"},
 		{cond.FeatureGone, Releasing, "the feature landed, or was closed, without it"},
 		{cond.ClearArmed, Clearing, "a human armed a context clear — it fires at this boundary and no other"},
@@ -59,6 +58,7 @@ var between = flow.State{
 var picking = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is choosing
 	Name:     Picking,
+	In:       GroupClaim,
 	Title:    "Being handed a subtask",
 	Action:   act.PickSubtask,
 	About: "The hub is putting the worker on its feature's next open child, and saying nothing about " +
@@ -80,13 +80,12 @@ var picking = flow.State{
 var featureGated = flow.State{
 	WhenIdle: flow.LetItRest, // the user's approval opens what is left
 	Name:     FeatureGated,
+	In:       GroupFeatureHeld,
 	Title:    "Feature waiting on approvals",
 	About: "Every child left under this feature is still awaiting the user's verdict, so there is " +
 		"nothing to work and nothing to submit. The approval gate opening is what moves this.",
 	Says: says.FeatureGated,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
-		{cond.HoldsNothing, Idle, "the feature it was working through is no longer on its row"},
 		{cond.FeatureGone, Releasing, "the feature landed or was closed"},
 		{cond.SubtaskReady, Picking, "an approval opened the next child"},
 		{cond.FeatureFinished, FeatureDone, "the gated children were closed rather than approved"},
@@ -104,13 +103,12 @@ var featureGated = flow.State{
 var featureDone = flow.State{
 	WhenIdle: flow.Nudge, // every subtask is checkpointed, so putting the branch up is its own next act
 	Name:     FeatureDone,
+	In:       GroupFeatureHeld,
 	Title:    "Feature finished",
 	About: "Every child of this feature is closed, so the feature itself is what goes up for review. " +
 		"A feature goes up when its last subtask lands, not when somebody decides to cut it.",
 	Says: says.FeatureDone,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
-		{cond.HoldsNothing, Idle, "the feature it was working through is no longer on its row"},
 		{cond.FeatureGone, Releasing, "the feature landed or was closed"},
 		{cond.SubtaskReady, Picking, "a child was reopened under it"},
 	},

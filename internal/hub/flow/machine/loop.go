@@ -59,7 +59,7 @@ func (m *machine[W]) listens(subject string, topic Topic) bool {
 	if err != nil {
 		return true // it stands somewhere undeclared; a pass is how that gets reported
 	}
-	for _, t := range s.Events {
+	for _, t := range m.exits[s.Name] {
 		c, ok := t.On.(Condition[W])
 		if !ok {
 			continue
@@ -208,15 +208,15 @@ func (m *machine[W]) look(subject string, wait bool) {
 // this state's conditions asks for — so no map carries a number somebody chose by feel.
 func (m *machine[W]) reschedule(subject string, s State[W]) {
 	m.mu.Lock()
-	m.due[subject] = time.Now().Add(cadence(s, m.cfg.Default))
+	m.due[subject] = time.Now().Add(cadence(m.exits[s.Name], m.cfg.Default))
 	m.mu.Unlock()
 }
 
-// cadence is the shortest staleness any of a state's exits will tolerate, or fallback when it
-// tolerates any — a state whose every exit arrives by topic or outcome need not be polled at all.
-func cadence[W any](s State[W], fallback time.Duration) time.Duration {
+// cadence is the shortest staleness any of a state's exits (its groups' included) tolerates, or
+// fallback: a state whose every exit arrives by topic or outcome need not be polled at all.
+func cadence[W any](exits []Transition[W], fallback time.Duration) time.Duration {
 	every := time.Duration(0)
-	for _, t := range s.Events {
+	for _, t := range exits {
 		var within time.Duration
 		switch c := t.On.(type) {
 		case Condition[W]:
@@ -237,10 +237,10 @@ func cadence[W any](s State[W], fallback time.Duration) time.Duration {
 	return time.Minute
 }
 
-// observed is the first event of this state the world agrees with, in declaration order. Outcomes
-// are skipped: the engine owns those, and they arrive with the action rather than from the world.
+// observed is the first exit (-> Exits) the world agrees with. Outcomes are skipped: they arrive with
+// the action, never from the world.
 func (m *machine[W]) observed(subject string, s State[W], w W, since time.Time) (Transition[W], bool) {
-	for _, t := range s.Events {
+	for _, t := range m.exits[s.Name] {
 		switch c := t.On.(type) {
 		case Condition[W]:
 			if c.Holds != nil && c.Holds(w) {

@@ -71,7 +71,6 @@ func main() {
 	rootCmd.AddCommand(cli.NewPrCmd())
 	rootCmd.AddCommand(cli.NewRunCmd())
 	rootCmd.AddCommand(cli.NewTuiCmd())
-	rootCmd.AddCommand(cli.NewDebugCmd())
 	rootCmd.AddCommand(cli.NewUpgradeCmd())
 	rootCmd.AddCommand(cli.NewVersionCmd())
 

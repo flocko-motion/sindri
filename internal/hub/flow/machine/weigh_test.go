@@ -67,7 +67,7 @@ func TestWeighReadsEveryExitAndMovesNobody(t *testing.T) {
 // order, since the first exit that holds is the one taken.
 func TestGraphExportsEveryEdgeWithItsKind(t *testing.T) {
 	m, _ := weighed(t)
-	g := Graph(m.States())
+	g, _ := Graph(m.States(), nil)
 	if len(g) != 3 || g[0].Name != "watching" {
 		t.Fatalf("graph = %+v, want the three states in declaration order", g)
 	}
@@ -75,13 +75,13 @@ func TestGraphExportsEveryEdgeWithItsKind(t *testing.T) {
 	if len(evs) != 3 {
 		t.Fatalf("events = %+v, want 3", evs)
 	}
-	if evs[0].On != "is-eight" || evs[0].Kind != "condition" || evs[0].To != "eight" || evs[0].Within != "1m0s" {
+	if evs[0].On != "is-eight" || evs[0].Trigger != "condition" || evs[0].To != "eight" || evs[0].Within != "1m0s" {
 		t.Errorf("first edge = %+v", evs[0])
 	}
 	if len(evs[1].Wake) != 1 || evs[1].Wake[0] != "counted" {
 		t.Errorf("second edge's wake topics = %v, want [counted]", evs[1].Wake)
 	}
-	if evs[2].Kind != "outcome" || evs[2].To != "" {
+	if evs[2].Trigger != "outcome" || evs[2].To != "" {
 		t.Errorf("third edge = %+v, want an outcome that moves nobody", evs[2])
 	}
 	if g[0].WhenIdle != "rest" {

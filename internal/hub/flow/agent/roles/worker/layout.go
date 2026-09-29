@@ -1,7 +1,7 @@
 // package: hub/flow/agent/roles/worker / layout
 // type:    rendering (the worker flow's default drawing)
 // job:     where the flow debug view draws each worker state by default.
-// limits:  generated — arrange the graph in `sindri debug flow` opened with ?dev, then Export layout
+// limits:  generated — arrange it in the debug view (URL: `sindri hub info`) with ?dev, then Export layout
 // and replace this file. A state missing here is placed by dagre; a name that is no state fails a test.
 package worker
 
@@ -9,32 +9,32 @@ import "github.com/flo-at/sindri/internal/hub/flow/machine"
 
 // Layout is the worker flow's default drawing, by state name.
 var Layout = machine.Layout{
-	"worker/idle":             {X: 648, Y: -28},
-	"worker/assigning":        {X: 1082, Y: -143},
-	"worker/preparing":        {X: 1276, Y: -139},
-	"worker/retiering":        {X: 1466, Y: -138},
-	"worker/handing-over":     {X: 1672, Y: -136},
-	"worker/working":          {X: 1556, Y: 679},
-	"worker/refreshing":       {X: 1440, Y: 1577},
-	"worker/reworking":        {X: 1863, Y: 1564},
-	"worker/interviewing":     {X: 1092, Y: 1368},
-	"worker/submitting":       {X: 859, Y: 1386},
-	"worker/gating":           {X: 791, Y: 1585},
-	"worker/submitted":        {X: 665, Y: 1383},
-	"worker/resolving":        {X: 274, Y: 1393},
-	"worker/between-subtasks": {X: 389, Y: 1171},
-	"worker/picking-subtask":  {X: 210, Y: 769},
-	"worker/feature-gated":    {X: -89, Y: 739},
-	"worker/feature-done":     {X: -73, Y: 540},
-	"worker/releasing":        {X: 372, Y: 536},
-	"worker/yielding":         {X: 545, Y: 532},
-	"worker/promoting":        {X: 574, Y: 1170},
-	"worker/rebasing":         {X: 482, Y: 1384},
-	"worker/launching":        {X: 328, Y: 161},
-	"worker/stopping":         {X: 303, Y: -125},
-	"worker/clearing":         {X: 655, Y: 204},
-	"worker/escalated":        {X: 639, Y: -334},
-	"worker/retired":          {X: 116, Y: 66},
-	"worker/not-done":         {X: 868, Y: 144},
-	"worker/stalled":          {X: 1915, Y: 643},
+	"worker/idle":             {X: 438, Y: -646},
+	"worker/assigning":        {X: 927, Y: -1146},
+	"worker/preparing":        {X: 1131, Y: -1135},
+	"worker/retiering":        {X: 1318, Y: -1136},
+	"worker/handing-over":     {X: 1515, Y: -1139},
+	"worker/working":          {X: 1939, Y: -970},
+	"worker/refreshing":       {X: 2436, Y: -724},
+	"worker/reworking":        {X: 1774, Y: -900},
+	"worker/interviewing":     {X: 2182, Y: -898},
+	"worker/submitting":       {X: 2441, Y: -897},
+	"worker/gating":           {X: 1756, Y: -737},
+	"worker/submitted":        {X: 1912, Y: -741},
+	"worker/resolving":        {X: 1756, Y: -971},
+	"worker/between-subtasks": {X: 330, Y: -1000},
+	"worker/picking-subtask":  {X: 985, Y: -1087},
+	"worker/feature-gated":    {X: 658, Y: -1052},
+	"worker/feature-done":     {X: 634, Y: -958},
+	"worker/releasing":        {X: 468, Y: -852},
+	"worker/yielding":         {X: 308, Y: -854},
+	"worker/promoting":        {X: 2102, Y: -653},
+	"worker/rebasing":         {X: 2164, Y: -1070},
+	"worker/launching":        {X: 90, Y: -647},
+	"worker/stopping":         {X: 80, Y: -800},
+	"worker/clearing":         {X: 94, Y: -725},
+	"worker/escalated":        {X: 83, Y: -983},
+	"worker/retired":          {X: 92, Y: -1046},
+	"worker/not-done":         {X: 83, Y: -889},
+	"worker/stalled":          {X: 2166, Y: -958},
 }

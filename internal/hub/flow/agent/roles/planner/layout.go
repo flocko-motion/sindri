@@ -1,7 +1,7 @@
 // package: hub/flow/agent/roles/planner / layout
 // type:    rendering (the planner flow's default drawing)
 // job:     where the flow debug view draws each planner state by default.
-// limits:  generated — arrange the graph in `sindri debug flow` opened with ?dev, then Export layout
+// limits:  generated — arrange it in the debug view (URL: `sindri hub info`) with ?dev, then Export layout
 // and replace this file. A state missing here is placed by dagre; a name that is no state fails a test.
 package planner
 

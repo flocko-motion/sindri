@@ -22,28 +22,28 @@ const (
 )
 
 var (
-	launching = lifecycle.Launching(Launching, Idle)
-	stopping  = lifecycle.Stopping(Stopping, Idle)
+	launching = lifecycle.In(GroupPod, lifecycle.Launching(Launching, Idle))
+	stopping  = lifecycle.In(GroupPod, lifecycle.Stopping(Stopping, Idle))
 )
 
 // clearing leads into the hand-over: a review is read whole, so the session is discarded before the
 // branch arrives rather than by whoever hands it over.
-var clearing = lifecycle.Clearing(Clearing, Taking, Idle)
+var clearing = lifecycle.In(GroupPod, lifecycle.Clearing(Clearing, Taking, Idle))
 
 // The verbs an escalated reviewer keeps: everything but the verdict. One stopped on a question still
 // reads the diff and the task, and still says what it has found.
-var escalated = lifecycle.Escalated(Escalated, Reviewing, flow.Offers{
+var escalated = lifecycle.In(GroupPod, lifecycle.Escalated(Escalated, Reviewing, flow.Offers{
 	{Verb: verb.Task, Why: "read the backlog"},
 	{Verb: verb.Comment, Why: "comment on the task"},
 	{Verb: verb.Fyi, Why: "one note to the user"},
 	{Verb: verb.Run, Why: "queue a slow build or test"},
 	{Verb: verb.Git, Why: "read the diff"},
-})
+}))
 
 // notDone: free of any review, and not taking one, because its mail is unread.
-var notDone = lifecycle.NotDone(NotDone, Idle, flow.Offers{
+var notDone = lifecycle.In(GroupPod, lifecycle.NotDone(NotDone, Idle, flow.Offers{
 	{Verb: verb.Task, Why: "read the backlog"},
 	{Verb: verb.Escalate, Why: "stop on a question"},
-})
+}))
 
-var retired = lifecycle.Retired(Retired, Idle, nil)
+var retired = lifecycle.In(GroupPod, lifecycle.Retired(Retired, Idle, nil))

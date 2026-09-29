@@ -3,7 +3,7 @@
 // job:     hand the debug view each role's checked-in layout, and name the file a developer's export
 // of it is pasted into.
 // limits:  the registry. The positions are each role package's own layout.go; producing them is
-// the debug view's export (sindri debug flow, ?dev).
+// the debug view's export (its URL: `sindri hub info`; open it with ?dev).
 package agent
 
 import (

@@ -554,13 +554,6 @@ func (c *HTTP) StateLog(name string) ([]api.StateEvent, error) {
 	return out, c.get("/agent/states?agent="+url.QueryEscape(name), &out)
 }
 
-// DebugServe asks the hub to serve the flow debug view on 127.0.0.1:port (0: the hub picks), and
-// returns its URL — the running one if it is already served.
-func (c *HTTP) DebugServe(port int) (string, error) {
-	var out api.DebugServeResp
-	return out.URL, c.postResult("/debug/serve", api.DebugServeReq{Port: port}, &out)
-}
-
 // Repos lists every registered repo (the registry overview / TUI switcher source).
 func (c *HTTP) Repos() ([]api.RepoSummary, error) {
 	var out []api.RepoSummary

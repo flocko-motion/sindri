@@ -20,6 +20,7 @@ const Stalled = "worker/stalled"
 var stalled = flow.State{
 	WhenIdle: flow.Nudge, // it holds work and has stopped — the prod is what this state is FOR
 	Name:     Stalled,
+	In:       GroupHandsOn,
 	Title:    "Stalled over its work",
 	Action:   act.Prod,
 	About: "The worker holds work and its screen has stopped changing past the dwell — a pane frozen " +

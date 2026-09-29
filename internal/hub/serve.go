@@ -36,6 +36,13 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
+	// The flow debug view, for as long as the hub runs. A debug tool that cannot bind is no reason to
+	// refuse the hub, so a failure is said here and on the board, and the hub serves on.
+	if url, err := h.debug.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — the flow debug view is not served: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "hub: flow debug view at %s\n", url)
+	}
 	// A planner holding a backlog task and a merge left in flight are both repaired by the maps that
 	// own them now — the planner's own disowning state, and pr/merging's orphan exit — so nothing is
 	// asked for here that is only reachable at boot.

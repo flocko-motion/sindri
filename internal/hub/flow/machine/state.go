@@ -19,9 +19,25 @@ type Topic string
 // a Condition about the world. The map does not distinguish them; the engine does.
 type Event interface{ EventName() string }
 
+// Kind says what an exit IS in the flow, apart from what triggers it. The engine runs every kind
+// alike; the debug view colours and hides by it.
+type Kind string
+
+const (
+	Progress     Kind = "progress"     // a step along the intended path
+	Setback      Kind = "setback"      // an intended step back: the flow working as designed
+	Fault        Kind = "fault"        // a runtime exception, and the recovery from it
+	Intervention Kind = "intervention" // a human stepped in
+	Upkeep       Kind = "upkeep"       // the hub looking after the pod and session
+	WorldMoved   Kind = "world-moved"  // the work changed or vanished underneath, through nobody's fault
+)
+
 // Outcome is how a state's action finished. The engine owns these: the action returns in the same
 // pass that started it, so an outcome cannot be missed and is never polled for.
-type Outcome struct{ Name string }
+type Outcome struct {
+	Name string
+	Kind Kind
+}
 
 // EventName is how this outcome appears on the record.
 func (o Outcome) EventName() string { return o.Name }
@@ -36,6 +52,7 @@ type Condition[W any] struct {
 	Within time.Duration
 	Holds  func(W) bool
 	Wake   []Topic
+	Kind   Kind
 }
 
 // EventName is how this condition appears on the record.
@@ -58,6 +75,20 @@ type Transition[W any] struct {
 	On  Event
 	To  string
 	Why string
+}
+
+// KindOf is what this transition is in the flow: its event's kind. Orphaned is always a fault — only
+// a dead hub's leftover fires it.
+func (t Transition[W]) KindOf() Kind {
+	switch e := t.On.(type) {
+	case Condition[W]:
+		return e.Kind
+	case Outcome:
+		return e.Kind
+	case Orphaned:
+		return Fault
+	}
+	return ""
 }
 
 // Action is what the hub does in a state — an IDENTITY, so a flow file names one without importing
@@ -110,6 +141,18 @@ const (
 	Nudge
 )
 
+// Group is a region whose exits every state inside inherits, so none can forget one. First is checked
+// before a state's own, Then after; only conditions, since an outcome belongs to one state's action.
+type Group[W any] struct {
+	Name  string
+	Title string
+	About string
+	// In is the group this one sits inside, "" for a top-level one.
+	In    string
+	First []Transition[W]
+	Then  []Transition[W]
+}
+
 // State is one state of a flow, DECLARED rather than coded around. The struct reads as that state's
 // documentation: what the hub is doing here, everything that can move the subject out, what it may
 // type, and what it is told if it asks.
@@ -117,6 +160,8 @@ type State[W any] struct {
 	Name  string
 	Title string
 	About string
+	// In is the group this state sits inside, whose exits it inherits (-> Group); "" for none.
+	In string
 	// Action is what the hub does while the subject is here. Nil means the hub does nothing — the
 	// subject is working, or waiting on somebody else.
 	Action *Action

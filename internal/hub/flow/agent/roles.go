@@ -15,6 +15,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/planner"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/reviewer"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/roles/worker"
+	"github.com/flo-at/sindri/internal/hub/flow/machine"
 )
 
 // Roles are the four an agent can have. Closed: a role outside this set has no flow, and an agent
@@ -39,9 +40,43 @@ var starts = map[string]string{
 	"coauthor": coauthor.Start,
 }
 
+// groups is each role's parent states: the regions its states sit in, whose exits they inherit.
+var groups = map[string][]flow.Group{
+	"worker":   worker.Groups,
+	"planner":  planner.Groups,
+	"reviewer": reviewer.Groups,
+	"coauthor": coauthor.Groups,
+}
+
 // Of is one role's flow — what "the planner's flow" means as a value rather than as a way of
 // reading the code.
 func Of(role string) []flow.State { return flows[role] }
+
+// GroupsOf is one role's parent states.
+func GroupsOf(role string) []flow.Group { return groups[role] }
+
+// AllGroups is every role's groups, which the machine is registered over beside All.
+var AllGroups = func() []flow.Group {
+	var out []flow.Group
+	for _, role := range Roles {
+		out = append(out, groups[role]...)
+	}
+	return out
+}()
+
+// ExitsOf is a state's effective exits — its own and its groups', in the order a pass checks them.
+// For a reader asking "where can this state go", which a state's own Events no longer answers alone.
+func ExitsOf(s flow.State) []flow.Transition {
+	byName := make(map[string]flow.Group, len(AllGroups))
+	for _, g := range AllGroups {
+		byName[g.Name] = g
+	}
+	var out []flow.Transition
+	for _, e := range machine.Exits(byName, s) {
+		out = append(out, e.Transition)
+	}
+	return out
+}
 
 // Start is where an agent of this role begins.
 func Start(role string) (string, error) {

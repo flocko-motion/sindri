@@ -29,8 +29,15 @@ func TestEveryRolesGraphLeadsOnlyToItsOwnStates(t *testing.T) {
 				if ev.To != "" && !names[ev.To] {
 					t.Errorf("%s: %s exit %d (%s) leads to %q, outside its own flow", role, s.Name, i+1, ev.On, ev.To)
 				}
-				if ev.Kind != "outcome" && ev.Kind != "condition" && ev.Kind != "orphaned" {
-					t.Errorf("%s: %s exit %d has kind %q", role, s.Name, i+1, ev.Kind)
+				if ev.Trigger != "outcome" && ev.Trigger != "condition" && ev.Trigger != "orphaned" {
+					t.Errorf("%s: %s exit %d has trigger %q", role, s.Name, i+1, ev.Trigger)
+				}
+				// Every agent exit says what it is: the view colours and hides by it, and an untagged one
+				// is a declaration somebody forgot to classify.
+				switch ev.Kind {
+				case "progress", "setback", "fault", "intervention", "upkeep", "world-moved":
+				default:
+					t.Errorf("%s: %s exit %d (%s) has no kind — tag its condition or outcome", role, s.Name, i+1, ev.On)
 				}
 			}
 		}

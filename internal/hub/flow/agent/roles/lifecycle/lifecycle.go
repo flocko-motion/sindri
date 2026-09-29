@@ -26,6 +26,13 @@ const (
 	RetiredIn   = "/retired"
 )
 
+// In puts a built state inside a group (-> machine.Group), for a role placing a shared state in one
+// of its own regions.
+func In(group string, s flow.State) flow.State {
+	s.In = group
+	return s
+}
+
 // note is the one verb every lifecycle state allows: an agent standing in one of them is being acted
 // upon, and the only thing left to it is saying what it is seeing.
 var note = flow.Offers{{Verb: verb.Log, Why: "record a note"}}

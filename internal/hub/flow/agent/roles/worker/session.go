@@ -25,6 +25,7 @@ const (
 var preparing = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is emptying its session
 	Name:     Preparing,
+	In:       GroupClaim,
 	Title:    "Having its session prepared",
 	Action:   act.Prepare,
 	About: "The work is selected and the session is being emptied for it. Work arrives WHOLE, so the " +
@@ -47,6 +48,7 @@ var preparing = flow.State{
 var retiering = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is switching its model
 	Name:     Retiering,
+	In:       GroupClaim,
 	Title:    "Having its model changed",
 	Action:   act.Retier,
 	About: "The work in hand is rated for a tier, and the session is put on that tier's model — " +

@@ -25,25 +25,25 @@ const (
 // The pod's two states. Both rest at Idle, which re-decides the moment the pod's own reading moves —
 // so a worker started for waiting work claims it from there, through the ordinary route.
 var (
-	launching = lifecycle.Launching(Launching, Idle)
-	stopping  = lifecycle.Stopping(Stopping, Idle)
+	launching = lifecycle.In(GroupPod, lifecycle.Launching(Launching, Idle))
+	stopping  = lifecycle.In(GroupPod, lifecycle.Stopping(Stopping, Idle))
 )
 
 // clearing is the HUMAN's armed clear and nothing else — the clear that prepares a session for work
 // is a step of the claim chain (-> session.go's preparing). Both ends rest at Idle, which re-decides:
 // a feature holder is sent back to its subtask loop from there, exactly as the pod states are.
-var clearing = lifecycle.Clearing(Clearing, Idle, Idle)
+var clearing = lifecycle.In(GroupPod, lifecycle.Clearing(Clearing, Idle, Idle))
 
 // notDone: holding nothing, and not available for anything, because its mail is unread.
-var notDone = lifecycle.NotDone(NotDone, Idle, flow.Offers{
+var notDone = lifecycle.In(GroupPod, lifecycle.NotDone(NotDone, Idle, flow.Offers{
 	{Verb: verb.Task, Why: "read the backlog"},
 	{Verb: verb.Escalate, Why: "stop on a question"},
-})
+}))
 
 // The verbs an escalated worker keeps: everything but the LANDING ones. An escalation stops an agent
 // committing the fleet to something while a question is open; it does not stop it reading, tidying
 // its branch, or telling the user anything.
-var escalated = lifecycle.Escalated(Escalated, Working, flow.Offers{
+var escalated = lifecycle.In(GroupPod, lifecycle.Escalated(Escalated, Working, flow.Offers{
 	{Verb: verb.Task, Why: "read the backlog"},
 	{Verb: verb.Comment, Why: "comment on the task"},
 	{Verb: verb.Fyi, Why: "one note to the user"},
@@ -53,6 +53,6 @@ var escalated = lifecycle.Escalated(Escalated, Working, flow.Offers{
 	{Verb: verb.Resolve, Why: "check your branch still merges"},
 	{Verb: verb.Revoke, Why: "withdraw a pull request you have out"},
 	{Verb: verb.Scratch, Why: "check work out into a disposable workspace"},
-})
+}))
 
-var retired = lifecycle.Retired(Retired, Idle, nil)
+var retired = lifecycle.In(GroupPod, lifecycle.Retired(Retired, Idle, nil))

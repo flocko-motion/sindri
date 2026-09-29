@@ -85,6 +85,7 @@ var boardHandles = map[string]string{
 // a header cannot fail a build.
 var boardCalls = map[string]string{
 	"h.agents.SettleIntent":    "retires a settled launch/stop; an in-memory map write, no probe",
+	"h.debug.Where":            "the debug view's URL or bind error, a field read under its lock — no probe",
 	"h.agents.Unreachable":     "counts pushes the pane never showed — a map the injector keeps, no probe",
 	"h.runFlow().FleetRuns":    "ranks the runs table — a store read",
 	"h.FleetRuns":              "the same, through the hub's own wrapper",

@@ -23,6 +23,7 @@ const (
 var promoting = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is taking the children on
 	Name:     Promoting,
+	In:       GroupTask,
 	Title:    "Taking on work its task gained",
 	Action:   act.Promote,
 	About: "The task this worker holds gained children while it was working, so its unit of work is " +
@@ -42,6 +43,7 @@ var promoting = flow.State{
 var rebasing = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is moving its branch
 	Name:     Rebasing,
+	In:       GroupTask,
 	Title:    "Catching up with its own milestone",
 	Action:   act.Rebase,
 	About: "An interim pull request this worker filed merged, and its standing branch is behind the " +

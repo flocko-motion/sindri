@@ -45,7 +45,7 @@ func TestNoFlowLeavesItsOwnRole(t *testing.T) {
 			own[s.Name] = true
 		}
 		for _, s := range Of(role) {
-			for _, e := range s.Events {
+			for _, e := range ExitsOf(s) {
 				if e.To != flow.Stay && !own[e.To] {
 					t.Errorf("%s: %q leads to %q, outside the %s flow", role, s.Name, e.To, role)
 				}
@@ -63,7 +63,7 @@ func TestEveryActingStateCanBeObserved(t *testing.T) {
 			continue
 		}
 		observable := 0
-		for _, e := range s.Events {
+		for _, e := range ExitsOf(s) {
 			if _, isOutcome := e.On.(machine.Outcome); !isOutcome {
 				observable++
 			}
@@ -105,7 +105,7 @@ func TestEveryDeclaredThingIsUsed(t *testing.T) {
 		if s.Action != nil {
 			usedAct[s.Action.Name] = true
 		}
-		for _, e := range s.Events {
+		for _, e := range ExitsOf(s) {
 			usedCond[e.On.EventName()] = true
 		}
 		for _, v := range s.Verbs {
@@ -143,13 +143,19 @@ func TestEveryStateReadsAsDocumentation(t *testing.T) {
 			t.Errorf("%s declares no Title", s.Name)
 		case len(s.About) < 40:
 			t.Errorf("%s declares no About worth reading: %q", s.Name, s.About)
-		case len(s.Events) == 0:
-			t.Errorf("%s declares no way out", s.Name)
+		case len(ExitsOf(s)) == 0:
+			t.Errorf("%s has no way out, of its own or from a region it sits in", s.Name)
 		}
-		for _, e := range s.Events {
+		for _, e := range ExitsOf(s) {
 			if e.Why == "" {
 				t.Errorf("%s: the transition on %q carries no reason", s.Name, e.On.EventName())
 			}
+		}
+	}
+	// A region is read the same way: its title and about are what the debug view shows for the box.
+	for _, g := range AllGroups {
+		if g.Title == "" || len(g.About) < 40 {
+			t.Errorf("region %s declares no Title or no About worth reading", g.Name)
 		}
 	}
 }

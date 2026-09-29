@@ -23,12 +23,12 @@ const (
 var idle = flow.State{
 	WhenIdle: flow.LetItRest, // nothing has been selected for it yet
 	Name:     Idle,
+	In:       GroupSeat,
 	Title:    "Reviewer holding no pull request",
 	About: "Free, so the oldest unclaimed review is its next one — which is also how a review filed " +
 		"while no reviewer was running gets picked up later.",
 	Says: says.NoReviews,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.Retired, Retired, "a human wound it down"},
 		{cond.ReviewHeld, Reviewing, "it already holds one, however it got there"},
 		// BEFORE the claim it refuses, which is the whole of what this standing means.
@@ -76,12 +76,12 @@ var taking = flow.State{
 var reviewing = flow.State{
 	WhenIdle: flow.Nudge, // it holds a pull request and the verdict is its to reach
 	Name:     Reviewing,
+	In:       GroupSeat,
 	Title:    "Reading a pull request",
 	About: "The reviewer holds one pull request whose branch sits in its one workspace. A PR that " +
 		"settles while it is reading releases the hold: a verdict on it now decides nothing.",
 	Says: says.Reviewing,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.ReviewOvertaken, Dropping, "the pull request settled before a verdict"},
 		{cond.ReviewDone, Idle, "it ruled on the one it held, and a verdict is where a review ends"},
 		{cond.AsleepHolding, Launching, "it holds this review and its pod is gone — a claim must not outlive the pod it was made for"},

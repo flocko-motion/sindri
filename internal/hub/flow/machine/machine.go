@@ -29,8 +29,8 @@ type Machine[W any] interface {
 	// nothing written. For a caller that must agree with the machine WITHOUT waiting for its next
 	// pass: the alternative is a second copy of the rules, and a second copy is what drifts.
 	Would(subject string) (State[W], error)
-	// Weigh is where a subject stands and which of that state's events hold now, in declaration
-	// order — the first true one is the edge a pass would take. Nothing written.
+	// Weigh is where a subject stands and which of that state's effective exits hold now, in the order
+	// Exits gives — the first true one is the edge a pass would take. Nothing written.
 	Weigh(subject string) (State[W], []bool, error)
 	// States is the declared flow, in registration order — the map, printable.
 	States() []State[W]
@@ -42,6 +42,8 @@ type Config[W any] struct {
 	// States is the flow. Every name unique, every Action registered, every state with an action
 	// carrying at least one condition exit (-> check).
 	States []State[W]
+	// Groups are the regions states sit in, whose exits they inherit (-> Group, Exits).
+	Groups []Group[W]
 	// Start is the state a subject with none stored is put into.
 	Start string
 	// Gather reads the world for one subject, ONCE per pass, before any condition looks at it.
@@ -83,8 +85,11 @@ type running struct {
 }
 
 type machine[W any] struct {
-	cfg      Config[W]
-	states   map[string]State[W]
+	cfg    Config[W]
+	states map[string]State[W]
+	groups map[string]Group[W]
+	// exits is every state's effective exits, resolved once: a flow is fixed for a machine's life.
+	exits    map[string][]Transition[W]
 	lifetime context.Context
 	stop     context.CancelFunc
 
@@ -130,6 +135,17 @@ func New[W any](lifetime context.Context, cfg Config[W]) (Machine[W], error) {
 		}
 		m.states[s.Name] = s
 	}
+	m.groups = make(map[string]Group[W], len(cfg.Groups))
+	for _, g := range cfg.Groups {
+		if _, dup := m.groups[g.Name]; dup {
+			return nil, fmt.Errorf("machine: two groups declared as %q", g.Name)
+		}
+		m.groups[g.Name] = g
+	}
+	m.exits = make(map[string][]Transition[W], len(m.states))
+	for name, s := range m.states {
+		m.exits[name] = transitions(Exits(m.groups, s))
+	}
 	if err := m.check(); err != nil {
 		return nil, err
 	}
@@ -145,6 +161,9 @@ func New[W any](lifetime context.Context, cfg Config[W]) (Machine[W], error) {
 func (m *machine[W]) check() error {
 	if _, ok := m.states[m.cfg.Start]; !ok {
 		return fmt.Errorf("machine: the start state %q is not declared", m.cfg.Start)
+	}
+	if err := m.checkGroups(); err != nil {
+		return err
 	}
 	for _, s := range m.states {
 		if s.Title == "" || s.About == "" {
@@ -170,7 +189,7 @@ func (m *machine[W]) check() error {
 // that action dies. Every state that acts must also declare a condition somebody can observe.
 func (m *machine[W]) checkExits(s State[W]) error {
 	conditions := 0
-	for _, t := range s.Events {
+	for _, t := range m.exits[s.Name] { // inherited conditions count: they are observed like its own
 		if _, ok := m.states[t.To]; !ok && t.To != Stay {
 			return fmt.Errorf("machine: state %q leads to undeclared %q", s.Name, t.To)
 		}

@@ -90,6 +90,7 @@ func (e *Engine) WakeRuns(t machine.Topic) {
 func (e *Engine) newFlow(lifetime context.Context, beat time.Duration) (machine.Machine[flow.World], error) {
 	return machine.New(lifetime, machine.Config[flow.World]{
 		States:     agentflow.All,
+		Groups:     agentflow.AllGroups,
 		Superseded: agentflow.Superseded,
 		Start:      agentflow.StartFor("worker"),
 		Gather:     e.gatherSubject,

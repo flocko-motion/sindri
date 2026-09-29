@@ -14,6 +14,8 @@ type AgentView struct {
 	Name    string `json:"name"`
 	Role    string `json:"role"`
 	Status  string `json:"status"`
+	// Phase is the state its machine has it in (e.g. "worker/working") — the fact Status is a word for.
+	Phase string `json:"phase,omitempty"`
 	// NeedsUser: only a human moves it on. Decided by the hub and carried — a front-end links no hub
 	// package, so a rule it applied itself would be a second copy of one.
 	NeedsUser bool `json:"needsUser,omitempty"`
@@ -122,6 +124,8 @@ type BoardState struct {
 	SpecCLIMissing bool `json:"spec_cli_missing"`
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the board.
 	StartedAt string `json:"started_at"`
+	// DebugView is the flow debug view's URL, or why it is not served (-> hub/api/debugview).
+	DebugView string `json:"debugView,omitempty"`
 	// DefaultMemory is the RAM an agent gets with none configured — the runtime's own current default.
 	DefaultMemory string `json:"defaultMemory"`
 	// Memory is the machine's memory headroom for agents. It sits here beside DefaultMemory and

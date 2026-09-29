@@ -25,6 +25,7 @@ const (
 var refreshing = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is clearing for the next round
 	Name:     Refreshing,
+	In:       GroupTask,
 	Title:    "Starting the next round fresh",
 	Action:   act.Clear,
 	About: "A rejection is a NEW ROUND on the same work, and a round starts fresh like a claim does: " +
@@ -43,6 +44,7 @@ var refreshing = flow.State{
 var reworking = flow.State{
 	WhenIdle: flow.Nudge, // the feedback is in its hands and the next round is its to write
 	Name:     Reworking,
+	In:       GroupHandsOn,
 	Title:    "Answering a rejection",
 	About: "A verdict came back asking for another round. The feedback is the brief, so it arrives " +
 		"the moment the agent lands here — the session it would have asked from was just discarded " +
@@ -50,7 +52,6 @@ var reworking = flow.State{
 	Says:  says.Rejected,
 	Tells: true,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.TaskGone, Idle, "the work was closed under it"},
 		{cond.NotRejected, Working, "the rejection was withdrawn or answered"},
 	},
@@ -70,6 +71,7 @@ var reworking = flow.State{
 var releasing = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is dropping the hold
 	Name:     Releasing,
+	In:       GroupFeature,
 	Title:    "Letting go of a landed feature",
 	Action:   act.Release,
 	About: "The feature this worker held is closed at its source, or was carried in by a merged pull " +
@@ -87,6 +89,7 @@ var releasing = flow.State{
 var yielding = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is giving the tree up
 	Name:     Yielding,
+	In:       GroupFeature,
 	Title:    "Yielding a split tree",
 	Action:   act.Yield,
 	About: "This worker holds a container while another agent holds a task under it — a tree split " +

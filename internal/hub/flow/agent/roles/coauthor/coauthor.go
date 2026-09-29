@@ -8,7 +8,6 @@ package coauthor
 import (
 	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
 	"github.com/flo-at/sindri/internal/hub/flow"
-	"github.com/flo-at/sindri/internal/hub/flow/agent/cond"
 	"github.com/flo-at/sindri/internal/hub/flow/agent/says"
 )
 
@@ -17,6 +16,7 @@ const Collab = "coauthor/collab"
 var collab = flow.State{
 	WhenIdle: flow.LetItRest, // the user types here, and silence between turns is the ordinary case
 	Name:     Collab,
+	In:       GroupSeat,
 	Title:    "Working with the user",
 	About: "A coauthor works directly with the user in the shared checkout. There is no task queue " +
 		"behind it and nothing the hub is waiting for — it is never empty-handed, because its " +
@@ -25,13 +25,7 @@ var collab = flow.State{
 		"stopping a pod — and what there is to say is standing in the agent's own brief already, " +
 		"which a cleared session keeps.",
 	Says: says.Coauthor,
-	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
-		{cond.Retired, Retired, "a human wound it down"},
-		{cond.ClearArmed, Clearing, "a human armed a context clear"},
-		{cond.StartAsked, Launching, "a human asked for this pod"},
-		{cond.StopAsked, Stopping, "a human asked for this pod back"},
-	},
+	// Nothing of its own: every way out is something a human does, which the seat holds (-> groups.go).
 	Verbs: flow.Offers{
 		{verb.Task, "read the backlog"},
 		{verb.CreateTask, "propose a task"},

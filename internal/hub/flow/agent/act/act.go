@@ -12,11 +12,11 @@ import "github.com/flo-at/sindri/internal/hub/flow"
 // The outcomes actions finish with. Shared where they mean the same thing, so a state's Events list
 // reads the same whichever action produced it.
 var (
-	Done    = flow.Outcome{Name: "done"}    // it worked
-	Nothing = flow.Outcome{Name: "nothing"} // there was nothing to do
-	Failed  = flow.Outcome{Name: "failed"}  // it did not work, and the reason is the agent's brief
-	Queued  = flow.Outcome{Name: "queued"}  // handed to a queue; somebody else answers
-	Stale   = flow.Outcome{Name: "stale"}   // what it was working from moved, so what it produced describes nothing
+	Done    = flow.Outcome{Name: "done", Kind: flow.Progress}   // it worked
+	Nothing = flow.Outcome{Name: "nothing", Kind: flow.Upkeep}  // there was nothing to do
+	Failed  = flow.Outcome{Name: "failed", Kind: flow.Fault}    // it did not work, and the reason is the agent's brief
+	Queued  = flow.Outcome{Name: "queued", Kind: flow.Progress} // handed to a queue; somebody else answers
+	Stale   = flow.Outcome{Name: "stale", Kind: flow.Setback}   // what it was working from moved, so what it produced describes nothing
 )
 
 // PickWork looks for the best-rated unit the backlog would hand this agent, and claims it. It SAYS

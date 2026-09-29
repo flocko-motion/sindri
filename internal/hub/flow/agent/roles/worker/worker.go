@@ -76,6 +76,7 @@ var idle = flow.State{
 var assigning = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is choosing
 	Name:     Assigning,
+	In:       GroupClaim,
 	Title:    "Being handed work",
 	Action:   act.PickWork,
 	About: "The hub is claiming a unit for this worker — syncing the backlog and branching. The " +
@@ -100,6 +101,7 @@ var assigning = flow.State{
 var handingOver = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is speaking
 	Name:     HandingOver,
+	In:       GroupClaim,
 	Title:    "Being handed its work",
 	Action:   act.HandOver,
 	About: "The work is claimed and the session is prepared, so the hub says what the worker now " +
@@ -119,15 +121,15 @@ var handingOver = flow.State{
 var working = flow.State{
 	WhenIdle: flow.Nudge, // it holds the work and is inside it
 	Name:     Working,
+	In:       GroupHandsOn,
 	Title:    "Working a task",
 	About: "The worker holds work on its own branch and is inside it. The hub does nothing but " +
 		"watch that the work still exists and still belongs to it.",
 	Says: says.Working,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
-		// SECOND, under the escalation alone: this state exists to hold an agent AT work, and every
-		// exit below it reads the work it is assumed to hold. An agent that has none is not working,
-		// however it arrived — an escalation raised before anything was claimed resolves to here.
+		// FIRST of its own, under the region's escalation alone: this state exists to hold an agent AT
+		// work, and every exit below it reads the work it is assumed to hold. An agent that has none is
+		// not working, however it arrived — an escalation raised before anything was claimed resolves here.
 		{cond.HoldsNothing, Idle, "it holds neither a task nor a feature, so it is not at work"},
 		{cond.MergeConflicted, Resolving, "the merge of its PR conflicts; the branch is back in its workspace"},
 		{cond.MilestoneLanded, Rebasing, "a milestone of its own landed; its branch is behind that base"},
@@ -165,6 +167,7 @@ var working = flow.State{
 var interviewing = flow.State{
 	WhenIdle: flow.Nudge, // the hub asked it a question and is waiting on the answer
 	Name:     Interviewing,
+	In:       GroupHandsOn,
 	Title:    "Answering for a submit",
 	Action:   act.Interview,
 	About: "The worker asked to submit and the hub is putting its questions, one at a time, waiting " +
@@ -175,7 +178,6 @@ var interviewing = flow.State{
 		{act.Done, Submitting, "every question is answered; what it holds can go up"},
 		{act.Stale, Working, "the tree moved under the questions, so the answers describe nothing"},
 		{act.Failed, Working, "the interview could not be conducted; the work is still in hand"},
-		{cond.Escalated, Escalated, "it stopped on a question only the user can answer"},
 		{cond.TaskGone, Idle, "the work it was submitting was closed or given to somebody else"},
 		{cond.AsleepHolding, Launching, "its pod is gone, and nothing can be asked of a dead pane"},
 		{cond.NoSubmitAsked, Working, "the submit it was answering for is gone"},
@@ -193,6 +195,7 @@ var interviewing = flow.State{
 var submitting = flow.State{
 	WhenIdle: flow.LetItRest, // the hub is filing what it has
 	Name:     Submitting,
+	In:       GroupTask,
 	Title:    "Submitting",
 	Action:   act.Submit,
 	About: "The hub is taking what the worker has: the commit first, then the quality gate, then a " +
@@ -211,6 +214,7 @@ var submitting = flow.State{
 var gating = flow.State{
 	WhenIdle: flow.LetItRest, // the fleet's one gate slot owes the answer
 	Name:     Gating,
+	In:       GroupInReview,
 	Title:    "Queued at the quality gate",
 	About: "The worker's commit is waiting on the fleet's single gate slot. The gate's own result " +
 		"moves it on — to a filed PR, or back to the failure it has to answer.",
@@ -220,7 +224,6 @@ var gating = flow.State{
 		{cond.Rejected, Refreshing, "the gate failed it"},
 		{cond.GateRefused, Working, "the gate answered and nothing landed — its output is the brief, and the work is still in hand"},
 		{cond.TaskGone, Idle, "the work was closed under it"},
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.HoldsNothing, Idle, "it holds neither a task nor a feature, so it is not at work"},
 	},
 	Verbs: flow.Offers{{verb.Log, "record a note"}, {verb.Mail, "read your mailbox"}},
@@ -230,13 +233,13 @@ var gating = flow.State{
 var submitted = flow.State{
 	WhenIdle: flow.LetItRest, // a reviewer owes the verdict
 	Name:     Submitted,
+	In:       GroupInReview,
 	Title:    "Waiting on a verdict",
 	About: "The pull request is filed and somebody else owes it a verdict. Nothing is asked of the " +
 		"worker until that lands — and a rejection puts it back on the work, which is where the " +
 		"feedback is answered.",
 	Says: says.AwaitVerdict,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.MergeConflicted, Resolving, "the merge of its PR conflicts; the branch is back in its workspace"},
 		{cond.Rejected, Refreshing, "the verdict came back rejected — the feedback is the brief"},
 		{cond.OwnPRRejected, Refreshing, "its own PR came back rejected"},
@@ -265,12 +268,12 @@ var submitted = flow.State{
 var resolving = flow.State{
 	WhenIdle: flow.Nudge, // the conflict markers are in its workspace and only it can settle them
 	Name:     Resolving,
+	In:       GroupHandsOn,
 	Title:    "Resolving a conflict",
 	About: "The merge hit a conflict and handed the branch back. The worker owns the resolution; " +
 		"the hub watches only that the work it belongs to still exists.",
 	Says: says.Resolving,
 	Events: flow.Events{
-		{cond.Escalated, Escalated, "it stopped on a question"},
 		{cond.TaskGone, Idle, "the work was closed under it"},
 		// Leaving is the ABSENCE of the conflict, not the verb succeeding: an agent that fixed the
 		// branch by hand is as resolved as one that ran `resolve`. What it holds is untouched — a

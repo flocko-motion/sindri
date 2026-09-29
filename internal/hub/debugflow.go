@@ -1,6 +1,6 @@
 // package: hub / debugflow
 // type:    assembly (the flow debug view, wired to the hub)
-// job:     answer the debug view's reads by subject kind, and start its listener on request.
+// job:     answer the debug view's reads by subject kind (its listener starts with the hub: serve.go).
 // limits:  dispatch. The graph and the reading are each kind's engine's (-> fleet.AgentGraph); the
 // listener and its read-only surface are debugview's.
 package hub
@@ -30,6 +30,3 @@ func (h *Hub) Subject(kind, project, id string) (api.SubjectFlow, error) {
 	}
 	return api.SubjectFlow{}, fmt.Errorf("the debug view has no subject of kind %q", kind)
 }
-
-// DebugServe starts the debug view's listener, or names the one already running.
-func (h *Hub) DebugServe(port int) (string, error) { return h.debug.Serve(port) }

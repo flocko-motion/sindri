@@ -1,7 +1,7 @@
 // package: hub/api/debugview / debugview
 // type:    adapter (the flow debug view's loopback HTTP listener)
-// job:     serve the flow debug page on 127.0.0.1, started on request and alive until the hub
-// stops: the page, its vendored libraries, and exactly the four reads it draws from.
+// job:     serve the flow debug page on 127.0.0.1 for as long as the hub runs, on one fixed port
+// where it is free: the page, its vendored libraries, and exactly the four reads it draws from.
 // limits:  READ-ONLY by construction — no route that acts is mounted, since any local process can
 // reach a loopback port where only the socket's owner reaches the control socket. A request naming
 // any other Host is refused, which is what stops a web page reaching it by DNS rebinding.
@@ -36,32 +36,46 @@ type Source interface {
 	HandleEvents(w http.ResponseWriter, r *http.Request)
 }
 
-// Server is the listener, idle until Serve is first called.
+// DefaultPort is where the view is served, so its URL stays the same across hub restarts; the next
+// ports up are tried only while one is taken, up to portTries in all.
+const (
+	DefaultPort = 47700
+	portTries   = 20
+)
+
+// Server is the listener, idle until Start.
 type Server struct {
 	src Source
 
 	mu   sync.Mutex
 	srv  *http.Server
 	port int
+	err  error // why Start could not serve, for whoever asks where the view is
 }
 
 // New builds an idle server over src.
 func New(src Source) *Server { return &Server{src: src} }
 
-// Serve starts the listener on 127.0.0.1:port (0 lets the OS pick) and returns its URL. Already
-// serving, it returns the running URL — unless port names a different one, which is refused.
-func (s *Server) Serve(port int) (string, error) {
+// Start serves the view on 127.0.0.1:DefaultPort, or the first free port above it, and returns the
+// URL. It fails only when all portTries are taken.
+func (s *Server) Start() (string, error) { return s.startFrom(DefaultPort, portTries) }
+
+func (s *Server) startFrom(first, tries int) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.srv != nil {
-		if port != 0 && port != s.port {
-			return "", fmt.Errorf("the debug view is already served on port %d; it stays there until the hub restarts", s.port)
-		}
 		return s.url(), nil
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	var ln net.Listener
+	var err error
+	for p := first; p < first+tries; p++ {
+		if ln, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p))); err == nil {
+			break
+		}
+	}
 	if err != nil {
-		return "", fmt.Errorf("debug view: listen on 127.0.0.1:%d: %w", port, err)
+		s.err = fmt.Errorf("no free port in 127.0.0.1:%d-%d (the last said: %w)", first, first+tries-1, err)
+		return "", s.err
 	}
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	s.srv = &http.Server{Handler: s.handler(s.port), ReadHeaderTimeout: 10 * time.Second}
@@ -74,6 +88,19 @@ func (s *Server) Serve(port int) (string, error) {
 }
 
 func (s *Server) url() string { return "http://127.0.0.1:" + strconv.Itoa(s.port) + "/" }
+
+// Where says where the view is served, or why it is not — for the board, and `sindri hub info`.
+func (s *Server) Where() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.srv != nil:
+		return s.url()
+	case s.err != nil:
+		return "not served: " + s.err.Error()
+	}
+	return "not started"
+}
 
 // Close stops the listener, if one was started.
 func (s *Server) Close() {
