@@ -1,9 +1,9 @@
 // package: tui / repo config form
 // type:    ui (repo configuration editor)
 // job:     edit the active repo's .sindri/config.yaml through a form over its keys
-// (verify, architecture, containerfile, review_prompt, github.issues) instead of
-// hand-editing YAML — fetch the resolved config, prefill, save via the hub
-// (which validates, so a broken config is surfaced, never persisted).
+// (verify, reference, architecture, containerfile, review_prompt, github.issues)
+// instead of hand-editing YAML — prefilled from the resolved config and saved
+// through the hub, which validates, so a broken config never lands.
 // limits:  form wiring only; the fields/frame are component_form/_field.
 package tui
 
@@ -42,6 +42,9 @@ func (m *model) openRepoConfigForm(d api.RepoDetail) {
 	// at all (-> repo.Gate), and a form that hid it left the one thing to fix out of the one screen
 	// for fixing it.
 	verifyF := newTextField("verify (required)", d.Config.Verify)
+	// Empty is a working setting: agents then follow the main checkout's branch, which is what the
+	// Repos detail marks "(main checkout)" — a label saying so here would truncate at formLabelW.
+	refF := newTextField("reference", d.Config.Reference)
 	archF := newTextField("architecture", d.Config.Architecture)
 	cfF := newTextField("containerfile", d.Config.Containerfile)
 	rpF := newTextField("review_prompt", d.Config.ReviewPrompt)
@@ -52,13 +55,13 @@ func (m *model) openRepoConfigForm(d api.RepoDetail) {
 	issuesF := newChoiceField("github.issues", []string{"on", "off"}, []string{"on", "off"}, issues)
 
 	cl := m.cl
-	m.form.open("config: "+d.Name, []field{verifyF, archF, cfF, rpF, issuesF}, nil, func() tea.Cmd {
+	m.form.open("config: "+d.Name, []field{verifyF, refF, archF, cfF, rpF, issuesF}, nil, func() tea.Cmd {
 		on := issuesF.value() == "on"
 		// Start from the config as loaded and change only the edited keys: a save rewrites the
 		// whole file, so a struct built fresh from these fields would delete every key the form
-		// does not show — reference, reading, lint.
+		// does not show — reading, lint.
 		cfg := d.Config
-		cfg.Verify = verifyF.value()
+		cfg.Verify, cfg.Reference = verifyF.value(), refF.value()
 		cfg.Architecture, cfg.Containerfile, cfg.ReviewPrompt = archF.value(), cfF.value(), rpF.value()
 		cfg.GitHub.Issues = &on
 		return func() tea.Msg {

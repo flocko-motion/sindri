@@ -119,6 +119,18 @@ func mailAttachable(m model) bool {
 	return ok
 }
 
+// agentEscalated: nothing to answer unless the agent has stopped on a question.
+func agentEscalated(m model) bool {
+	a, ok := m.selAgent()
+	return ok && a.Escalation != ""
+}
+
+// mailUnreadForUser: the bulk mark-read reaches only what is addressed to the user, so with none of
+// that unread it would retire nothing — offered as a no-op it reads as a badge that will not clear.
+func mailUnreadForUser(m model) bool {
+	return m.state.MailUnreadUser > 0
+}
+
 // agentSelected: several Agents-tab actions apply only to a real roster agent, not one of the
 // orphan containers the tab also lists — an orphan routes only to its own removal (D, isOrphan).
 func agentSelected(m model) bool {

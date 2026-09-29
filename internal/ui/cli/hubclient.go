@@ -159,6 +159,10 @@ func startHub() error {
 	for i := 0; i < startupAttempts; i++ {
 		if client.IsRunning() {
 			fmt.Fprintf(os.Stderr, " up (pid %d, log: %s)\n", pid, logPath)
+			// The hub says where its debug view is in its own log, which a detached start never shows.
+			if st, err := client.Dial("").State(); err == nil && st.DebugView != "" {
+				fmt.Fprintf(os.Stderr, "flow debug view: %s\n", st.DebugView)
+			}
 			return nil
 		}
 		// Fast-fail: an exited process will never answer, so report why instead of burning the budget.

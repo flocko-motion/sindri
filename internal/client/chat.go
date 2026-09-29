@@ -3,7 +3,7 @@
 // job:     the meeting room's half of the client: membership, saying something, the
 // live stream, and the two verbs that end a meeting — new (clear the history)
 // and close (empty the roster).
-// limits:  transport only; what any of it MEANS is the hub's (-> hub/chat).
+// limits:  transport only; what any of it MEANS is the hub's (-> hub/messaging/chat).
 package client
 
 import (

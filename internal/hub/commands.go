@@ -12,6 +12,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/api/agents/verb"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/workspace"
+	taskflow "github.com/flo-at/sindri/internal/hub/flow/task"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
+	"github.com/flo-at/sindri/internal/hub/prompts"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
 	"io"
 	"os"
 	"slices"
@@ -19,100 +26,103 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
-	"github.com/flo-at/sindri/internal/hub/workflow"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
+	"github.com/flo-at/sindri/internal/hub/world/task"
 )
 
 // CmdInfo is a command as advertised to a browser; it crosses the wire, so it is
 // internal/api.CmdInfo under the name every existing caller here already uses.
 type CmdInfo = api.CmdInfo
 
-// registry builds the command surface, rebuilt per call; Run closures capture the hub.
-func (h *Hub) registry() *registry.Registry {
-	return registry.New(
-		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
-		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
-		registry.Command{Name: "prs", Help: "list pull requests and their status — your own if you're a worker, the whole project otherwise; the 10 most recent active ones, `--limit N` to widen", Run: h.cmdListPRs},
-		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", Run: h.wf.CmdShow},
-		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
-		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
-		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Blocked: heldByEscalation("next", func(c registry.Caller) string {
-				if c.HasTask {
-					return "You already hold work — run `sindri` to be told what to do with it."
-				}
-				return ""
-			}), Run: h.wf.CmdNext},
+// binding is what stands behind one catalogue verb: the full usage text — which lives beside the
+// implementation, so the two cannot drift — an optional per-caller wording, the gate the flow does
+// not already hold, and the run itself. The catalogue carries the name, the summary and the roles
+// (-> hub/api/agents/verb), so nothing about a verb is written in two places.
+type binding struct {
+	usage    string
+	usageFor func(registry.Caller) string
+	blocked  func(registry.Caller) string
+	run      func(registry.Caller, []string, io.Writer) (int, error)
+}
+
+// bindings is the one table from a verb's name to what runs it. Rebuilt per call: the closures
+// capture the hub, and the acting halves below it hold nothing of their own.
+func (h *Hub) bindings() map[string]binding {
+	return map[string]binding{
+		"status": {usage: "show who you are and your current state", run: h.AgentFlow().CmdStatus},
+		"log":    {usage: "record a note in your activity log: log <message>", run: h.AgentFlow().CmdLog},
+		"prs": {usage: "list pull requests and their status — your own if you're a worker, the whole project " +
+			"otherwise; the 10 most recent active ones, `--limit N` to widen", run: h.PRFlow().CmdListPRs},
+		"show": {usage: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", run: h.wf.CmdShow},
 		// Through the workflow, not inline here: the gate builds and tests, so it goes through the run
-		// queue with every other one (-> workflow.CmdLint).
-		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.wf.CmdLint},
+		// queue with every other one (-> fleet.CmdLint).
+		"lint": {usage: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", run: h.PRFlow().CmdLint},
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
-		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("submit", landingBlocked("submit")), Run: h.wf.CmdSubmit},
+		"submit": {usage: "request your branch be merged: submit [message]", run: h.PRFlow().CmdSubmit,
+			blocked: agentflow.HeldByEscalation("submit", landingBlocked("submit"))},
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
-		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("contribute", landingBlocked("contribute")), Run: h.wf.CmdContribute},
+		"contribute": {usage: "land an interim contribution mid-task (needs the user's approval): contribute [message]",
+			run:     h.PRFlow().CmdContribute,
+			blocked: agentflow.HeldByEscalation("contribute", landingBlocked("contribute"))},
 		// The author's own reject: it withdraws its PR to keep working. Available exactly while one is
 		// out, which is the state where realising something is missing had no way out but somebody
 		// else's verdict.
-		registry.Command{Name: "revoke", Help: "withdraw your pull request and keep working on it: revoke [why]",
-			Roles: []string{"worker", "planner"},
-			Blocked: func(c registry.Caller) string {
-				if c.Phase != "submitted" {
+		"revoke": {usage: "withdraw your pull request and keep working on it: revoke [why]", run: h.PRFlow().CmdRevoke,
+			blocked: func(c registry.Caller) string {
+				if !situation.Standing(c.Phase, "submitted") {
 					return "You have no pull request out to withdraw — `sindri` tells you where you are."
 				}
 				return ""
-			}, Run: h.wf.CmdRevoke},
+			}},
 		// Always available to a worker — checking your branch still merges is harmless at any time.
-		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
+		"resolve": {usage: "check your branch still merges onto its base, and resolve any conflicts: resolve",
+			run: h.PRFlow().CmdResolve},
 		// Align any time — harmless, and it surfaces conflicts to fix rather than letting drift.
-		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.wf.CmdRebase},
+		"rebase": {usage: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase",
+			run: h.PRFlow().CmdRebase},
 		// The agents have no git of their own — that isolation is the point. So the hub runs a
-		// curated read/restore subset for them (-> workflow.CmdGit): without it, an agent cannot
-		// see what it changed or put a file back, and reconstructs both from memory.
-		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
+		// curated read/restore subset for them: without it, an agent cannot see what it changed or
+		// put a file back, and reconstructs both from memory.
+		"git": {usage: workspace.GitHelp, run: h.agentWorkspace().CmdGit},
 		// The coauthor's second workspace: /workspace is the user's checkout, which is no place to
 		// check out somebody else's branch, so the hub puts it in a tree of the coauthor's own.
-		registry.Command{Name: "scratch", Help: workflow.ScratchHelp, Roles: []string{"coauthor"}, Run: h.wf.CmdScratch},
+		"scratch": {usage: workspace.ScratchHelp, run: h.agentWorkspace().CmdScratch},
 		// Not for a planner: its workspace is read-only, so there is nothing here for it to run.
-		registry.Command{Name: "run", Help: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
-			Roles: []string{"worker", "reviewer", "coauthor"}, Run: h.wf.CmdScheduleRun},
-		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
-			Blocked: heldByEscalation("checkpoint", func(c registry.Caller) string {
+		"run": {usage: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
+			run: h.RunFlow().CmdScheduleRun},
+		"checkpoint": {usage: "record the current subtask and move to the next: checkpoint [summary]",
+			run: h.TaskFlow().CmdCheckpoint,
+			blocked: agentflow.HeldByEscalation("checkpoint", func(c registry.Caller) string {
 				if c.Container == "" {
 					return "Checkpoint records one subtask of a feature, and you hold a task of your own — " +
 						"`sindri submit \"<summary>\"` puts it up for review when it's done."
 				}
 				return ""
-			}), Run: h.wf.CmdCheckpoint},
+			})},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
-		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker", "reviewer"}, Run: h.wf.CmdTasks},
+		"task": {usage: taskflow.TaskHelp, run: h.TaskFlow().CmdTasks},
 		// The coauthor shapes the backlog it already reads; both verbs still end at the user's approval.
-		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner", "coauthor"}, Run: h.wf.CmdCreateTask},
-		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner", "coauthor"}, Run: h.wf.CmdEditTask},
-		registry.Command{Name: "prioritise-task", Help: workflow.PrioritiseTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdPrioritiseTask},
+		"create-task":     {usage: taskflow.CreateTaskHelp, run: h.TaskFlow().CmdCreateTask},
+		"edit-task":       {usage: taskflow.EditTaskHelp, run: h.TaskFlow().CmdEditTask},
+		"prioritise-task": {usage: taskflow.PrioritiseTaskHelp, run: h.TaskFlow().CmdPrioritiseTask},
 		// Planner only, never a worker, which could undo a human's verdict on its own task
 		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
-		registry.Command{Name: "reopen-task", Help: reopenTaskHelp, Roles: []string{"planner"}, Run: h.cmdReopenTask},
+		"reopen-task": {usage: reopenTaskHelp, run: h.cmdReopenTask},
 		// A planner's landing verb: `openspec submit` is a worker's submit in different dress, so the
 		// escalation hold has to reach it. Held open, an escalated planner could ship a PR built on the
 		// guess it had just said it would not make.
-		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"},
-			Blocked: heldByEscalation("openspec", nil), Run: h.wf.CmdOpenspec},
-		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
+		"openspec": {usage: "ship your openspec changes as a PR: openspec submit [message]",
+			run: h.PRFlow().CmdOpenspec, blocked: agentflow.HeldByEscalation("openspec", nil)},
 		// A planner plans for people, so it may see who they are — in ITS repo. Visibility is local
 		// while addressing is global: mail takes any name, but only ones the user has given it.
-		registry.Command{Name: "staff", Help: "list this repo's agents — name, role, and what each is working on", Roles: []string{"planner"}, Run: h.cmdStaff},
+		"staff": {usage: "list this repo's agents — name, role, and what each is working on", run: h.AgentFlow().CmdStaff},
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
 		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
 		// they already read the whole backlog. Findings belong on the task, not the activity log.
-		registry.Command{Name: "comment", Help: commentHelp(registry.Caller{}), HelpFor: commentHelp,
-			Roles: []string{"worker", "reviewer", "planner", "coauthor"},
-			Blocked: func(c registry.Caller) string {
+		"comment": {usage: commentHelp(registry.Caller{}), usageFor: commentHelp, run: h.cmdComment,
+			blocked: func(c registry.Caller) string {
 				switch c.Role {
 				case "worker":
 					if !c.HasTask {
@@ -127,44 +137,62 @@ func (h *Hub) registry() *registry.Registry {
 					}
 				}
 				return ""
-			}, Run: h.cmdComment},
+			}},
 		// One verb, three acts (-> CmdApprove): a reviewer's opens the merge gate, a planner's is an
 		// optional badge beside it, a coauthor's is a full verdict on a PR it can already diff and lint.
-		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
-			Roles: []string{"reviewer", "planner", "coauthor"}, Blocked: heldByEscalation("approve", nil), Run: h.wf.CmdApprove},
-		// The verb, never the queue: nothing assigns a coauthor a review (-> reviewerAssignable).
-		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer", "coauthor"},
-			Blocked: heldByEscalation("reject", nil), Run: h.wf.CmdReject},
+		"approve": {usage: approveHelp(registry.Caller{}), usageFor: approveHelp,
+			run: h.PRFlow().CmdApprove, blocked: agentflow.HeldByEscalation("approve", nil)},
+		// The verb, never the queue: nothing assigns a coauthor a review (-> ReviewerAssignable).
+		"reject": {usage: "reject a pull request: reject <pr-id> <feedback...>",
+			run: h.PRFlow().CmdReject, blocked: agentflow.HeldByEscalation("reject", nil)},
 		// Either side of a stop only the user can end, open to every role — any agent can meet a
 		// decision that is not its to make. Escalate stays open while escalated: a badly-put
 		// question has to be re-puttable.
-		registry.Command{Name: "escalate", Help: escalateHelp, Run: h.cmdEscalate},
-		registry.Command{Name: "resume", Help: resumeHelp,
-			Blocked: func(c registry.Caller) string {
+		"escalate": {usage: agentflow.EscalateHelp, run: h.AgentFlow().CmdEscalate},
+		"resume": {usage: agentflow.ResumeHelp, run: h.AgentFlow().CmdResume,
+			blocked: func(c registry.Caller) string {
 				if c.Escalation == "" {
 					return "You have no escalation to clear — `sindri` tells you where you are."
 				}
 				return ""
-			}, Run: h.cmdResume},
+			}},
 		// One short note to the user, against a budget the help states up front: known scarcity selects
 		// better than a cap discovered by hitting it. Not the coauthor — it is in the room already.
-		registry.Command{Name: "fyi", Help: workflow.FyiHelp(workflow.NotesPerClaim),
-			HelpFor: func(c registry.Caller) string { return workflow.FyiHelp(c.NotesLeft) },
-			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.cmdFyi},
+		"fyi": {usage: prompts.FyiHelp(prompts.NotesPerClaim), run: h.mail.CmdFyi,
+			usageFor: func(c registry.Caller) string { return prompts.FyiHelp(c.NotesLeft) }},
 		// Every role receives mail, so every role reads it — and never held back by an escalation, since
 		// reading is how an escalated agent learns the answer it waits for.
-		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
+		"mail": {usage: mail.Help, run: h.mail.CmdMail},
 		// Answering needs no name: the recipient comes off the message, so neither end needs a directory.
-		registry.Command{Name: "reply", Help: replyHelp, Run: h.cmdReply},
+		"reply": {usage: mail.ReplyHelp, run: h.mail.CmdReply},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
-		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
-			Blocked: func(c registry.Caller) string {
+		"meeting": {usage: "say something to everyone in the meeting room: meeting <message...>", run: h.chat.Cmd,
+			blocked: func(c registry.Caller) string {
 				if !c.InChat {
 					return "You're not in the meeting room — the user adds agents to it, so there's nobody to say this to yet."
 				}
 				return ""
-			}, Run: h.cmdChat},
-	)
+			}},
+	}
+}
+
+// registry is the command surface: the catalogue in its declared order, each entry carrying what
+// the binding table puts behind it. The name, the summary and the roles come from the catalogue
+// alone, so a verb the maps offer and a verb the agent can type are one list by construction.
+func (h *Hub) registry() *registry.Registry {
+	bound := h.bindings()
+	cmds := make([]registry.Command, 0, len(verb.Catalogue))
+	for _, d := range verb.Catalogue {
+		b, ok := bound[d.Name]
+		if !ok {
+			continue // an unbound catalogue entry: TestEveryVerbIsBound names it at test time
+		}
+		cmds = append(cmds, registry.Command{
+			Name: d.Name, Help: b.usage, HelpFor: b.usageFor,
+			Roles: d.Roles, Blocked: b.blocked, Run: b.run,
+		})
+	}
+	return registry.New(cmds...)
 }
 
 // landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute). In a
@@ -174,10 +202,10 @@ func landingBlocked(verb string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Container != "" {
 			switch {
-			case verb == "contribute" && c.Phase == "submitted":
+			case verb == "contribute" && situation.Standing(c.Phase, "submitted"):
 				return fmt.Sprintf("Feature %s is already up for the user to merge — wait for that, or "+
 					"`sindri revoke` to take it back and keep working.", c.Container)
-			case (verb == "contribute" || verb == "submit") && c.Phase == "gating":
+			case (verb == "contribute" || verb == "submit") && situation.Standing(c.Phase, "gating"):
 				return "Your quality gate is queued — wait for the result before trying again."
 			case verb == "submit" && c.SubtasksOpen:
 				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
@@ -187,8 +215,8 @@ func landingBlocked(verb string) func(registry.Caller) string {
 			}
 			return ""
 		}
-		if c.Phase != "working" {
-			return workflow.ReplyNotWorking(verb, c.Phase, c.Task)
+		if !situation.Standing(c.Phase, "working") {
+			return prompts.ReplyNotWorking(verb, c.Phase, c.Task)
 		}
 		return ""
 	}
@@ -238,9 +266,13 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Project: project,
 		Agent:   name,
 		Role:    s.Role,
-		// Holding a task or a collaborative container hides "next" and shows "submit" (a container
-		// swaps in "checkpoint"); an idle worker gets the reverse.
-		HasTask:      s.Phase != "idle" || s.Container != "",
+		// Where the flow machine has this agent, and what that state offers. It is the AUTHORITY on
+		// what may run: the per-command closures below it survive only for the questions no state can
+		// answer, and never re-derive one.
+		Standing: h.wf.Standing(project, name),
+		// Holding a task or a collaborative container is what opens the verbs that ACT on one —
+		// "submit", or "checkpoint" inside a container — and what makes "comment" mean something.
+		HasTask:      !situation.Standing(s.Phase, "idle") || s.Container != "",
 		Container:    s.Container,
 		SubtasksOpen: subtasksOpen,
 		Task:         s.Task,
@@ -343,7 +375,7 @@ func (h *Hub) internalFailure(project, name, what string, exit int, err error) (
 	}
 	live, _ := h.store.For(project).GetState(name)
 	if live.Escalation == "" {
-		if _, eerr := h.Escalate(project, name, reason); eerr != nil {
+		if _, eerr := h.AgentFlow().Escalate(project, name, reason); eerr != nil {
 			fmt.Fprintf(os.Stderr, "hub: escalating %q after %s failed: %v\n", name, what, eerr)
 			// Escalate writes state FIRST (escalate.go): a later step failing still leaves it set, so
 			// a re-read — not the in-memory reason — is what actually reflects the truth.
@@ -370,28 +402,6 @@ func (h *Hub) internalFailure(project, name, what string, exit int, err error) (
 	return exit, fmt.Errorf("%s failed inside the hub too, on top of the escalation already standing. "+
 		"The user sees that earlier question on the board, not this fault — it's only in the hub's log "+
 		"right now. `sindri log <message>` is still open; use it to put this on record yourself.", what)
-}
-
-func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	// The watchdog's observation, not a probe — but no reading yet is not "down": the caller is
-	// running this from inside its own pod, so only a CONFIRMED-down reading says otherwise.
-	l, ok := h.watch.get(c.Project, c.Agent)
-	running := !ok || l.up
-	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
-	return 0, nil
-}
-
-func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, error) {
-	msg := strings.TrimSpace(strings.Join(args, " "))
-	if msg == "" {
-		fmt.Fprintln(out, "usage: log <message>")
-		return 2, nil
-	}
-	if err := h.store.For(c.Project).Log(c.Agent, "note", msg); err != nil {
-		return 1, err
-	}
-	fmt.Fprintln(out, "logged")
-	return 0, nil
 }
 
 // commentUsage is the argument form for this caller: no id where the caller's own state already names
@@ -518,64 +528,6 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 	return 0, nil
 }
 
-// cmdStaff lists the caller's colleagues in ITS OWN project — who they are and what each holds,
-// the answer to "who do I ask about this". Scoped by construction, the roster query being: an
-// agent may talk to anyone the user has named to it, and may not browse the fleet for a name.
-func (h *Hub) cmdStaff(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	ps := h.store.For(c.Project)
-	roster, err := ps.Roster()
-	if err != nil {
-		return 1, err
-	}
-	if len(roster) == 0 {
-		fmt.Fprintln(out, "no agents in this repo yet")
-		return 0, nil
-	}
-	for _, a := range roster {
-		who := a.Name
-		if a.Name == c.Agent {
-			who += " (you)"
-		}
-		fmt.Fprintf(out, "%-14s %-9s %s\n", who, a.Role, staffHolding(h.store, a))
-	}
-	return 0, nil
-}
-
-// staffHolding is what one colleague has in hand: a reviewer a PR, everyone else a task or the
-// feature it is working through. Retirement is said, since it decides whether to wait for them.
-func staffHolding(fleet *store.Store, a store.Agent) string {
-	var holding string
-	if a.Role == "reviewer" {
-		// fleet's ReviewingPR: a pooled reviewer's row is never filed under its own project.
-		if _, pr, err := fleet.ReviewingPR(a.Project, a.Name); err == nil && pr != "" {
-			holding = "reviewing " + pr
-		}
-	}
-	st, err := fleet.For(a.Project).GetState(a.Name)
-	if err == nil && holding == "" {
-		switch {
-		case st.Container != "" && st.Task != "":
-			holding = st.Container + " › " + st.Task
-		case st.Container != "":
-			holding = st.Container
-		case st.Task != "":
-			holding = st.Task
-		}
-	}
-	if holding == "" {
-		holding = "nothing in hand"
-	}
-	if a.Retired {
-		holding += " (retired: finishing what it holds, taking nothing new)"
-	}
-	return holding
-}
-
-// cmdChat is the agent-facing `chat` verb — it delegates to the chat relay.
-func (h *Hub) cmdChat(c registry.Caller, args []string, out io.Writer) (int, error) {
-	return h.chat.Cmd(c, args, out)
-}
-
 // reopenTaskUsage is the one description of reopen-task's surface, shown for a missing reason and
 // (via reopenTaskHelp) `reopen-task --help`.
 const reopenTaskUsage = "usage: reopen-task <id> <reason...>\n" +
@@ -610,7 +562,7 @@ func (h *Hub) cmdReopenTask(c registry.Caller, args []string, out io.Writer) (in
 	return 0, nil
 }
 
-// ReopenTask restores a closed sindri-owned task (-> workflow.Engine.ReopenTask) and records reason
+// ReopenTask restores a closed sindri-owned task (-> fleet.Engine.ReopenTask) and records reason
 // as a comment on it, attributed to author — the "this did not hold" signal a fresh duplicate task
 // would otherwise lose. Both cmdReopenTask and server.go's /task/reopen route through here, so the
 // reason is required, and recorded exactly once, however it was asked for.
@@ -619,7 +571,7 @@ func (h *Hub) ReopenTask(project, id, author, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("say why %s is being reopened — an unstated reason is exactly what gets lost otherwise", id)
 	}
-	if err := h.wf.ReopenTask(project, id); err != nil {
+	if err := h.TaskFlow().ReopenTask(project, id); err != nil {
 		return err
 	}
 	// The task is already open by this point: say so, or the error alone reads as "neither happened".

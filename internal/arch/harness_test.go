@@ -20,8 +20,8 @@ import (
 	// Blank-imported so this test's cache key includes their transitive source: `go list -deps` below
 	// is a subprocess Go's cache cannot see into, so without these edges a new import under one of
 	// them would leave a stale PASS here.
-	_ "github.com/flo-at/sindri/internal/hub/situation"
-	_ "github.com/flo-at/sindri/internal/hub/workflow"
+	_ "github.com/flo-at/sindri/internal/hub/flow/fleet"
+	_ "github.com/flo-at/sindri/internal/hub/world/situation"
 )
 
 // boxAdapters are the packages that ARE an agent's box: the session, and the coding tool inside it.
@@ -40,7 +40,7 @@ var boxAdapters = map[string]string{
 // AGENT lives in is never one of them: that is the harness's, and a file added here claiming
 // otherwise is the thing this list exists to make somebody argue for.
 var runQueuePods = map[string]string{
-	"internal/hub/workflow/execrun.go": "the run queue's own throwaway pods, which belong to no agent",
+	"internal/hub/flow/run/exec_act.go": "the run queue's own throwaway pods, which belong to no agent",
 }
 
 // TestOnlyTheRunQueueNamesTheRuntime is the file-level half of the rule above: the import graph
@@ -49,7 +49,8 @@ var runQueuePods = map[string]string{
 func TestOnlyTheRunQueueNamesTheRuntime(t *testing.T) {
 	const runtime = `"github.com/flo-at/sindri/internal/container"`
 	seen := 0
-	for _, dir := range []string{"internal/hub/workflow", "internal/hub/situation"} {
+	for _, dir := range []string{"internal/hub/flow/fleet", "internal/hub/world/situation",
+		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)
@@ -82,8 +83,8 @@ func TestOnlyTheRunQueueNamesTheRuntime(t *testing.T) {
 // the box. situation is here as well as workflow: it is where the rules moved TO, so it inherits the
 // same prohibition, and a rule that reached for a pane would land there first.
 var orchestrators = []string{
-	"github.com/flo-at/sindri/internal/hub/workflow",
-	"github.com/flo-at/sindri/internal/hub/situation",
+	"github.com/flo-at/sindri/internal/hub/flow/fleet",
+	"github.com/flo-at/sindri/internal/hub/world/situation",
 }
 
 // TestTheOrchestratorCannotReachTheBox walks the REAL import graph, so an indirect import fails too —
@@ -105,58 +106,40 @@ func TestTheOrchestratorCannotReachTheBox(t *testing.T) {
 		for _, dep := range deps {
 			if why, forbidden := boxAdapters[dep]; forbidden {
 				t.Errorf("%s depends on %s — %s. The orchestrator reaches the box only through "+
-					"workflow.Harness; if this arrived indirectly, the package that pulled it in is the "+
+					"fleet.Harness; if this arrived indirectly, the package that pulled it in is the "+
 					"one to fix", pkg, dep, why)
 			}
 		}
 	}
 }
 
-// TestDeliveryDoesNotAskTheRuleset walks out from hub.Deliver and fails on any reach into the
-// workflow engine. Asking it whether a message is worth sending is what made the ruleset and the
-// delivery path call each other through the composition root: the sender decides, and delivery
-// carries out what it is given (-> hub/deliver.go).
+// TestDeliveryDoesNotAskTheRuleset holds the same line the walk used to, structurally: the mailbox
+// is its own package now, so "delivery cannot ask the ruleset" is a fact about its import graph
+// rather than a property somebody has to keep re-proving over a call tree.
+//
+// Asking the flow whether a message is worth sending is what made the ruleset and the delivery path
+// call each other through the composition root. The sender decides; delivery carries out what it is
+// given (-> hub/messaging/mail/deliver.go).
 func TestDeliveryDoesNotAskTheRuleset(t *testing.T) {
-	pkg := parseHubPackage(t, filepath.Join(moduleRoot(t), "internal", "hub"))
-	const entry = "Hub.Deliver"
-	if pkg.decls[entry] == nil {
-		t.Fatal("hub.Deliver not found — the guard is reading the wrong package")
+	const pkg = "github.com/flo-at/sindri/internal/hub/messaging/mail"
+	out, err := exec.Command("go", "list", "-deps", pkg).Output()
+	if err != nil {
+		t.Fatalf("go list -deps %s: %v", pkg, err)
 	}
-	walked, reached := map[string]bool{}, 0
-	queue := []string{entry}
-	for len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-		if walked[key] {
-			continue
-		}
-		walked[key] = true
-		for _, decl := range pkg.decls[key] {
-			for _, c := range callsIn(decl.fn) {
-				reached++
-				if c.root == "h.wf" {
-					t.Errorf("%s reaches h.wf.%s — delivery must not ask the ruleset whether a message is "+
-						"worth sending. That judgement belongs where the message is composed", key, c.name)
-					continue
-				}
-				if c.root == "" && pkg.decls["."+c.name] != nil {
-					queue = append(queue, "."+c.name)
-					continue
-				}
-				if recv, internal := hubInternal[c.root]; internal && pkg.decls[recv+"."+c.name] != nil {
-					queue = append(queue, recv+"."+c.name)
-				}
-			}
-		}
+	deps := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(deps) < 10 {
+		t.Fatalf("go list -deps %s returned %d packages — the guard is not reading the graph", pkg, len(deps))
 	}
-	// Anti-vacuity: Deliver writes mail, notifies the board and injects, across more than one helper.
-	if reached < 8 {
-		t.Fatalf("the walk reached %d calls from hub.Deliver — it is not reading the delivery path", reached)
+	for _, dep := range deps {
+		if strings.Contains(dep, "/internal/hub/flow") {
+			t.Errorf("hub/mail depends on %s — delivery must not ask the ruleset whether a message is "+
+				"worth sending. That judgement belongs where the message is composed", dep)
+		}
 	}
 }
 
 // TestNoPaneWordIsMatchedInTheHub is the guard whose absence let a pane word survive a green gate:
-// workflow/stall.go still matched "api-error" off a raw runtime parameter after the other two strings
+// the stall watcher still matched "api-error" off a raw runtime parameter after the other two strings
 // had gone, and stallwatch and credwatch each matched one of their own. The words come OUT of
 // observe.go's const block rather than being restated here, so a sixth word added there is guarded
 // the day it appears.
@@ -177,7 +160,8 @@ func TestNoPaneWordIsMatchedInTheHub(t *testing.T) {
 		t.Fatalf("only %d runtime words read out of observe.go — the guard is not reading the vocabulary", len(words))
 	}
 	files, hits := 0, 0
-	for _, dir := range []string{"internal/hub", "internal/hub/workflow", "internal/hub/situation"} {
+	for _, dir := range []string{"internal/hub", "internal/hub/flow/fleet", "internal/hub/world/situation",
+		"internal/hub/flow/pr", "internal/hub/flow/task", "internal/hub/flow/run", "internal/hub/flow/agent", "internal/hub/core"} {
 		entries, err := os.ReadDir(filepath.Join(moduleRoot(t), dir))
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)
@@ -213,7 +197,7 @@ func TestNoPaneWordIsMatchedInTheHub(t *testing.T) {
 // so this guard and the code it guards cannot hold different ideas of what the words are.
 func paneWords(t *testing.T) map[string]bool {
 	t.Helper()
-	path := filepath.Join(moduleRoot(t), "internal", "hub", "observe", "state.go")
+	path := filepath.Join(moduleRoot(t), "internal", "hub", "world", "observe", "state.go")
 	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
@@ -310,9 +294,9 @@ var judgements = []string{"stalled", "blocked", "full", "needs", "idle"}
 // states a conclusion. "Idle" is the one to watch: "at an empty prompt" is an observation and "has
 // nothing to do" is a conclusion, and one identifier carried both until this split.
 func TestTheObservationCarriesNoJudgement(t *testing.T) {
-	names, files := exportedNamesIn(t, filepath.Join(moduleRoot(t), "internal", "hub", "observe"))
+	names, files := exportedNamesIn(t, filepath.Join(moduleRoot(t), "internal", "hub", "world", "observe"))
 	if files < 1 {
-		t.Fatal("no source found in internal/hub/observe — the scan is reading the wrong directory")
+		t.Fatal("no source found in internal/hub/world/observe — the scan is reading the wrong directory")
 	}
 	if len(names) < 8 {
 		t.Fatalf("only %d exported names found — the scan is not reading the observation", len(names))
@@ -321,7 +305,7 @@ func TestTheObservationCarriesNoJudgement(t *testing.T) {
 		for _, word := range judgements {
 			if strings.Contains(strings.ToLower(n), word) {
 				t.Errorf("the observation exports %q, which states a %q — that is true only against the "+
-					"work the agent holds, so it belongs to the orchestrator (-> hub/situation.Surface)", n, word)
+					"work the agent holds, so it belongs to the orchestrator (-> hub/world/situation.Surface)", n, word)
 			}
 		}
 	}
@@ -331,11 +315,11 @@ func TestTheObservationCarriesNoJudgement(t *testing.T) {
 // reaching into the box: the harness carries out what it is given and reports the outcome.
 var orchestratorNouns = []string{"task", "pr", "review", "verdict", "backlog", "feature", "subtask"}
 
-// TestTheHarnessNamesNoWork reads workflow.Harness itself and checks every method and parameter.
+// TestTheHarnessNamesNoWork reads fleet.Harness itself and checks every method and parameter.
 func TestTheHarnessNamesNoWork(t *testing.T) {
-	iface := interfaceNamed(t, filepath.Join(moduleRoot(t), "internal", "hub", "workflow", "engine.go"), "Harness")
+	iface := interfaceNamed(t, filepath.Join(moduleRoot(t), "internal", "hub", "core", "core.go"), "Harness")
 	if iface == nil {
-		t.Fatal("workflow.Harness not found — the guard is reading the wrong file")
+		t.Fatal("core.Harness not found — the guard is reading the wrong file")
 	}
 	methods := 0
 	for _, field := range iface.Methods.List {

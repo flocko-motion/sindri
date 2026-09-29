@@ -1,4 +1,4 @@
-// package: adapter/applecontainer / applecontainer
+// package: adapter/container/applecontainer / applecontainer
 // type:    adapter (external tool: Apple `container`) — implements container.Runtime
 // job:     the Apple-`container` backend for the container-runtime port (macOS 26):
 // each agent pod is its OWN micro-VM, so one agent's crash/OOM can't take

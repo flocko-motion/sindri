@@ -171,6 +171,10 @@ func main() {
 			"single command, so you don't need compound shell such as: "+
 			"brokkr <cmd> 2>&1 | tail -N ; echo \"=== exit: $? ===\".")
 	root.SilenceUsage = true // runtime errors report themselves; don't dump usage
+	// One printing path for every error, in run(). Cobra's own would double up with the report a
+	// command already wrote, and its silence is why a command that sets SilenceErrors to hide
+	// exitCodeError's empty message used to lose REAL errors too: exit 1, nothing said.
+	root.SilenceErrors = true
 	root.AddCommand(newMapCmd(), newRefsCmd(), newLintCmd(), newVersionCmd(), newGoplsMCPCmd())
 
 	exit(run(root))
@@ -201,9 +205,10 @@ func run(root *cobra.Command) (code int) {
 	}
 	var ec exitCodeError
 	if errors.As(err, &ec) {
-		return ec.code
+		return ec.code // the command already printed its own report
 	}
-	return 1 // a real error; cobra has already printed it to the (buffered) err writer
+	fmt.Fprintf(errSink(), "error: %v\n", err)
+	return 1
 }
 
 // errSink puts a recovered panic in the tail buffer when --tail is active, else on stderr.

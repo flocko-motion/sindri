@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -432,7 +433,12 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase) · meeting: remove a member
+	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase) · meeting: remove a member · mail: mark yours read (keyMarkRead)
+		if m.tab == 6 && m.cl != nil {
+			cl := m.cl
+			m.flash = fmt.Sprintf("marked %d of yours read", m.state.MailUnreadUser)
+			return mutateThenRefresh(cl, cl.MarkAllMailRead)
+		}
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -454,7 +460,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.verifyCmd(id)
 			}
 		}
-	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks) / meeting: add a member
+	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks) / meeting: add a member · agents: answer an escalation (keyResume)
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok && a.Escalation != "" {
+				m.openResumeForm(a.Name)
+				return nil
+			}
+		}
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
@@ -551,9 +563,6 @@ func (m *model) onKey(k string) tea.Cmd {
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 				case "mail": // Agents: go read what this agent has not (-> gotoItem, which narrows)
 					m.gotoItem(it.kind, it.value)
-					return nil
-				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
-					m.openResumeForm(it.value)
 					return nil
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), resumed)

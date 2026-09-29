@@ -62,9 +62,9 @@ var boardHandles = map[string]string{
 	"h.startedAt": "the hub's start time, a value it has held since New",
 	// Pure packages: values and formatting, no I/O of any kind.
 	"api":      "wire types and the status vocabulary",
-	"commands": "resolves the board's own tabs from the board",
+	"sections": "resolves the board's own tabs from the board",
 	"store":    "row types and their helpers",
-	"agent":    "the agent package's pure helpers (see boardCalls for its service)",
+	"harness":  "the harness package's pure helpers (see boardCalls for its service)",
 	"workflow": "the workflow package's pure rules (see boardCalls for its engine)",
 	"fmt":      "formatting",
 	"strings":  "text",
@@ -85,8 +85,12 @@ var boardHandles = map[string]string{
 // a header cannot fail a build.
 var boardCalls = map[string]string{
 	"h.agents.SettleIntent":    "retires a settled launch/stop; an in-memory map write, no probe",
+	"h.debug.Where":            "the debug view's URL or bind error, a field read under its lock — no probe",
 	"h.agents.Unreachable":     "counts pushes the pane never showed — a map the injector keeps, no probe",
-	"h.wf.FleetRuns":           "ranks the runs table — a store read",
+	"h.runFlow().FleetRuns":    "ranks the runs table — a store read",
+	"h.FleetRuns":              "the same, through the hub's own wrapper",
+	"h.wf.Handles":             "hands back the pointer the engine already holds — a field read",
+	"runflow.New":              "wraps those handles in the run subject's acting half — a struct literal",
 	"container.Name":           "the backend's display name, a string it holds — not an operation on it",
 	"container.AgentContainer": "builds a pod name out of a path — string arithmetic, not a pod",
 }

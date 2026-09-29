@@ -3,7 +3,7 @@
 // job:     the two ways a user reaches an agent, as two actions: `tell` PUSHES into the live
 // session now, and `mail` WAITS to be read without interrupting. Each one-liner says
 // which it is, because that is where the choice is made.
-// limits:  thin calls into the backend; the delivery model is the hub's (-> workflow.Delivery).
+// limits:  thin calls into the backend; the delivery model is the hub's (-> mail.Delivery).
 package cli
 
 import (
@@ -51,7 +51,10 @@ func agentTellCmd() *cobra.Command {
 			"/login prompt is sent, so the message would sit in its input box unread. Both answers are yours\n" +
 			"to give — --restart bounces it first, which is how it re-reads the credentials the hub keeps\n" +
 			"staged, and --anyway sends regardless, for when you have just renewed the host's token and know\n" +
-			"better than the pane does.",
+			"better than the pane does.\n\n" +
+			"A pane with a line already typed into its input box is held for the same reason and answered by\n" +
+			"the same --anyway: typing appends, so a send would join your half-written sentence and submit\n" +
+			"both. Wait for whoever is typing, or say you know that line is going nowhere.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			msg := strings.Join(args[1:], " ")
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
@@ -71,7 +74,7 @@ func agentTellCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&restart, "restart", false, "if it reads signed out, restart it first (it re-reads the host's credentials), then send")
-	c.Flags().BoolVar(&anyway, "anyway", false, "send even if it reads signed out — the pane's reading may be out of date")
+	c.Flags().BoolVar(&anyway, "anyway", false, "send whatever the pane says — signed out, or a line already in its input box")
 	return c
 }
 

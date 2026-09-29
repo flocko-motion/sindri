@@ -221,3 +221,78 @@ func TestRuntime(t *testing.T) {
 		}
 	}
 }
+
+// TestInputPendingSeesSomebodyMidSentence is the guard behind every push. send-keys APPENDS to the
+// input box, so typing into one a person is part-way through joins the two and submits the pair —
+// which is how a user's half-written message went up with a hub notice spliced into it.
+func TestInputPendingSeesSomebodyMidSentence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		screen string
+		want   bool
+	}{
+		{
+			name:   "empty box",
+			screen: "some earlier output\n\n╭─────────────╮\n❯                          \n╰─────────────╯",
+		},
+		{
+			name:   "somebody typing",
+			screen: "╭─────────────╮\n❯ ranke-db is not an issue now, we focus on the webapp\n╰─────────────╯",
+			want:   true,
+		},
+		{
+			// The case this exists for: a turn is running and a person has typed ahead into the box.
+			// Claude queues what is typed mid-turn, which is exactly why the hub pushes then — but it
+			// queues it onto THEIR line, not beside it.
+			name:   "typed ahead while a turn runs",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ and also check the migration\n  ⏵⏵ bypass permissions on · esc to interrupt",
+			want:   true,
+		},
+		{
+			name:   "empty box while a turn runs",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on · esc to interrupt",
+		},
+		{
+			// A form's options carry the same chevron. They are nobody's typing, and answering one is
+			// what typing at the pane is FOR — holding here would make `sindri agent tell` unable to
+			// answer the dialog it exists to answer.
+			name:   "a form is not somebody typing",
+			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)",
+		},
+		{
+			name:   "a form with its own input box below",
+			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)\n❯ ",
+		},
+		{
+			name:   "no input box at all",
+			screen: "$ ls\nREADME.md\n",
+		},
+		// Captured from a freshly started agent, escapes and all. An empty box is NOT empty: Claude
+		// draws a hint in it, and the only thing separating that from typing is that it is FAINT.
+		// Every case above is a hand-written plain string, so none of them could express this — and
+		// read as typing, it held every push to every new agent until a human cleared a box that had
+		// nothing in it.
+		{
+			name:   "the placeholder in an empty box is not somebody typing",
+			screen: "\x1b[37m────────\x1b[39m\n\x1b[39m❯ \x1b[2mTry \"edit <filepath> to...\"\x1b[0m\n\x1b[37m────────\x1b[39m",
+		},
+		{
+			name:   "typing, in a pane captured with its escapes",
+			screen: "\x1b[37m────────\x1b[39m\n\x1b[39m❯ restart the hub and try again\n\x1b[37m────────\x1b[39m",
+			want:   true,
+		},
+		{
+			// Typed over the hint: Claude drops the placeholder the moment a key lands, so anything
+			// left un-faint is theirs.
+			name:   "typing beside faint chrome",
+			screen: "\x1b[39m❯ \x1b[2m\x1b[0mdrop the second caller\n",
+			want:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (Claude{}).InputPending(tc.screen); got != tc.want {
+				t.Errorf("InputPending = %v, want %v for:\n%s", got, tc.want, tc.screen)
+			}
+		})
+	}
+}

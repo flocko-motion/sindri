@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sindri flow debug</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/dagre.min.js"></script>
+<script src="vendor/cytoscape-dagre.js"></script>
+<style>
+:root {
+  --bg: #fafafa; --panel: #ffffff; --ink: #1f2328; --muted: #656d76; --line: #d0d7de;
+  --active: #fde68a; --active-edge: #b45309; --would: #2563eb; --holds: #15803d;
+  --hl: #c026d3; --sel: #0969da; --bad: #b42318; --bad-bg: #fef3f2; --chip: #eef1f4;
+  --node: #ffffff; --region: #f1f3f5; --edge: #6e7781; --label-bg: #fafafa;
+  /* One colour per kind of exit (-> machine.Kind). */
+  --k-progress: #1f6feb; --k-setback: #bf8700; --k-fault: #cf222e; --k-intervention: #8250df;
+  --k-upkeep: #8c959f; --k-world-moved: #1a7f37; --k-none: #6e7781;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Contrast first: text near white, secondary text a light grey, lines visible on every surface. */
+    --bg: #22272e; --panel: #2d333b; --ink: #f4f6f8; --muted: #c5ccd4; --line: #768390;
+    --node: #3a414b; --region: #2a3038; --edge: #a8b3bf; --label-bg: #22272e;
+    --active: #8a6a14; --active-edge: #ffd166; --would: #6cb6ff; --holds: #57d364;
+    --hl: #f0a8ff; --sel: #6cb6ff; --bad: #ff938a; --bad-bg: #4a2323; --chip: #3a414b;
+    --k-progress: #6cb6ff; --k-setback: #e3b341; --k-fault: #ff7b72; --k-intervention: #d2a8ff;
+    --k-upkeep: #909dab; --k-world-moved: #7ee787; --k-none: #a8b3bf;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; } /* the page is a fixed frame; only the side panes scroll */
+body { background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif;
+  display: grid; grid-template-rows: auto auto 1fr; }
+/* Rows pinned: the banner is display:none when quiet, and an unpinned main would slide into its auto row. */
+header { grid-row: 1; }
+#banner { grid-row: 2; }
+main { grid-row: 3; }
+header { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
+  border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 14px; margin: 0 8px 0 0; }
+header .spacer { flex: 1; }
+button, select, input { font: inherit; color: inherit; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; }
+button { cursor: pointer; }
+button[aria-pressed="true"] { background: var(--chip); font-weight: 600; }
+#kinds { display: flex; gap: 4px; flex-wrap: wrap; }
+.kind-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 8px; }
+.kind-toggle .sw { width: 14px; height: 4px; border-radius: 2px; }
+.kind-toggle[aria-pressed="false"] { opacity: .45; text-decoration: line-through; font-weight: 400; }
+#live { color: var(--muted); font-size: 12px; }
+#banner { display: none; padding: 6px 10px; background: var(--bad-bg); color: var(--bad);
+  border-bottom: 1px solid var(--bad); white-space: pre-wrap; }
+#banner.on { display: block; }
+main { --left-w: 330px; --right-w: 400px; display: grid; min-height: 0;
+  grid-template-columns: var(--left-w) 6px 1fr 6px var(--right-w); }
+.splitter { cursor: col-resize; background: var(--line); opacity: .35; }
+.splitter:hover, .splitter.drag { opacity: 1; background: var(--sel); }
+aside, section { min-height: 0; overflow: auto; background: var(--panel); }
+#left { padding: 8px; }
+#left input { width: 100%; margin-bottom: 8px; }
+table.agents { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.agents th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px; position: sticky; top: 0; background: var(--panel); }
+table.agents td { padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+table.agents tr.repo td { color: var(--muted); font-weight: 600; padding-top: 10px; }
+table.agents tr.agent { cursor: pointer; }
+table.agents tr.agent:hover td { background: var(--chip); }
+table.agents tr.agent.sel td { background: var(--chip); box-shadow: inset 0 1px 0 var(--sel), inset 0 -1px 0 var(--sel); }
+table.agents .muted { color: var(--muted); }
+#graph { position: relative; background: var(--bg); overflow: hidden; } /* cytoscape pans itself; a scrollbar here resizes its canvas into overflowing again */
+#cy { position: absolute; inset: 0; }
+#empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+#right { display: grid; grid-template-rows: auto 1fr; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; border-radius: 0; padding: 8px 14px; background: transparent; }
+.tabs button[aria-selected="true"] { border-bottom: 2px solid var(--sel); font-weight: 600; }
+.pane { overflow: auto; padding: 10px; min-height: 0; }
+.pane[hidden] { display: none; }
+h2 { font-size: 14px; margin: 0 0 4px; }
+h3 { font-size: 12px; margin: 12px 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.sub { color: var(--muted); margin-bottom: 6px; }
+table.kv { border-collapse: collapse; width: 100%; }
+table.kv td { padding: 2px 6px 2px 0; vertical-align: top; }
+table.kv td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
+code { font-size: 12px; background: var(--chip); padding: 0 4px; border-radius: 3px; }
+#exportPanel { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 20; }
+#exportPanel[hidden] { display: none; }
+#exportPanel .sheet { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px;
+  width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: grid; gap: 8px; overflow: auto; }
+#exportPanel ol { margin: 0; padding-left: 20px; }
+#exportPanel p { margin: 0; }
+#exportCode { width: 100%; height: 340px; font: 12px/1.45 ui-monospace, monospace; white-space: pre; resize: vertical; tab-size: 8; }
+.row-buttons { display: flex; gap: 8px; align-items: center; }
+.row-buttons .spacer { flex: 1; }
+a.jump { color: var(--sel); text-decoration: none; }
+a.jump:hover code { outline: 1px solid var(--sel); }
+.chip { display: inline-block; padding: 0 6px; border-radius: 9px; background: var(--chip); font-size: 11px; }
+.kchip { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; color: #fff; }
+.yes { color: var(--holds); font-weight: 600; }
+.no { color: var(--muted); }
+ul.plain { margin: 0; padding-left: 16px; }
+ul.plain li { margin: 2px 0; }
+.from { color: var(--muted); font-size: 11px; }
+#histFilter { width: 100%; margin-bottom: 8px; }
+details.pass { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+details.pass > summary { padding: 4px 8px; cursor: pointer; list-style-position: inside; }
+.row { padding: 3px 8px; border-top: 1px solid var(--line); font-size: 12px; }
+.lone { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+.row .ts { color: var(--muted); margin-right: 6px; }
+.row .reason { font-weight: 600; margin-right: 6px; }
+.row.move { cursor: pointer; }
+.row.move:hover { background: var(--chip); }
+.row.picked { outline: 2px solid var(--hl); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sindri flow debug</h1>
+  <label>Kind <select id="kind"><option value="agent">agents</option></select></label>
+  <button id="pause" aria-pressed="false" title="Stop following the hub">Pause</button>
+  <button id="relayout" title="Forget dragged positions and lay the graph out again">Re-layout</button>
+  <button id="focus" title="Centre the active state">Focus active</button>
+  <button id="dagre" class="dev" hidden title="Lay the graph out from scratch, ignoring the checked-in default">Dagre layout</button>
+  <button id="export" class="dev" hidden title="Export this arrangement as the checked-in default">Export layout</button>
+  <span id="kinds" role="group" aria-label="Kinds of exit shown"></span>
+  <span class="spacer"></span>
+  <span id="live">connecting…</span>
+</header>
+<div id="banner" role="alert"></div>
+<div id="exportPanel" hidden role="dialog" aria-labelledby="exportTitle">
+  <div class="sheet">
+    <h2 id="exportTitle">Export the <span id="exportRole"></span> layout</h2>
+    <p>This is the arrangement on screen now, as the checked-in default every viewer gets until they
+      drag their own. To ship it:</p>
+    <ol>
+      <li>Replace the <b>whole</b> of <code id="exportFile"></code> with the code below.</li>
+      <li>Run <code>go test ./internal/hub/flow/agent/</code> — it fails on any name that is not a
+        state of this flow — and <code>brokkr lint</code>.</li>
+      <li>Rebuild the hub. Your own dragged positions still win in this browser: <b>Re-layout</b>
+        drops them to show the default.</li>
+    </ol>
+    <p class="sub">Every declared state is included, in declaration order, coordinates rounded. Regions
+      are drawn around their states, so they have no positions of their own. A state added to the flow
+      later has no entry and is placed by dagre until the next export. Start a fresh arrangement with
+      <b>Dagre layout</b>.</p>
+    <textarea id="exportCode" readonly spellcheck="false" aria-label="layout.go"></textarea>
+    <div class="row-buttons">
+      <button id="exportCopy">Copy to clipboard</button>
+      <span id="exportCopied" class="sub"></span>
+      <span class="spacer"></span>
+      <span class="sub">into <code id="exportFile2"></code></span>
+      <button id="exportClose">Close</button>
+    </div>
+  </div>
+</div>
+<main id="main">
+  <aside id="left">
+    <input id="filter" type="search" placeholder="Filter agents (name, role, state, status)">
+    <table class="agents"><thead><tr><th style="width:26%">agent</th><th style="width:16%">role</th>
+      <th style="width:32%">state</th><th>status</th></tr></thead><tbody id="agents"></tbody></table>
+  </aside>
+  <div class="splitter" id="splitLeft" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+  <section id="graph"><div id="cy"></div><div id="empty">Pick an agent on the left.</div></section>
+  <div class="splitter" id="splitRight" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+  <aside id="right">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tabDetails" aria-selected="true">Details</button>
+      <button role="tab" id="tabHistory" aria-selected="false">State history</button>
+    </div>
+    <div class="pane" id="details"></div>
+    <div class="pane" id="history" hidden>
+      <input id="histFilter" type="search" placeholder="Filter history (reason, detail, pass)">
+      <div id="histList"></div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+
+// ---- state ----------------------------------------------------------------------------------
+const KINDS = ["progress", "setback", "fault", "intervention", "upkeep", "world-moved"];
+const S = {
+  kind: "agent",
+  board: [],          // agent rows from the board
+  sel: null,          // {project, id, role}
+  selRow: "",         // the selected agent's board row, serialised, for the live trigger
+  graphKey: "",       // "agent/<role>" of the graph drawn
+  graph: null,        // api.FlowGraph
+  reading: null,      // api.SubjectFlow
+  picked: null,       // {type: "node"|"edge", id}
+  pickedRow: null,    // history row id whose edge is highlighted
+  collapsed: new Set(),
+  paused: false,
+  shown: new Set(KINDS), // the kinds of exit drawn
+  edgeOf: new Map(),     // "owner|slot|index" -> the drawn edge that exit rides
+  symbols: new Set(),    // states drawn as small copies at every edge end
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = {
+  get(k, dflt) { try { const v = localStorage.getItem(k); return v === null ? dflt : JSON.parse(v); } catch (_) { return dflt; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* storage off: it just does not persist */ } },
+  del(k) { try { localStorage.removeItem(k); } catch (_) { /* nothing stored */ } },
+};
+
+// ---- errors are shown, never swallowed ------------------------------------------------------
+function fail(msg) { $("banner").textContent = msg; $("banner").classList.add("on"); }
+function clearFail() { $("banner").classList.remove("on"); }
+
+async function getJSON(path) {
+  let resp;
+  try { resp = await fetch(path); } catch (e) { throw new Error(`${path}: the hub did not answer (${e.message})`); }
+  const text = await resp.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (_) { /* reported below */ }
+  if (!resp.ok) throw new Error(`${path}: ${body && body.error ? body.error : resp.status + " " + resp.statusText}`);
+  if (body === null) throw new Error(`${path}: the hub answered with no JSON`);
+  return body;
+}
+
+// ---- the flow as data: states, regions, and which exit is whose -----------------------------
+const stateOf = (name) => S.graph && S.graph.states.find((s) => s.name === name);
+const groupOf = (name) => S.graph && (S.graph.groups || []).find((g) => g.name === name);
+// slotOf is the list an exit reference points into: a state's own events, or a region's First/Then.
+function eventOf(ref) {
+  const s = stateOf(ref.owner);
+  if (s) return s.events[ref.index];
+  const g = groupOf(ref.owner);
+  return g ? (ref.first ? g.first : g.then)[ref.index] : null;
+}
+const slot = (ref) => (stateOf(ref.owner) ? "own" : ref.first ? "first" : "then");
+const refKey = (ref) => `${ref.owner}|${slot(ref)}|${ref.index}`;
+// ancestors is a state's or region's regions, innermost first.
+function ancestors(name) {
+  const out = [];
+  let g = groupOf((stateOf(name) || groupOf(name) || {}).in);
+  while (g) { out.push(g.name); g = groupOf(g.in); }
+  return out;
+}
+
+// ---- positions, per viewer and per graph (states only: a region is drawn round its states) --
+const posKey = () => `sindri-flow-pos:${S.graphKey}`;
+function savePos() {
+  const out = {};
+  cy.nodes().not(".proxy").filter((n) => !n.isParent()).forEach((n) => { out[n.id()] = n.position(); });
+  store.set(posKey(), out);
+}
+const symbolsKey = () => `sindri-flow-symbols:${S.graphKey}`;
+
+// ---- the graph ------------------------------------------------------------------------------
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// Sized off the label's own lines: cytoscape deprecated sizing a node by "label".
+const labelLines = (n) => String(n.data("label") || "").split("\n");
+const nodeWidth = (n) => Math.min(180, Math.max(76, ...labelLines(n).map((l) => l.length * 7.8))) + 22;
+const nodeHeight = (n) => labelLines(n).length * 17 + 18;
+const kindColour = (k) => css(`--k-${KINDS.includes(k) ? k : "none"}`);
+const cy = cytoscape({
+  container: $("cy"),
+  style: [
+    { selector: "node", style: {
+      shape: "round-rectangle", label: "data(label)", "text-valign": "center", "text-wrap": "wrap",
+      "text-max-width": 150, width: nodeWidth, height: nodeHeight, "font-size": 13,
+      color: css("--ink"), "background-color": css("--node"), "border-width": 1.5, "border-color": css("--line") } },
+    // A region is a box round its states, titled at the top; its exits leave from its edge.
+    { selector: "node.region", style: {
+      shape: "round-rectangle", "background-color": css("--region"), "background-opacity": 0.55,
+      "border-style": "dashed", "border-color": css("--line"), "text-valign": "top", "text-halign": "center",
+      "font-size": 12, "font-weight": "bold", color: css("--muted"), padding: 18 } },
+    { selector: "node.start", style: { "font-weight": "bold" } },
+    { selector: "node.ghost", style: { "border-style": "dashed", color: css("--muted") } },
+    // A copy of a state met from everywhere: the same node, smaller and quieter, where the edge would end.
+    { selector: "node.proxy", style: { width: (n) => labelLines(n)[0].length * 6.6 + 16, height: 20, "font-size": 10,
+      color: css("--muted"), "border-style": "dashed" } },
+    // A state drawn only as copies, left with no edge of its own: its copies are where it is.
+    { selector: "node.gone", style: { display: "none" } },
+    { selector: "node.would", style: { "border-width": 5, "border-style": "double", "border-color": css("--would") } },
+    { selector: "node.active", style: { "background-color": css("--active"), "border-width": 3, "border-color": css("--active-edge") } },
+    { selector: "node.region.active-region", style: { "border-color": css("--active-edge"), "border-width": 2 } },
+    { selector: "node:selected", style: { "overlay-color": css("--sel"), "overlay-opacity": 0.25, "overlay-padding": 6 } },
+    // Every edge leaves a node's right side from a small circle and enters the next one's left side
+    // with an arrowhead: direction reads from geometry, which leaves colour to say what an exit IS.
+    { selector: "edge", style: {
+      width: 1.8, "curve-style": "bezier", "source-endpoint": "50% 0%", "target-endpoint": "-50% 0%",
+      "source-arrow-shape": "circle", "target-arrow-shape": "triangle", "arrow-scale": 0.8,
+      "line-color": "data(colour)", "target-arrow-color": "data(colour)", "source-arrow-color": "data(colour)",
+      label: "data(label)", "font-size": 11, "text-wrap": "wrap", color: css("--muted"),
+      "text-background-color": css("--label-bg"), "text-background-opacity": 0.85, "text-background-padding": 2,
+      "text-rotation": "autorotate", "loop-direction": "-45deg", "loop-sweep": "-60deg" } },
+    { selector: "edge.orphaned", style: { "line-style": "dotted", opacity: 0.5 } },
+    { selector: "edge.dim", style: { opacity: 0.45 } },
+    { selector: "edge.orphaned.dim", style: { opacity: 0.25 } },
+    { selector: "edge.exit", style: { opacity: 1, color: css("--ink"), "font-weight": "bold", width: 2.5 } },
+    // Holding and "next" are a halo, so the line keeps the colour of its kind.
+    { selector: "edge.holds", style: { "underlay-color": css("--holds"), "underlay-opacity": 0.35, "underlay-padding": 5, width: 3.5 } },
+    { selector: "edge.next", style: { "underlay-opacity": 0.65, "underlay-padding": 7, "arrow-scale": 1.3, width: 4.5 } },
+    { selector: "edge.hl", style: { width: 5, "underlay-color": css("--hl"), "underlay-opacity": 0.6, "underlay-padding": 6, opacity: 1 } },
+    // A selection pulls its own edges forward and pushes the rest back.
+    { selector: "edge.faded", style: { opacity: 0.12 } },
+    { selector: "edge.near", style: { opacity: 1, width: 3, color: css("--ink"), "font-weight": "bold", "z-index": 9 } },
+    { selector: "edge:selected", style: { width: 5, opacity: 1, "underlay-color": css("--sel"), "underlay-opacity": 0.5,
+      "underlay-padding": 6, color: css("--ink"), "z-index": 10 } },
+    { selector: "edge.khide", style: { display: "none" } },
+  ],
+});
+const short = (name) => name.includes("/") ? name.slice(name.indexOf("/") + 1) : name;
+
+// drawGraph lays down the regions as boxes, the states inside them, and one edge per (owner, target,
+// kind): an exit a region holds is drawn once from the region's box, not once per state inside it.
+function drawGraph(g) {
+  cy.elements().remove();
+  proxies.clear();
+  S.edgeOf = new Map();
+  const els = [];
+  const names = new Set(g.states.map((s) => s.name));
+  for (const r of g.groups || []) {
+    els.push({ group: "nodes", data: { id: r.name, label: r.title, parent: r.in || undefined }, classes: "region" });
+  }
+  for (const s of g.states) {
+    els.push({ group: "nodes", data: { id: s.name, label: short(s.name), parent: s.in || undefined },
+      classes: s.name === g.start ? "start" : "" });
+  }
+  const owners = [
+    ...g.states.map((s) => ({ name: s.name, lists: [["own", s.events]] })),
+    ...(g.groups || []).map((r) => ({ name: r.name, lists: [["first", r.first || []], ["then", r.then || []]] })),
+  ];
+  for (const o of owners) {
+    const edges = new Map();
+    for (const [slotName, evs] of o.lists) {
+      evs.forEach((ev, i) => {
+        const to = ev.to || o.name; // an event that moves nobody is a loop on its own owner
+        const orph = ev.trigger === "orphaned";
+        const id = `${o.name}->${to}~${ev.kind || "none"}${orph ? "~orphaned" : ""}`;
+        if (!edges.has(id)) edges.set(id, { to, kind: ev.kind, orph, members: [] });
+        edges.get(id).members.push({ slot: slotName, index: i, ev });
+        S.edgeOf.set(`${o.name}|${slotName}|${i}`, id);
+      });
+    }
+    for (const [id, e] of edges) {
+      if (!names.has(e.to) && !groupOf(e.to)) {
+        names.add(e.to);
+        els.push({ group: "nodes", data: { id: e.to, label: short(e.to) + "\n(not in this flow)" }, classes: "ghost" });
+      }
+      const mark = (m) => m.slot === "first" ? "↑ " : m.slot === "then" ? "↓ " : "";
+      // A symbol state is met where the edge would reach it: a copy right of the source for an edge
+      // in, left of the target for an edge out. A loop stays on the real node.
+      let source = o.name, tgt = e.to;
+      if (e.to !== o.name && S.symbols.has(e.to)) tgt = proxy(els, e.to, o.name, "right");
+      else if (e.to !== o.name && S.symbols.has(o.name)) source = proxy(els, o.name, e.to, "left");
+      els.push({ group: "edges", data: { id, source, target: tgt, owner: o.name, to: e.to, kind: e.kind || "",
+        colour: kindColour(e.kind), members: e.members.map((m) => ({ slot: m.slot, index: m.index })),
+        label: e.members.map((m) => `${mark(m)}${m.ev.on}`).join("\n") },
+        classes: `k-${e.kind || "none"}` + (e.orph ? " orphaned" : "") + (e.to === o.name ? " stay" : "") });
+    }
+  }
+  cy.add(els);
+  cy.nodes().filter((n) => S.symbols.has(n.id()) && n.connectedEdges().empty()).addClass("gone");
+  applyKinds();
+  layout();
+}
+
+// shown is where a state is on screen: itself, or its copies when it is drawn only as those.
+const shown = (ele) => ele.hasClass("gone") ? cy.nodes(".proxy").filter((p) => p.data("real") === ele.id()) : ele;
+
+// proxy is the copy of symbol state real standing beside anchor — one per (real, anchor, side), so
+// several edges at one spot share it. Not grabbable and in no region: it follows its anchor.
+const proxies = new Set();
+function proxy(els, real, anchor, side) {
+  const id = `sym:${real}@${anchor}:${side}`;
+  if (!proxies.has(id)) {
+    proxies.add(id);
+    els.push({ group: "nodes", data: { id, label: short(real), real, anchor, side }, classes: "proxy", grabbable: false });
+  }
+  return id;
+}
+// placeProxies puts every copy beside its anchor, stacked where several share a side.
+function placeProxies() {
+  const slots = new Map();
+  cy.nodes(".proxy").forEach((p) => {
+    const a = cy.getElementById(p.data("anchor"));
+    if (a.empty()) return;
+    const bb = a.boundingBox({ includeLabels: false });
+    const key = `${p.data("anchor")}:${p.data("side")}`;
+    const n = slots.get(key) || 0;
+    slots.set(key, n + 1);
+    const w = p.width() / 2 + 70; // room for the edge's own label between the state and its copy
+    p.position({ x: p.data("side") === "right" ? bb.x2 + w : bb.x1 - w, y: (bb.y1 + bb.y2) / 2 + n * 24 });
+  });
+}
+
+// layout places every state: the viewer's own dragged positions win, then the checked-in default
+// (a developer's export), then dagre for whatever neither names. "reset" drops the viewer's own;
+// "dagre" also ignores the default, which is where a developer starts a new arrangement.
+function layout(mode) {
+  if (mode === "reset" || mode === "dagre") store.del(posKey());
+  const stored = mode ? {} : store.get(posKey(), {});
+  const defaults = mode === "dagre" ? {} : (S.graph.positions || {});
+  // The copies are laid out by their anchors, not by dagre: a copy dagre placed would pull the real
+  // flow apart to make room for something that only stands beside it.
+  const copies = cy.nodes(".proxy");
+  cy.elements().not(copies).not(copies.connectedEdges())
+    // rankSep leaves each column's gap wide enough for a copy and its edge label to stand in.
+    .layout({ name: "dagre", rankDir: "LR", nodeSep: 40, rankSep: 190, edgeSep: 12, animate: false }).run();
+  cy.nodes().not(copies).filter((n) => !n.isParent()).forEach((n) => {
+    const p = stored[n.id()] || defaults[n.id()];
+    if (p) n.position({ x: p.x, y: p.y });
+  });
+  placeProxies();
+  cy.fit(undefined, 30);
+}
+cy.on("dragfree", "node", savePos);
+cy.on("drag", "node", placeProxies);
+
+// The reading, painted onto the drawn graph: the active state and the regions round it, its exits
+// (inherited included) marked where they hold, the first holding one as "next", and where a pass
+// would settle when that is somewhere else.
+function paint() {
+  cy.elements().removeClass("active active-region would exit holds next dim");
+  const r = S.reading;
+  if (!r || !S.graph) return;
+  // A symbol state's copies wear its marks too: each one IS it, where the edge meets it.
+  const withCopies = (name) => cy.nodes().filter((n) => n.id() === name || n.data("real") === name);
+  withCopies(r.state).addClass("active");
+  const around = new Set([r.state, ...ancestors(r.state)]);
+  ancestors(r.state).forEach((g) => cy.getElementById(g).addClass("active-region"));
+  if (r.would && r.would !== r.state) withCopies(r.would).addClass("would");
+  const st = stateOf(r.state);
+  if (!st) return;
+  cy.edges().forEach((e) => { if (!around.has(e.data("owner"))) e.addClass("dim"); });
+  let next = -1;
+  (st.exits || []).forEach((ref, i) => {
+    const e = cy.getElementById(S.edgeOf.get(refKey(ref)) || "");
+    e.addClass("exit");
+    if (r.holds && r.holds[i]) { e.addClass("holds"); if (next < 0) next = i; }
+  });
+  if (next >= 0) cy.getElementById(S.edgeOf.get(refKey(st.exits[next])) || "").addClass("next");
+}
+
+// ---- kinds of exit: shown or hidden, per viewer ---------------------------------------------
+function applyKinds() {
+  cy.edges().forEach((e) => e.toggleClass("khide", !S.shown.has(e.data("kind") || "none") && !!e.data("kind")));
+}
+function renderKinds() {
+  $("kinds").innerHTML = KINDS.map((k) =>
+    `<button class="kind-toggle" data-kind="${k}" aria-pressed="${S.shown.has(k)}" title="Show or hide ${k} exits">` +
+    `<span class="sw" style="background:${kindColour(k)}"></span>${k}</button>`).join("");
+}
+$("kinds").addEventListener("click", (e) => {
+  const b = e.target.closest(".kind-toggle");
+  if (!b) return;
+  const k = b.dataset.kind;
+  if (S.shown.has(k)) S.shown.delete(k); else S.shown.add(k);
+  store.set("sindri-flow-kinds", [...S.shown]);
+  renderKinds();
+  applyKinds();
+});
+
+// ---- selection ------------------------------------------------------------------------------
+// A selected node pulls its own edges forward — in and out alike, geometry says which — and a state
+// counts the exits it inherits: those leave from the regions round it.
+function markNear(ele) {
+  cy.edges().removeClass("near faded");
+  if (!ele || !ele.isNode()) return;
+  const own = new Set([ele.id(), ...(stateOf(ele.id()) ? ancestors(ele.id()) : [])]);
+  cy.edges().forEach((e) => {
+    const touches = own.has(e.data("owner")) || e.data("to") === ele.id(); // "to", not the drawn target: that may be a copy
+    e.addClass(touches ? "near" : "faded");
+  });
+}
+// panIntoView moves the view just enough to bring ele inside it, by a margin — never re-centring,
+// so a jump keeps the arrangement the reader was already looking at.
+function panIntoView(ele) {
+  if (ele.hasClass("gone")) return; // not drawn: its copies stand at every edge, and no one of them is it
+  const m = 30, bb = ele.renderedBoundingBox(), w = cy.width(), h = cy.height();
+  const dx = bb.x1 < m ? m - bb.x1 : bb.x2 > w - m ? (w - m) - bb.x2 : 0;
+  const dy = bb.y1 < m ? m - bb.y1 : bb.y2 > h - m ? (h - m) - bb.y2 : 0;
+  if (dx || dy) cy.animate({ panBy: { x: dx, y: dy }, duration: 200 });
+}
+// select is what a click in the details pane does: the same selection a tap on the graph makes.
+function select(id) {
+  const ele = cy.getElementById(id);
+  if (ele.empty()) { fail(`${id} is not drawn in this graph`); return; }
+  cy.elements().unselect();
+  ele.select();
+  S.picked = { type: ele.isNode() ? "node" : "edge", id };
+  markNear(ele.isNode() ? ele : null);
+  renderDetails();
+  panIntoView(ele);
+}
+$("details").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-symbol]");
+  if (b) {
+    const name = b.dataset.symbol;
+    if (S.symbols.has(name)) S.symbols.delete(name); else S.symbols.add(name);
+    store.set(symbolsKey(), [...S.symbols]);
+    drawGraph(S.graph); paint();
+    select(name);
+    return;
+  }
+  const a = e.target.closest("[data-sel]");
+  if (!a) return;
+  e.preventDefault();
+  select(a.dataset.sel);
+});
+cy.on("tap", "node", (evt) => {
+  if (evt.target.hasClass("proxy")) { select(evt.target.data("real")); showTab("details"); return; } // a copy stands for the real state
+  S.picked = { type: "node", id: evt.target.id() }; markNear(evt.target); renderDetails(); showTab("details");
+});
+cy.on("tap", "edge", (evt) => { S.picked = { type: "edge", id: evt.target.id() }; markNear(null); renderDetails(); showTab("details"); });
+cy.on("tap", (evt) => { if (evt.target === cy) { S.picked = null; markNear(null); renderDetails(); } });
+
+// ---- details pane ---------------------------------------------------------------------------
+const kv = (rows) => `<table class="kv">${rows.filter((r) => r[1] !== undefined && r[1] !== "")
+  .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>`;
+const code = (s) => `<code>${esc(s)}</code>`;
+// jump is a details-pane link to an element on the graph (-> select).
+const jump = (id, text) => `<a href="#" class="jump" data-sel="${esc(id)}"><code>${esc(text)}</code></a>`;
+// kjump is a link to an edge, in its kind's colour — the same colour it is drawn in on the graph.
+const kjump = (id, text, kind) => { const c = kindColour(kind);
+  return `<a href="#" class="jump" data-sel="${esc(id)}"><code style="color:${c};box-shadow:inset 3px 0 0 ${c}">${esc(text)}</code></a>`; };
+const kchip = (k) => `<span class="kchip" style="background:${kindColour(k)}">${esc(k || "untagged")}</span>`;
+const target = (owner, ev) => (ev.to ? jump(ev.to, ev.to) : jump(owner, "(stays)"));
+
+function renderDetails() {
+  const el = $("details");
+  const r = S.reading;
+  if (!S.graph || !r) { el.innerHTML = `<div class="sub">Pick an agent to see its flow.</div>`; return; }
+  if (!S.picked) { el.innerHTML = subjectDetails(r); return; }
+  if (S.picked.type === "node") {
+    const s = stateOf(S.picked.id), g = groupOf(S.picked.id);
+    el.innerHTML = s ? stateDetails(s, r) : g ? regionDetails(g) :
+      `<h2>${esc(S.picked.id)}</h2><div class="sub">Not declared in this flow — an edge leads here from outside it.</div>`;
+    return;
+  }
+  const e = cy.getElementById(S.picked.id);
+  el.innerHTML = e.nonempty() ? edgeDetails(e, r) : "";
+}
+
+function subjectDetails(r) {
+  return `<h2>${esc(r.id)}</h2><div class="sub">${esc(r.kind)} · ${esc(r.variant)} · ${esc(r.project)}</div>` +
+    kv([["stands in", jump(r.state, r.state)], ["a pass would settle in", jump(r.would, r.would)]]) +
+    `<h3>Observed</h3>` + factsTable(r) +
+    `<div class="sub" style="margin-top:10px">Select a state, a region or an edge for its declaration.</div>`;
+}
+const factsTable = (r) => kv((r.facts || []).map((f) => [f.name, esc(f.value)]));
+
+// entrances is every drawn edge arriving at a state, and who it comes from.
+function entrances(name) {
+  return cy.edges().filter((e) => e.data("to") === name && e.data("owner") !== name).map((e) => {
+    const evs = e.data("members").map((m) => eventOf({ owner: e.data("owner"), first: m.slot === "first", index: m.index }).on);
+    return `<li>${kjump(e.id(), evs.join(", "), e.data("kind"))} from ${jump(e.data("owner"), e.data("owner"))}</li>`;
+  });
+}
+
+function stateDetails(s, r) {
+  const active = s.name === r.state;
+  const tags = [active ? `<span class="chip">active</span>` : "", s.name === r.would && !active ? `<span class="chip">would settle here</span>` : "",
+    s.name === S.graph.start ? `<span class="chip">start</span>` : ""].join(" ");
+  let h = `<h2>${esc(s.name)}</h2><div class="sub">${esc(s.title)} ${tags}</div><p>${esc(s.about)}</p>`;
+  h += kv([
+    ["in region", s.in ? ancestors(s.name).map((g) => jump(g, groupOf(g).title)).join(" ‹ ") : ""],
+    ["action", s.action ? code(s.action) + (s.awaits ? " <span class=\"chip\">awaits the subject</span>" : "") : "<span class=\"no\">none — the hub does nothing here</span>"],
+    ["outcomes", (s.outcomes || []).map(code).join(" ")],
+    ["when idle", esc(s.whenIdle)],
+    ["says", s.says ? code(s.says) + (s.tells ? " <span class=\"chip\">told unprompted</span>" : "") : ""],
+  ]);
+  // Every exit, in the order a pass checks them: the regions' first word, its own, their last.
+  h += `<h3>Exits, in order</h3><ul class="plain">` + (s.exits || []).map((ref, i) => {
+    const ev = eventOf(ref);
+    const holds = active && r.holds && r.holds[i] ? ` <span class="yes">holds</span>` : "";
+    const from = ref.owner === s.name ? "" : ` <span class="from">from ${jump(ref.owner, groupOf(ref.owner).title)}</span>`;
+    return `<li>${i + 1}. ${kjump(S.edgeOf.get(refKey(ref)), ev.on, ev.kind)} → ${target(ref.owner, ev)}${holds}${from}</li>`;
+  }).join("") + `</ul>`;
+  // A state met from everywhere draws cleaner as small copies at each edge end.
+  const sym = S.symbols.has(s.name);
+  h += `<div style="margin-top:8px"><button data-symbol="${esc(s.name)}">${sym ? "Draw once" : "Draw as copies"}</button>` +
+    ` <span class="from">${sym ? "drawn as a small copy wherever an edge meets it" : "one node, every edge running to it"}</span></div>`;
+  const ins = entrances(s.name);
+  h += `<h3>Entrances</h3>` + (ins.length ? `<ul class="plain">${ins.join("")}</ul>` : `<div class="sub">none — only the start is reached without one</div>`);
+  if (s.verbs && s.verbs.length) {
+    h += `<h3>Verbs</h3><ul class="plain">` + s.verbs.map((v) => `<li>${code(v.verb)} ${esc(v.why)}</li>`).join("") + `</ul>`;
+  }
+  if (active) h += `<h3>Observed</h3>` + factsTable(r);
+  return h;
+}
+
+function regionDetails(g) {
+  const list = (evs, first) => evs && evs.length ? `<ul class="plain">` + evs.map((ev, i) =>
+    `<li>${kjump(S.edgeOf.get(`${g.name}|${first ? "first" : "then"}|${i}`), ev.on, ev.kind)} → ${target(g.name, ev)}</li>`).join("") + `</ul>` :
+    `<div class="sub">none</div>`;
+  const members = [...S.graph.states.filter((s) => s.in === g.name).map((s) => jump(s.name, short(s.name))),
+    ...(S.graph.groups || []).filter((x) => x.in === g.name).map((x) => jump(x.name, x.title))];
+  return `<h2>${esc(g.title)}</h2><div class="sub">region ${code(g.name)}</div><p>${esc(g.about)}</p>` +
+    kv([["inside", g.in ? jump(g.in, groupOf(g.in).title) : ""], ["contains", members.join(" ")]]) +
+    `<h3>First — checked before a state's own</h3>` + list(g.first, true) +
+    `<h3>Then — checked after</h3>` + list(g.then, false);
+}
+
+// edgeDetails is one drawn edge: whose it is, where it leads, and every event riding it — with, for
+// an exit the active state has, whether it holds now.
+function edgeDetails(e, r) {
+  const owner = e.data("owner");
+  const st = stateOf(r.state);
+  const activeRefs = new Map(((st && st.exits) || []).map((ref, i) => [refKey(ref), i]));
+  const first = r.holds ? r.holds.findIndex(Boolean) : -1;
+  const to = e.data("to"); // the state it leads to, not the drawn target: that may be a symbol copy
+  let h = `<h2>${esc(short(owner))} → ${esc(to === owner ? "(stays)" : short(to))}</h2>` +
+    `<div class="sub">${kchip(e.data("kind"))} ${stateOf(owner) ? "a state's own exit" : "a region's exit, inherited by every state inside it"}</div>` +
+    kv([["from", jump(owner, stateOf(owner) ? owner : groupOf(owner).title)], ["to", jump(to, to === owner ? "(stays)" : to)]]);
+  for (const m of e.data("members")) {
+    const ref = { owner, first: m.slot === "first", index: m.index };
+    const ev = eventOf(ref);
+    const i = activeRefs.get(refKey(ref));
+    let now = `<span class="no">not evaluated — only the active state's exits are</span>`;
+    if (i !== undefined) {
+      if (ev.trigger === "outcome") now = `<span class="no">an outcome — it arrives with the action, never read off the world</span>`;
+      else if (r.holds && r.holds[i]) now = `<span class="yes">holds</span>${first === i ? " — the exit a pass would take" : ` — but exit ${first + 1} comes first`}`;
+      else now = `<span class="no">does not hold</span>`;
+    }
+    const where = m.slot === "own" ? "" : ` <span class="from">${m.slot === "first" ? "first" : "then"} slot</span>`;
+    h += `<h3 style="color:${kindColour(ev.kind)}">${esc(ev.on)} ${kchip(ev.kind)} <span class="chip">${esc(ev.trigger)}</span>${where}</h3>` + kv([
+      ["why", esc(ev.why)], ["staleness", ev.within ? esc(ev.within) : ""],
+      ["wakes on", (ev.wake || []).map(code).join(" ")], ["now", now],
+    ]);
+  }
+  return h;
+}
+
+// ---- history pane ---------------------------------------------------------------------------
+function renderHistory() {
+  const list = $("histList");
+  const r = S.reading;
+  if (!r) { list.innerHTML = ""; return; }
+  const q = $("histFilter").value.trim().toLowerCase();
+  const rows = (r.history || []).filter((h) => !q || `${h.reason} ${h.detail} ${h.pass || ""}`.toLowerCase().includes(q));
+  const groups = [];
+  for (const h of rows) { // newest first; one pass's steps are adjacent
+    const last = groups[groups.length - 1];
+    if (h.pass && last && last.pass === h.pass) last.rows.push(h); else groups.push({ pass: h.pass || "", rows: [h] });
+  }
+  list.innerHTML = groups.map((g) => {
+    const body = g.rows.slice().reverse().map(rowHTML).join("");
+    if (!g.pass) return `<div class="lone">${body}</div>`;
+    const moves = g.rows.filter((h) => h.move).map((h) => `${short(h.move.from)} → ${short(h.move.to)}`);
+    const open = S.collapsed.has(g.pass) ? "" : " open";
+    return `<details class="pass" data-pass="${esc(g.pass)}"${open}><summary><b>${esc(g.pass)}</b> ` +
+      `<span class="ts">${esc(g.rows[g.rows.length - 1].ts)}</span> ${esc(moves.join(", "))}</summary>${body}</details>`;
+  }).join("") || `<div class="sub">No history${q ? " matches the filter" : ""}.</div>`;
+}
+function rowHTML(h) {
+  const cls = "row" + (h.move ? " move" : "") + (S.pickedRow === h.id ? " picked" : "");
+  return `<div class="${cls}" data-id="${h.id}"><span class="ts">${esc(h.ts)}</span><span class="reason">${esc(h.reason)}</span>${esc(h.detail)}</div>`;
+}
+$("histList").addEventListener("toggle", (e) => {
+  const p = e.target.dataset && e.target.dataset.pass;
+  if (!p) return;
+  if (e.target.open) S.collapsed.delete(p); else S.collapsed.add(p);
+}, true);
+// A recorded move names the state it left, the event and where it went; the edge it took is found
+// among that state's EFFECTIVE exits, so a move by an inherited exit lights the region's edge.
+$("histList").addEventListener("click", (e) => {
+  const rowEl = e.target.closest(".row.move");
+  if (!rowEl) return;
+  const h = S.reading.history.find((x) => String(x.id) === rowEl.dataset.id);
+  if (!h || !h.move) return;
+  cy.edges().removeClass("hl");
+  S.pickedRow = h.id;
+  renderHistory();
+  const from = stateOf(h.move.from);
+  const ref = from && (from.exits || []).find((x) => {
+    const ev = eventOf(x);
+    return ev && ev.on === h.move.on && (ev.to || x.owner) === h.move.to;
+  });
+  const edge = ref ? cy.getElementById(S.edgeOf.get(refKey(ref)) || "") : cy.collection();
+  if (edge.empty()) { fail(`history row ${h.id}: no exit ${h.move.from} —${h.move.on}→ ${h.move.to} in this graph (the flow changed since?)`); return; }
+  clearFail();
+  edge.addClass("hl");
+  panIntoView(edge);
+});
+$("histFilter").addEventListener("input", renderHistory);
+
+// ---- tabs -----------------------------------------------------------------------------------
+function showTab(which) {
+  $("tabDetails").setAttribute("aria-selected", which === "details");
+  $("tabHistory").setAttribute("aria-selected", which === "history");
+  $("details").hidden = which !== "details";
+  $("history").hidden = which !== "history";
+}
+$("tabDetails").onclick = () => showTab("details");
+$("tabHistory").onclick = () => showTab("history");
+
+// ---- resizable side panes, per viewer --------------------------------------------------------
+function splitter(el, cssVar, sign) {
+  el.addEventListener("pointerdown", (down) => {
+    const start = down.clientX, main = $("main");
+    const w0 = parseFloat(getComputedStyle(main).getPropertyValue(cssVar)) || 300;
+    el.classList.add("drag");
+    el.setPointerCapture(down.pointerId);
+    const move = (e) => main.style.setProperty(cssVar, `${Math.max(180, Math.min(900, w0 + sign * (e.clientX - start)))}px`);
+    const up = () => {
+      el.classList.remove("drag");
+      el.removeEventListener("pointermove", move);
+      store.set(`sindri-flow${cssVar}`, getComputedStyle(main).getPropertyValue(cssVar).trim());
+      cy.resize();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up, { once: true });
+  });
+  const saved = store.get(`sindri-flow${cssVar}`, "");
+  if (saved) $("main").style.setProperty(cssVar, saved);
+}
+splitter($("splitLeft"), "--left-w", 1);
+splitter($("splitRight"), "--right-w", -1);
+
+// ---- the subject list -----------------------------------------------------------------------
+function renderAgents() {
+  const q = $("filter").value.trim().toLowerCase();
+  const byRepo = new Map();
+  for (const a of S.board) {
+    if (q && !`${a.name} ${a.role} ${a.repo} ${a.status} ${a.phase || ""}`.toLowerCase().includes(q)) continue;
+    const k = a.repo || a.project;
+    if (!byRepo.has(k)) byRepo.set(k, []);
+    byRepo.get(k).push(a);
+  }
+  $("agents").innerHTML = [...byRepo.keys()].sort().map((repo) => `<tr class="repo"><td colspan="4">${esc(repo)}</td></tr>` +
+    byRepo.get(repo).map((a) => {
+      const sel = S.sel && S.sel.project === a.project && S.sel.id === a.name ? " sel" : "";
+      return `<tr class="agent${sel}" data-project="${esc(a.project)}" data-id="${esc(a.name)}" data-role="${esc(a.role)}">` +
+        `<td title="${esc(a.name)}">${esc(a.name)}</td><td class="muted">${esc(a.role)}</td>` +
+        `<td title="${esc(a.phase || "")}">${esc(short(a.phase || "—"))}</td><td class="muted" title="${esc(a.status)}">${esc(a.status)}</td></tr>`;
+    }).join("")).join("") || `<tr><td colspan="4" class="muted">No agents${q ? " match" : ""}.</td></tr>`;
+}
+$("filter").addEventListener("input", renderAgents);
+$("agents").addEventListener("click", (e) => {
+  const el = e.target.closest("tr.agent");
+  if (el) pick({ project: el.dataset.project, id: el.dataset.id, role: el.dataset.role });
+});
+
+async function pick(sel) {
+  S.sel = sel; S.picked = null; S.pickedRow = null; S.reading = null;
+  renderAgents();
+  $("empty").style.display = "none";
+  try {
+    const key = `${S.kind}/${sel.role}`;
+    if (key !== S.graphKey) {
+      S.graph = await getJSON(`debug/graph?kind=${encodeURIComponent(S.kind)}&variant=${encodeURIComponent(sel.role)}`);
+      S.graphKey = key;
+      // The flow's start is copied by default: every role rests there, so every region leads to it.
+      S.symbols = new Set(store.get(symbolsKey(), [S.graph.start]));
+      drawGraph(S.graph);
+    }
+    S.selRow = rowOf(S.board);
+    await refresh();
+    focusActive();
+  } catch (e) { fail(e.message); }
+}
+
+async function refresh() {
+  if (!S.sel) return;
+  try {
+    const q = `kind=${encodeURIComponent(S.kind)}&project=${encodeURIComponent(S.sel.project)}&id=${encodeURIComponent(S.sel.id)}`;
+    S.reading = await getJSON(`debug/subject?${q}`);
+    if (S.reading.variant !== S.sel.role) { S.sel.role = S.reading.variant; S.graphKey = ""; return pick(S.sel); } // its role changed under it
+    clearFail();
+    paint(); renderDetails(); renderHistory();
+    $("live").textContent = `${S.paused ? "paused" : "live"} · read ${new Date().toLocaleTimeString()}`;
+  } catch (e) { fail(e.message); }
+}
+function focusActive() {
+  if (!S.reading) return;
+  const n = cy.getElementById(S.reading.state);
+  if (n.nonempty()) cy.animate({ center: { eles: shown(n) }, duration: 250 });
+}
+
+// ---- following the hub ----------------------------------------------------------------------
+// The board stream says "something changed" as a whole snapshot; the selected agent's own row
+// changing is the trigger to read it again. A 10s fallback covers world facts the row never shows.
+const rowOf = (agents) => {
+  if (!S.sel) return "";
+  const a = agents.find((x) => x.project === S.sel.project && x.name === S.sel.id);
+  return a ? JSON.stringify(a) : "";
+};
+function follow() {
+  const es = new EventSource("events");
+  es.onopen = () => { clearFail(); $("live").textContent = S.paused ? "paused" : "live"; };
+  es.onmessage = (m) => {
+    let st;
+    try { st = JSON.parse(m.data); } catch (e) { fail(`events: unreadable snapshot (${e.message})`); return; }
+    S.board = st.agents || [];
+    renderAgents();
+    const row = rowOf(S.board);
+    if (row !== S.selRow) { S.selRow = row; if (!S.paused) refresh(); }
+  };
+  es.onerror = () => { $("live").textContent = "stream lost — reconnecting…"; };
+}
+setInterval(() => { if (!S.paused) refresh(); }, 10000);
+
+$("pause").onclick = () => {
+  S.paused = !S.paused;
+  $("pause").setAttribute("aria-pressed", S.paused);
+  $("pause").textContent = S.paused ? "Resume" : "Pause";
+  $("live").textContent = S.paused ? "paused" : "live";
+  if (!S.paused) refresh();
+};
+$("relayout").onclick = () => { if (S.graph) layout("reset"); };
+$("focus").onclick = focusActive;
+$("kind").onchange = (e) => { S.kind = e.target.value; };
+
+// ---- developer: exporting the arrangement as the checked-in default (?dev) ------------------
+const DEV = new URLSearchParams(location.search).has("dev");
+if (DEV) document.querySelectorAll(".dev").forEach((el) => { el.hidden = false; });
+$("dagre").onclick = () => { if (S.graph) layout("dagre"); };
+$("export").onclick = () => {
+  if (!S.graph) { fail("pick an agent first — the export is of the graph on screen"); return; }
+  const g = S.graph;
+  const names = g.states.map((s) => s.name); // declaration order, so a re-export diffs cleanly
+  const keys = names.map((n) => `"${n}":`);
+  const width = Math.max(...keys.map((k) => k.length));
+  const rows = names.map((n, i) => {
+    const p = cy.getElementById(n).position();
+    return `\t${keys[i].padEnd(width)} {X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}},`;
+  });
+  const pkg = g.layoutPackage;
+  $("exportCode").value = [
+    `// package: ${g.layoutFile.replace(/^internal\//, "").replace(/\/layout\.go$/, "")} / layout`,
+    `// type:    rendering (the ${pkg} flow's default drawing)`,
+    `// job:     where the flow debug view draws each ${pkg} state by default.`,
+    `// limits:  generated — arrange it in the debug view (URL: \`sindri hub info\`) with ?dev, then Export layout`,
+    `// and replace this file. A state missing here is placed by dagre; a name that is no state fails a test.`,
+    `package ${pkg}`,
+    ``,
+    `import "github.com/flo-at/sindri/internal/hub/flow/machine"`,
+    ``,
+    `// Layout is the ${pkg} flow's default drawing, by state name.`,
+    `var Layout = machine.Layout{`,
+    ...rows,
+    `}`,
+    ``,
+  ].join("\n");
+  $("exportFile").textContent = g.layoutFile;
+  $("exportFile2").textContent = g.layoutFile;
+  $("exportRole").textContent = g.variant;
+  $("exportCopied").textContent = "";
+  $("exportPanel").hidden = false;
+};
+$("exportCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("exportCode").value); $("exportCopied").textContent = "copied"; }
+  catch (e) { $("exportCode").select(); $("exportCopied").textContent = `the clipboard refused (${e.message}) — the code is selected, copy it by hand`; }
+};
+$("exportClose").onclick = () => { $("exportPanel").hidden = true; };
+
+(async () => {
+  const saved = store.get("sindri-flow-kinds", null);
+  if (Array.isArray(saved)) S.shown = new Set(saved);
+  renderKinds();
+  try { S.board = (await getJSON("state")).agents || []; renderAgents(); } catch (e) { fail(e.message); }
+  renderDetails();
+  follow();
+})();
+</script>
+</body>
+</html>

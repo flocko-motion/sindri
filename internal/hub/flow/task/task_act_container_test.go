@@ -1,0 +1,128 @@
+package task
+
+import (
+	"github.com/flo-at/sindri/internal/hub/flowtest"
+	"path/filepath"
+	"testing"
+
+	"github.com/flo-at/sindri/internal/hub/world/store"
+)
+
+// Regression tests for sd-5ef393, folded into sd-a72056's reason-carrying mutator: SetState writes
+// the whole row, so a caller that reset an agent without carrying its Container forward silently
+// unhooked it from the feature it still held. Three sites did — FinishTask (via CloseTask),
+// UnassignTask, and DiscardPR — each fixed to rest a container holder back onto its feature
+// (Container/Branch preserved) rather than fully idle.
+
+// TestCloseTaskPreservesAHeldContainer: closing a SUBTASK under a held feature must rest the worker
+// back onto the feature, not wipe it to bare idle — the feature itself is not done.
+func TestCloseTaskPreservesAHeldContainer(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject(proj, root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For(proj)
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-sub", Title: "a subtask", Status: "open", Priority: "P2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutAgent(store.Agent{Name: "brokkr", Role: "worker", Workspace: ".worktrees/brokkr"}); err != nil {
+		t.Fatal(err)
+	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "brokkr", Task: "td-sub", Container: "td-feature", Branch: "td-feature", Phase: "working"})
+	a := newActWith2(t, st, &flowtest.Hub{Root: root})
+
+	if err := a.pr().CloseTask(proj, "td-sub"); err != nil {
+		t.Fatalf("CloseTask: %v", err)
+	}
+	got, err := ps.GetState("brokkr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Container != "td-feature" || got.Branch != "td-feature" {
+		t.Errorf("closing a subtask must preserve the held feature, got Container=%q Branch=%q", got.Container, got.Branch)
+	}
+	if got.Task != "" {
+		t.Errorf("the closed subtask itself must be cleared, got Task=%q", got.Task)
+	}
+	// Where that leaves it is not asserted here: closing a task records what the agent holds, and
+	// its own map reads the feature it still has and puts it back on the subtask loop.
+}
+
+// TestUnassignTaskPreservesAHeldContainer: unassigning one subtask must not strand the worker out of
+// the feature it still holds — the same shape as CloseTask's own fix.
+func TestUnassignTaskPreservesAHeldContainer(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject(proj, root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For(proj)
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-sub", Title: "a subtask", Status: "open", Priority: "P2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutAgent(store.Agent{Name: "brokkr", Role: "worker", Workspace: ".worktrees/brokkr"}); err != nil {
+		t.Fatal(err)
+	}
+	// Down (not alive): the crashed-mid-feature case — a stale claim under a held container must
+	// still keep the container. A LIVE holder is pinned separately (-> TestUnassignTaskTakesALiveHolderOffIt).
+	flowtest.Place(t, ps, store.AgentState{Agent: "brokkr", Task: "td-sub", Container: "td-feature", Branch: "td-feature", Phase: "working"})
+	a := newActWith2(t, st, &flowtest.Hub{Root: root, Down: true})
+
+	if err := a.UnassignTask(proj, "td-sub"); err != nil {
+		t.Fatalf("UnassignTask: %v", err)
+	}
+	got, err := ps.GetState("brokkr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Container != "td-feature" || got.Branch != "td-feature" {
+		t.Errorf("unassigning a subtask must preserve the held feature, got Container=%q Branch=%q", got.Container, got.Branch)
+	}
+	if got.Task != "" {
+		t.Errorf("the unassigned subtask itself must be cleared, got Task=%q", got.Task)
+	}
+}
+
+// TestDiscardPRPreservesAHeldContainer: discarding a milestone/interim PR from a container worker
+// must not drop it out of the feature — only that PR is going away, not the feature it belongs to.
+func TestDiscardPRPreservesAHeldContainer(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject(proj, root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For(proj)
+	if err := ps.PutAgent(store.Agent{Name: "brokkr", Role: "worker", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-feature", Task: "td-feature", Agent: "brokkr", Branch: "td-feature", Status: "open", Kind: "interim"}); err != nil {
+		t.Fatal(err)
+	}
+	flowtest.Place(t, ps, store.AgentState{Agent: "brokkr", Task: "td-sub", Container: "td-feature", Branch: "td-feature", Phase: "submitted"})
+	deps := &flowtest.Hub{Root: root}
+	a := newActWith2(t, st, deps)
+
+	if err := a.pr().DiscardPR(proj, "pr-td-feature"); err != nil {
+		t.Fatalf("DiscardPR: %v", err)
+	}
+	got, err := ps.GetState("brokkr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Container != "td-feature" || got.Branch != "td-feature" {
+		t.Errorf("discarding a milestone PR must preserve the held feature, got Container=%q Branch=%q", got.Container, got.Branch)
+	}
+}

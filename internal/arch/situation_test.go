@@ -31,24 +31,35 @@ var ownedRules = map[string]string{
 // may happen to an agent does not, and the surface is where that rule goes.
 var ruleDerivers = map[string]string{
 	// The surface itself, and the gathering that feeds it.
-	"internal/hub/situation/surface.go":   "the surface — the one home for these rules",
-	"internal/hub/situation/situation.go": "the gathering that feeds it",
+	"internal/hub/world/situation/surface.go":   "the surface — the one home for these rules",
+	"internal/hub/world/situation/situation.go": "the gathering that feeds it",
 	// The store: these are its columns.
-	"internal/hub/store/store.go":    "the roster row's own definition",
-	"internal/hub/store/agent.go":    "reads and writes those columns",
-	"internal/hub/store/reviewer.go": "the reviewer pool's own query, filtering on the column in SQL",
+	"internal/hub/world/store/store.go":    "the roster row's own definition",
+	"internal/hub/world/store/agent.go":    "reads and writes those columns",
+	"internal/hub/world/store/reviewer.go": "the reviewer pool's own query, filtering on the column in SQL",
 	// The writers: setting a flag is not deriving a rule from it.
-	"internal/hub/agent/clearcontext.go": "sets and clears the arming — its writer",
-	"internal/hub/agent/retire.go":       "sets and clears retirement — its writer",
-	"internal/hub/server.go":             "the retire endpoint's own request field, not a roster row",
-	"internal/hub/hub.go":                "SetRetired reads the prior value to spot a return to service",
+	"internal/hub/harness/clearcontext.go": "sets and clears the arming — its writer",
+	"internal/hub/harness/retire.go":       "sets and clears retirement — its writer",
+	"internal/hub/flowtest/roster.go":      "the fixture that SETS the flag, standing in for that writer",
+	"internal/hub/api/frontend/routes.go":  "the retire endpoint's own request field, not a roster row",
+	"internal/hub/hub.go":                  "SetRetired reads the prior value to spot a return to service",
 	// Rendering: the board carries these as fields for a front-end to show.
 	"internal/hub/state.go":    "projects the roster onto the board, flags included",
 	"internal/hub/commands.go": "renders the retirement note beside what the agent holds",
 	// Read off the SITUATION, which is the sanctioned carrier — the fact, for a caller that needs the
 	// fact rather than a rule: which armed clear to fire, and which directive a retired agent gets.
-	"internal/hub/workflow/engine.go": "reads ClearArmed off the situation, to fire the clear it names",
-	"internal/hub/workflow/task.go":   "reads Retired off the situation, to serve DirRetired",
+	"internal/hub/core/core.go":          "reads both off the situation and hands the FACT on — the one place either is read",
+	"internal/hub/flow/task/task_act.go": "reads Retired off the situation, to serve DirRetired",
+	"internal/hub/flow/fleet/flowdo.go":  "takes the arming BACK once the clear has answered it — its writer, not a second decider",
+	// The declared states read both off the situation for the same reason: which action follows an
+	// armed clear, and which words a retired agent is given. The surface's own wakeRefusal mirrors
+	// this table branch for branch, and now that the table is declared data that mirroring is
+	// checkable rather than remembered (-> hub/flow).
+	// The flow tree reads both off the situation for the same reason: a condition is the FACT, and
+	// where it leads is the map's. The surface's own wakeRefusal mirrors these maps, and now that
+	// they are declared data that mirroring is checkable rather than remembered (-> hub/flow).
+	"internal/hub/flow/cond":  "the facts themselves, as conditions a map watches",
+	"internal/hub/flow/agent": "the maps that say where each fact leads",
 	// The front-ends render them; a rule they applied themselves is what AgentView.NeedsUser exists
 	// to prevent, and importguard_test.go keeps them from reaching the surface anyway.
 	"internal/ui":  "front-ends render the flags they are given",
@@ -89,7 +100,7 @@ func TestTheSurfaceIsTheOnlyHomeForTheseRules(t *testing.T) {
 				return true
 			}
 			why, owned := ownedRules[sel.Sel.Name]
-			if !owned {
+			if !owned || vocabulary(sel) {
 				return true
 			}
 			seen++
@@ -116,6 +127,16 @@ func TestTheSurfaceIsTheOnlyHomeForTheseRules(t *testing.T) {
 	}
 }
 
+// vocabularyPackages are the flow's closed sets, whose members are NAMES rather than facts —
+// says.Retired is a speech, not a roster row, and the scan is by field name alone.
+var vocabularyPackages = map[string]bool{"says": true, "cond": true, "act": true, "verb": true, "topic": true}
+
+// vocabulary reports a selector reaching into one of those, which carries no rule with it.
+func vocabulary(sel *ast.SelectorExpr) bool {
+	root, ok := sel.X.(*ast.Ident)
+	return ok && vocabularyPackages[root.Name]
+}
+
 // allowedDeriver reports whether rel is declared, by exact path or by a declared directory prefix.
 func allowedDeriver(rel string) bool {
 	for p := range ruleDerivers {
@@ -130,7 +151,7 @@ func allowedDeriver(rel string) bool {
 // spawns, dials or reads a transcript, whatever an agent's state. The situation sits on the board's
 // own path, so a query added here is paid per agent per render, times the connected clients.
 func TestASituationCostsNoRuntimeCall(t *testing.T) {
-	dir := filepath.Join(moduleRoot(t), "internal", "hub", "situation")
+	dir := filepath.Join(moduleRoot(t), "internal", "hub", "world", "situation")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)

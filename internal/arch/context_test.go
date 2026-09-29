@@ -30,6 +30,9 @@ var declaredRoots = map[string]string{
 	// The hub process: one root, handed to hub.New as the hub's lifetime, inherited by every loop it
 	// starts and every fleet-side push whose port carries no context of its own (-> hub.Hub.lifetime).
 	"cmd/sindri-hub/main.go": "the hub entrypoint — the root the whole hub tree hangs off",
+	// The fake hub every subject's tests are handed: a TEST is an entrypoint, and no fixture here
+	// turns on handles outliving it. A case that needs the lifetime cancelled builds its own.
+	"internal/hub/flowtest/flowtest.go": "the shared test fixture — a test is where the work starts",
 	// The TUI's interactive sessions: a front-end's own lifetime, ended when it exits. The CLI chat
 	// session takes cmd.Context() instead (cobra roots it in Execute, cmd/sindri/main.go) — it is a
 	// caller with a context already in scope, not a fresh entrypoint.

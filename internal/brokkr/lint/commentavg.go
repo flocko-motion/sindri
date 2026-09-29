@@ -22,7 +22,7 @@ const DefaultMaxCommentAvg = 2.0
 
 // MaxCommentAvgFor resolves a project's own lint.max_comment_avg, or DefaultMaxCommentAvg with
 // none set — the config half of the effective ceiling, shared so cmd/brokkr's flag layer on top of
-// it and the hub's own brief (-> workflow.Engine.commentBudget) read one function, not two
+// it and the hub's own brief (-> fleet.Engine.commentBudget) read one function, not two
 // independent copies of the same default-then-config fallback that could drift apart.
 func MaxCommentAvgFor(cfg config.Config) float64 {
 	if cfg.Lint.MaxCommentAvg != nil {
@@ -61,7 +61,7 @@ What does NOT count as fixing it:
 
 // AimFor is the mean a fix should TARGET, below the ceiling it must clear: a file trimmed to the
 // limit exactly fails again on the next comment added, so half a line of headroom is the goal.
-// Exported so a caller stating the budget up front (-> workflow.Engine.commentBudget) computes it
+// Exported so a caller stating the budget up front (-> fleet.Engine.commentBudget) computes it
 // the same way this package's own report does, rather than re-deriving it and drifting.
 func AimFor(allowed float64) float64 {
 	aim := allowed - 0.5
@@ -192,9 +192,11 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		// Name the band as a claim with a reason owed, not as spare room; no mean can judge prose.
+		// The band is where the READER judges, so the question is addressed to them: one agent read
+		// "say why" as a prompt and tried to answer this check, which has nowhere to put a reply.
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
-			"  Cut to %.1f; stopping short claims the prose earns its length, which this check cannot judge — say why.\n",
+			"  Cut to %.1f. Stopping short claims the prose earns its length, which this check cannot judge —\n"+
+			"  so ask yourself why each block you keep earns its lines. That answer is yours; nothing collects it.\n",
 			len(viols), aim)
 		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)

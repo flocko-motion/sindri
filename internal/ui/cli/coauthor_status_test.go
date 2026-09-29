@@ -40,6 +40,20 @@ func TestCoauthorDoesNotRelaunchARunningOne(t *testing.T) {
 	}
 }
 
+// TestCoauthorRelaunchesAPodTheBoardStillReadsLive is the "container state improper" attach: the
+// pod had exited, the watchdog still held its last "up", and the attach exec'd into a dead pod.
+func TestCoauthorRelaunchesAPodTheBoardStillReadsLive(t *testing.T) {
+	if !coauthorNeedsLaunch("idle", false) {
+		t.Error("a live word over a pod that is not running must relaunch, not attach")
+	}
+	if coauthorNeedsLaunch("idle", true) {
+		t.Error("a live word over a running pod must reattach")
+	}
+	if coauthorNeedsLaunch("launching", false) {
+		t.Error("a launch in flight has no pod yet; that is no reason to start a second one")
+	}
+}
+
 // TestCoauthorWaitsOutALaunchInFlight: launching is not a reason to launch again, but it is a
 // reason to keep waiting — the two predicates differ exactly here.
 func TestCoauthorWaitsOutALaunchInFlight(t *testing.T) {

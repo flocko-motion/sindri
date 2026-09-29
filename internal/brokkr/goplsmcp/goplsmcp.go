@@ -1,4 +1,4 @@
-// package: brokkr / goplsmcp
+// package: brokkr/goplsmcp / goplsmcp
 // type:    logic (MCP shim in front of gopls)
 // job:     serve gopls' type-aware Go tools over MCP, and answer a refused Go toolchain with
 // the fix — gopls would answer "No symbols found", which reads as a fact about the code.

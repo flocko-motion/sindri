@@ -512,24 +512,25 @@ var detailFocusKeys = []focusKey{
 	{"g/G", "top/bot"},
 }
 
-// footerFromTable renders a focus override table as one footer-style line.
-func footerFromTable(table []focusKey) string {
-	parts := make([]string, len(table))
+// entriesFromTable renders a focus override table as shed-able footer entries. None is a readout,
+// so these shed last-first — but both tables are short enough that no real width reaches them.
+func entriesFromTable(table []focusKey) []footerEntry {
+	out := make([]footerEntry, len(table))
 	for i, r := range table {
-		parts[i] = r.keys + " " + r.label
+		out[i] = footerEntry{text: r.keys + " " + r.label}
 	}
-	return strings.Join(parts, " · ")
+	return out
 }
 
-// contextFooter is the tab's action hints, generated from the keymap so help can't drift.
-func (m model) contextFooter() string {
+// contextFooter is the tab's action hints at width, generated from the keymap so help can't drift.
+func (m model) contextFooter(width int) string {
 	switch m.focus {
 	case focusItems: // focused on a detail cross-reference
-		return footerFromTable(rightFocusKeys)
+		return shedTail(entriesFromTable(rightFocusKeys), width)
 	case focusDetail: // focused on the pane's raw content
-		return footerFromTable(detailFocusKeys)
+		return shedTail(entriesFromTable(detailFocusKeys), width)
 	}
-	return m.footerFor(tabScope(m.tab))
+	return shedTail(m.footerEntries(tabScope(m.tab)), width)
 }
 
 // actionableItems is the focusable cross-references of the current tab's detail.

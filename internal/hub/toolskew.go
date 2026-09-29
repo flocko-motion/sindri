@@ -11,13 +11,15 @@ package hub
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // hostLookupTimeout bounds the host-side probes: check() runs inside New, before Serve answers the
@@ -29,8 +31,8 @@ const hostLookupTimeout = 3 * time.Second
 const toolskewMetaKey = "toolskew.said"
 
 // toolskew reports a host/pod tool-version mismatch once, until it changes. Its two lookups are
-// fields set at construction, not package vars monkey-patched by a test: newHub(t)'s default (a
-// no-op) then applies to every hub test for free, and only toolskew's own tests need the real shape.
+// fields set at construction rather than package vars a test monkey-patches, so newHub(t)'s no-op
+// default applies to every hub test for free.
 type toolskew struct {
 	h            *Hub
 	said         string
@@ -49,9 +51,8 @@ func newToolskew(h *Hub, hostVersions func(context.Context) map[string]string, p
 	return t
 }
 
-// check compares the host's tool versions against the pod image's manifest and mails the user of
-// whatever disagrees. Silent when the image has never been built: there is nothing yet to compare,
-// which is not the same as a mismatch.
+// check mails the user whatever the host and the pod image disagree about. Silent when the image
+// has never been built: nothing to compare with is not a mismatch.
 func (t *toolskew) check() {
 	manifest, err := t.podManifest()
 	if err != nil || len(manifest) == 0 {
@@ -83,16 +84,14 @@ func (t *toolskew) check() {
 		strings.Join(lines, "\n"))
 }
 
-// say mails the user once per distinct message, recording it as reported only once the mail is
-// actually written: SAY IT ONCE is about not repeating a mismatch the user HAS read, not about
-// giving up on one that never reached them. A failed send leaves t.said unset, so the very next
-// check retries rather than staying silent for ever.
+// say mails the user once per distinct message, marking it reported only once the mail is written:
+// a failed send leaves t.said unset, so the next check retries rather than going quiet for ever.
 func (t *toolskew) say(msg string) {
 	if msg == t.said {
 		return
 	}
 	if msg != "" {
-		if err := t.h.Deliver(workflow.GlobalProject, api.SenderUser, msg, workflow.MailOnly.From("hub")); err != nil {
+		if err := t.h.mail.Deliver(api.GlobalProject, api.SenderUser, msg, mail.MailOnly.From("hub")); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: mailing tool-version mismatch: %v\n", err)
 			return
 		}
@@ -101,4 +100,21 @@ func (t *toolskew) say(msg string) {
 	if err := t.h.store.SetMeta(toolskewMetaKey, msg); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: persisting tool-skew state: %v\n", err)
 	}
+}
+
+// defaultPodManifest is the pod half of the comparison: the image's baked-in manifest, a cache read
+// with no build and no container call. brokkr is bind-mounted rather than baked, so its version
+// comes from the mounted binary's own build info instead.
+func defaultPodManifest() (map[string]string, error) {
+	m, err := container.ImageManifest(container.ImageName)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := harness.PodBrokkrVersion(); ok {
+		if m == nil {
+			m = map[string]string{}
+		}
+		m["brokkr"] = v
+	}
+	return m, nil
 }

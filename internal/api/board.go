@@ -1,7 +1,7 @@
 // package: api / board
 // type:    logic (the whole-board wire type + its badge counts)
 // job:     the board every UI renders (BoardState), the views it carries, and its
-// pure count methods — these make it satisfy hub/commands' Board interface
+// pure count methods — these make it satisfy hub/sections' Board interface
 // without either side importing the other.
 // limits:  data and pure counts only; assembling a BoardState is the hub's.
 package api
@@ -14,6 +14,8 @@ type AgentView struct {
 	Name    string `json:"name"`
 	Role    string `json:"role"`
 	Status  string `json:"status"`
+	// Phase is the state its machine has it in (e.g. "worker/working") — the fact Status is a word for.
+	Phase string `json:"phase,omitempty"`
 	// NeedsUser: only a human moves it on. Decided by the hub and carried — a front-end links no hub
 	// package, so a rule it applied itself would be a second copy of one.
 	NeedsUser bool `json:"needsUser,omitempty"`
@@ -21,7 +23,10 @@ type AgentView struct {
 	// unchanged by then — the evidence, shown beside the conclusion drawn from it.
 	ObservedAt string `json:"observedAt,omitempty"`
 	StillFor   string `json:"stillFor,omitempty"`
-	Task       string `json:"task"`
+	// InputPending is a line typed into the pane and never sent: it blocks every push, so nothing
+	// the hub says arrives until somebody clears it.
+	InputPending bool   `json:"inputPending,omitempty"`
+	Task         string `json:"task"`
 	// Feature is the parent task whose subtasks it is working, if any (gates the agent's verbs).
 	Feature   string `json:"feature,omitempty"`
 	Branch    string `json:"branch"`
@@ -32,7 +37,7 @@ type AgentView struct {
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
-	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
+	// both read off its transcript (0 = not measured). Past fleet.ContextFullFraction of that
 	// window, its next assignment clears its context instead of compacting it, before handing the
 	// work over — automatic, so Status never needs a word for it. The window is per agent because
 	// it is the model's: one number for the fleet would clear 1M agents at 17%.
@@ -58,8 +63,8 @@ type AgentView struct {
 	Escalation string `json:"escalation,omitempty"`
 }
 
-// RepoDocState is what a repo has told sindri about itself — its architecture doc and its quality
-// gate, each with Advice ("" when fine). Absent, one costs a briefing and the other every submit.
+// RepoDocState is what a repo has told sindri about itself — its architecture doc, its quality gate
+// and the branch agents work against, each with Advice ("" when fine).
 type RepoDocState struct {
 	Doc      string `json:"doc"`      // the path in effect: configured, else the default
 	Set      bool   `json:"set"`      // the project named it (vs falling back to the default)
@@ -69,6 +74,12 @@ type RepoDocState struct {
 	Gate       string `json:"gate"`       // the `verify:` script, "" when the repo declares none
 	GateOK     bool   `json:"gateOK"`     // Gate is set and present in the repo
 	GateAdvice string `json:"gateAdvice"` // "" when nothing to say
+
+	// Reference is the branch in effect, ReferencePinned whether `reference:` named it. Following
+	// the main checkout is the design, so the pair tells two working repos apart.
+	Reference       string `json:"reference"`
+	ReferencePinned bool   `json:"referencePinned"`
+	ReferenceAdvice string `json:"referenceAdvice"` // "" when a branch resolved
 }
 
 // FleetMemory is the machine's memory headroom: what the fleet costs the host now, and the ceiling
@@ -113,6 +124,8 @@ type BoardState struct {
 	SpecCLIMissing bool `json:"spec_cli_missing"`
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the board.
 	StartedAt string `json:"started_at"`
+	// DebugView is the flow debug view's URL, or why it is not served (-> hub/api/debugview).
+	DebugView string `json:"debugView,omitempty"`
 	// DefaultMemory is the RAM an agent gets with none configured — the runtime's own current default.
 	DefaultMemory string `json:"defaultMemory"`
 	// Memory is the machine's memory headroom for agents. It sits here beside DefaultMemory and

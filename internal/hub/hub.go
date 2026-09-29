@@ -11,6 +11,13 @@ package hub
 import (
 	"context"
 	"fmt"
+	agentflow "github.com/flo-at/sindri/internal/hub/flow/agent"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/idle"
+	"github.com/flo-at/sindri/internal/hub/flow/agent/workspace"
+	prflow "github.com/flo-at/sindri/internal/hub/flow/pr"
+	runflow "github.com/flo-at/sindri/internal/hub/flow/run"
+	"github.com/flo-at/sindri/internal/hub/flow/task"
+	"github.com/flo-at/sindri/internal/hub/prompts"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,15 +28,17 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/agentchan"
-	"github.com/flo-at/sindri/internal/hub/chat"
+	"github.com/flo-at/sindri/internal/hub/api/agents/channel"
+	"github.com/flo-at/sindri/internal/hub/api/debugview"
+	"github.com/flo-at/sindri/internal/hub/api/serve"
 	"github.com/flo-at/sindri/internal/hub/comments"
+	"github.com/flo-at/sindri/internal/hub/flow/fleet"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/messaging/chat"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"github.com/flo-at/sindri/internal/hub/project"
-	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/situation"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
+	"github.com/flo-at/sindri/internal/hub/world/situation"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -46,22 +55,21 @@ type Hub struct {
 	lifetime context.Context
 	endLife  context.CancelFunc
 
-	chat     *chat.Service       // the user's chatroom relay (internal/hub/chat)
+	mail     *mail.Box           // the fleet's mailbox and the one door into it (internal/hub/messaging/mail)
+	chat     *chat.Service       // the user's chatroom relay (internal/hub/messaging/chat)
 	comments *comments.Service   // task-comment sync (internal/hub/comments)
-	agents   *agent.Service      // agent management: identity/auth/memory/inject/runtime/lifecycle
-	wf       *workflow.Engine    // the PR/task lifecycle orchestrator (internal/hub/workflow)
+	agents   *harness.Service    // agent management: identity/auth/memory/inject/runtime/lifecycle
+	wf       *fleet.Engine       // the machines every subject re-decides through (-> hub/flow/fleet)
 	projects *project.Service    // repo-registry management (internal/hub/project)
-	agentCh  *agentchan.Server   // the inbound agent command channel (internal/hub/agentchan)
+	agentCh  *channel.Server     // the inbound agent command channel (internal/hub/agent/agentchan)
 	sit      *situation.Gatherer // where each agent stands, and what may happen to it (internal/hub/situation)
 	watch    *watchdog           // agent liveness, observed on a loop (internal/hub/watchdog.go)
-	refs     *refwatch           // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
-	creds    *credwatch          // agent credential upkeep from the host (internal/hub/credwatch.go)
-	stalls   *stallwatch         // held work nobody is working on (internal/hub/stallwatch.go)
-	runs     *runwatch           // executes the run queue, one at a time (internal/hub/runwatch.go)
+	ticks    *ticks              // every sweep the hub runs on a clock (internal/hub/ticks.go)
 	status   *statuswatch        // diffs the derived status word into state_log (internal/hub/statuswatch.go)
 	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
 	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
 	tools *toolskew
+	debug *debugview.Server // the flow debug view, idle until asked for (internal/hub/debugflow.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -98,25 +106,6 @@ func New(ctx context.Context) (*Hub, error) {
 	return open(ctx, hosttools.Versions, defaultPodManifest)
 }
 
-// defaultPodManifest is toolskew's real pod-side lookup: the image's baked-in manifest
-// (go/node/openspec, a local cache read, no build and no container call) plus brokkr's own
-// version. brokkr isn't baked into the image at all — it's bind-mounted from pod-bin at container
-// run time — so its value comes from agent.PodBrokkrVersion instead, reading that same file's own
-// build info.
-func defaultPodManifest() (map[string]string, error) {
-	m, err := container.ImageManifest(container.ImageName)
-	if err != nil {
-		return nil, err
-	}
-	if v, ok := agent.PodBrokkrVersion(); ok {
-		if m == nil {
-			m = map[string]string{}
-		}
-		m["brokkr"] = v
-	}
-	return m, nil
-}
-
 // open is New's real body, parameterized over toolskew's two lookups: production always supplies
 // the real ones (via New); newHub(t) supplies an inert stand-in, so the other hub tests never touch
 // the real image cache or spawn a real go/node/openspec just by constructing a Hub.
@@ -129,24 +118,29 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	if err != nil {
 		return nil, err
 	}
-	// GlobalProject registers here, not lazily like a repo: nothing ever names it in a request the
+	// api.GlobalProject registers here, not lazily like a repo: nothing ever names it in a request the
 	// way a real repo's root does, so it must exist from the first tick. Its path is a dedicated
 	// subdirectory (not the bare state dir itself) so repoSlug reads its name off it unchanged.
-	if err := st.RegisterProject(workflow.GlobalProject, filepath.Join(dir, workflow.GlobalProject)); err != nil {
+	if err := st.RegisterProject(api.GlobalProject, filepath.Join(dir, api.GlobalProject)); err != nil {
 		return nil, err
 	}
 	life, endLife := context.WithCancel(ctx)
 	h := &Hub{store: st, events: newBus(), startedAt: time.Now(), lifetime: life, endLife: endLife}
+	// First of the modules: every other one sends through it, and it reaches back only for a push
+	// and the board — neither of which has to exist yet (-> mailDeps).
+	h.mail = mail.New(h.store, mailDeps{h})
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
 	// reaches h.agents at request time.
-	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
+	h.agentCh = channel.New(h.store, agentchanDeps{h})
 	// Before agents and wf, which both ask it: the observer behind it reads h.watch and h.agents at
 	// CALL time, so neither has to exist yet.
-	h.sit = situation.NewGatherer(h.store, harness{h})
-	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = workflow.New(h.store, workflowDeps{h}, harness{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
+	h.sit = situation.NewGatherer(h.store, hubHarness{h}, idle.Rule)
+	h.agents = harness.New(h.store, agentDeps{h}, h.agentCh)
+	h.wf = fleet.New(h.lifetime, h.store, workflowDeps{h}, hubHarness{h}, h.mail, spec.Source{}, github.Source{}).
+		Gated(spec.Source{}).
+		Reconciling()
 	h.projects = project.New(h.store, projectDeps{h})
 	// Before watch: watchdog.sweep calls h.status.sweep at its own tail, on the very first beat, so
 	// this must exist before that goroutine starts — building it takes no dependency of its own.
@@ -154,16 +148,20 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
 	h.watch = newWatchdog(life, h)
-	// After wf: it drives SyncReference, whose first pass only records where each reference stands.
-	h.refs = newRefwatch(life, h)
-	h.creds = newCredwatch(h)
-	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
-	h.stalls = newStallwatch(h)
+	// Every sweep the hub runs on a clock, in one table (-> ticks.go). After watch and wf, which all
+	// three reach: the watchdog's dwell, and the flow they nudge and check through.
+	h.ticks = startTicks(life, []tick{
+		// atOnce: the first pass only records where each reference stands, so nothing reads as moved
+		// on the strength of a hub restart.
+		{name: "reference-drift", every: refInterval, atOnce: true, sweep: newRefwatch(h).sweep},
+		{name: "credentials", every: credInterval, atOnce: true, sweep: newCredwatch(h).sweep},
+		{name: "stalled-and-mail", every: stallInterval, sweep: newStallwatch(h).sweep},
+	})
 	// After wf: it drives NextQueuedRun/ExecuteRun through it.
-	h.runs = newRunwatch(life, h)
 	// A one-shot startup comparison, not a loop: the pod image only changes on a rebuild, not tick
 	// by tick. Needs only h.store (via Deliver), so nothing above it is a real dependency.
 	h.tools = newToolskew(h, hostVersions, podManifest)
+	h.debug = debugview.New(h)
 	return h, nil
 }
 
@@ -217,18 +215,61 @@ func ensureGitignore(root string) {
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
 	// The loops first, THEN the lifetime: work already under way finishes as it would have, and only
-	// what outlives the loops is cut short. runs.close() is the one exception (-> runwatch.close).
+	// what outlives the loops is cut short.
+	h.wf.Close() // the four flows, and whatever action each had in flight
 	h.watch.close()
-	h.refs.close()
-	h.creds.close()
-	h.stalls.close()
-	h.runs.close()
+	h.ticks.close()
 	// status has no loop of its own to stop — watchdog.close() above already ended what drove it.
 	h.agentCh.CloseAll()
+	h.debug.Close()
 	h.endLife()
-	server.FlushAccessLog() // emit any open access-log run before we go quiet
+	serve.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
+
+// AgentFlow is the acting half of an agent's flow, over the hub's own handles.
+func (h *Hub) AgentFlow() *agentflow.Act { return agentflow.New(h.wf.Handles()) }
+
+// PRFlow is the acting half of a pull request's flow, over the hub's own handles.
+func (h *Hub) PRFlow() *prflow.Act { return prflow.New(h.wf.Handles()) }
+
+// RunFlow is the acting half of a queued run's flow, over the hub's own handles.
+func (h *Hub) RunFlow() *runflow.Act { return runflow.New(h.wf.Handles()) }
+
+// agentWorkspace is what an agent types against its OWN tree — `git` and `scratch` — over the
+// hub's handles. Separate from the actions its map runs on its behalf (-> AgentFlow).
+func (h *Hub) agentWorkspace() *workspace.Act { return workspace.New(h.wf.Handles()) }
+
+// TaskFlow is the acting half of a task's flow, over the hub's own handles. Built per call: it holds
+// nothing of its own, and a field would be a second place for the handles to live.
+func (h *Hub) TaskFlow() *task.Act { return task.New(h.wf.Handles()) }
+
+// The six readers below hand out the subsystems the front-end's routes act on. Readers rather than
+// one shared struct: the hub stays the single place they are assembled, and a caller reaches
+// exactly the one it names (-> hub/api/frontend.Hub).
+
+// Fleet is the machines every subject re-decides through.
+func (h *Hub) Fleet() *fleet.Engine { return h.wf }
+
+// Agents is identity, auth, memory, injection and pod lifecycle.
+func (h *Hub) Agents() *harness.Service { return h.agents }
+
+// Projects is the repo registry.
+func (h *Hub) Projects() *project.Service { return h.projects }
+
+// Chat is the user's chatroom relay.
+func (h *Hub) Chat() *chat.Service { return h.chat }
+
+// Mail is the fleet's mailbox and the one door into it.
+func (h *Hub) Mail() *mail.Box { return h.mail }
+
+// Comments is task-comment sync.
+func (h *Hub) Comments() *comments.Service { return h.comments }
+
+// StartupAdvice is what each registered repo should be told once, at boot — a config that will not
+// load, or a missing architecture doc. Delegated: the rule is the registry's (-> hub/project), and
+// the hub is what has a startup to say it at.
+func (h *Hub) StartupAdvice() []string { return h.projects.StartupAdvice() }
 
 // SocketPath is the global hub's control socket.
 func (h *Hub) SocketPath() string { return paths.HubSocket() }
@@ -257,12 +298,12 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 		// The judgement is made HERE, where the message is composed, rather than asked of the delivery
 		// path: an agent still stuck on an escalation or an armed clear is waiting on THAT, and this
 		// notice is not the exit from either — so it is recorded and not used to interrupt.
-		d := workflow.MailAndPush
+		d := mail.MailAndPush
 		if why := h.wakeRefused(project, name); why != "" {
-			d = workflow.MailOnly
-			_ = h.store.For(project).Log(name, "push-suppressed", why+" — not woken for: "+workflow.MsgUnretired)
+			d = mail.MailOnly
+			_ = h.store.For(project).Log(name, "push-suppressed", why+" — not woken for: "+prompts.MsgUnretired)
 		}
-		return h.Deliver(project, name, workflow.MsgUnretired, d)
+		return h.mail.Deliver(project, name, prompts.MsgUnretired, d)
 	}
 	return nil
 }
@@ -291,11 +332,11 @@ func (h *Hub) rehydrate(project, name string) {
 func (h *Hub) greet(project, name string) {
 	// Ungated on purpose, and mail-less: a fresh session held back on retirement would sit silent for
 	// ever instead of seeing DirRetired even once — its only way to learn its own situation.
-	_ = h.Deliver(project, name, h.wf.Kickoff(project, name), workflow.PushOnly)
+	_ = h.mail.Deliver(project, name, h.wf.Kickoff(project, name), mail.PushOnly)
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
 	// is in a state where that means anything (-> chat.ReminderFor). Ungated for the kickoff's reason:
 	// mail-less, so a member held back would lose the cue for good.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {
-		_ = h.Deliver(project, name, cue, workflow.PushOnly)
+		_ = h.mail.Deliver(project, name, cue, mail.PushOnly)
 	}
 }

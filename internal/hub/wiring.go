@@ -1,7 +1,7 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-// needs back to the hub (chat Delivery, comments Deps, workflow Deps). Each
+// needs back to the hub (chat mail.Delivery, comments Deps, workflow Deps). Each
 // module's logic lives in its own package; this is only the glue.
 // limits:  adapters only — no module logic here. The DTOs these modules exchange
 // live in internal/api, which the hub and every front-end import directly.
@@ -9,15 +9,17 @@ package hub
 
 import (
 	"context"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/observe"
-	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
+	"github.com/flo-at/sindri/internal/hub/api/serve"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
 )
 
 // observed is the hub's standing look at one agent, assembled from what it already holds in memory:
@@ -44,55 +46,60 @@ func (h *Hub) observed(project, name string) observe.Observation {
 	return o
 }
 
-// harness adapts the hub to workflow.Harness: the agent's box, and nothing that names a task.
-type harness struct{ h *Hub }
+// harness adapts the hub to fleet.Harness: the agent's box, and nothing that names a task.
+type hubHarness struct{ h *Hub }
 
-func (x harness) Observe(project, name string) observe.Observation {
+func (x hubHarness) Observe(project, name string) observe.Observation {
 	return x.h.observed(project, name)
 }
 
-// Probe takes a FRESH look where Observe reports the standing one — for a caller that needs the
-// answer as of now. Under the hub's lifetime, since workflow.Harness carries no context of its own.
-func (x harness) Probe(project, name string) observe.Observation {
-	o := x.h.observed(project, name)
+// Probe takes a FRESH look where Observe reports the standing one, through the observer, so what
+// the caller acts on is what the machine and the board read next.
+func (x hubHarness) Probe(project, name string) observe.Observation {
+	if x.h.watch != nil {
+		x.h.watch.lookNow(project, name)
+		return x.h.observed(project, name)
+	}
+	o := x.h.observed(project, name) // on the way up, before the observer exists
 	o.Up = x.h.agents.AgentAlive(x.h.lifetime, project, name)
 	o.TakenAt = time.Now()
 	return o
 }
 
-func (x harness) Say(project, name, text string, d workflow.Delivery) error {
-	return x.h.Deliver(project, name, text, d)
+func (x hubHarness) Say(project, name, text string, d mail.Delivery) error {
+	return x.h.mail.Deliver(project, name, text, d)
 }
 
-func (x harness) Clear(ctx context.Context, project, name string) error {
+func (x hubHarness) Clear(ctx context.Context, project, name string) error {
 	return x.h.agents.Clear(ctx, project, name)
 }
 
-func (x harness) Compact(ctx context.Context, project, name string) error {
-	return x.h.agents.Compact(ctx, project, name)
-}
-
-func (x harness) SetModel(ctx context.Context, project, name, model string) error {
+func (x hubHarness) SetModel(ctx context.Context, project, name, model string) error {
 	return x.h.agents.SetModel(ctx, project, name, model)
 }
 
 // Interrupt and Start run under the hub's lifetime for the same reason Probe does.
-func (x harness) Interrupt(project, name string) error {
+func (x hubHarness) Interrupt(project, name string) error {
 	return x.h.agents.Interrupt(x.h.lifetime, project, name)
 }
 
-func (x harness) Start(project, name string) error {
-	return x.h.agents.Launch(x.h.lifetime, project, name, false, false, 0, 0, io.Discard)
+// Start and Stop take the CALLER's context — the machine's, which cancels it when the agent leaves
+// the launching or stopping state. That cancellation is the bound on a launch a runtime never
+// answers, in place of a sweep watching the intent from outside.
+func (x hubHarness) Start(ctx context.Context, project, name string) error {
+	return x.h.agents.Start(ctx, project, name)
 }
 
-func (x harness) Container(project, name string) string { return x.h.container(project, name) }
-
-func (x harness) ModelMatches(want, detected string) bool {
-	return x.h.agents.ModelMatches(want, detected)
+func (x hubHarness) Stop(ctx context.Context, project, name string) error {
+	return x.h.agents.StopAgent(ctx, project, name)
 }
 
-func (x harness) CompactionThreshold(window int) int {
-	return x.h.agents.CompactionThreshold(window)
+func (x hubHarness) Container(project, name string) string { return x.h.container(project, name) }
+
+func (x hubHarness) TierIs(on, tier string) (met, known bool) { return x.h.agents.TierIs(on, tier) }
+
+func (x hubHarness) SetTier(ctx context.Context, project, name, tier string) error {
+	return x.h.agents.SetTier(ctx, project, name, tier)
 }
 
 // agentDeps adapts the hub to agent.Deps.
@@ -101,9 +108,17 @@ type agentDeps struct{ h *Hub }
 func (d agentDeps) Notify()                                   { d.h.notify() }
 func (d agentDeps) ContainerName(project, name string) string { return d.h.container(project, name) }
 func (d agentDeps) ProjectRoot(project string) string         { return d.h.projectRoot(project) }
-func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.architectureDoc(project) }
-func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.RefreshTask(project, id) }
-func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
+func (d agentDeps) ArchitectureDoc(project string) string {
+	return d.h.projects.ArchitectureDoc(project)
+}
+func (d agentDeps) RefreshTask(project, id string) error {
+	return d.h.TaskFlow().RefreshTask(project, id)
+}
+
+func (d agentDeps) SetTaskStatus(project, id, want string) error {
+	return d.h.PRFlow().SetStatus(project, id, want)
+}
+func (d agentDeps) Rehydrate(project, name string) { d.h.rehydrate(project, name) }
 
 func (d agentDeps) Kickoff(project, name string) string { return d.h.wf.Kickoff(project, name) }
 
@@ -111,8 +126,8 @@ func (d agentDeps) Observation(project, name string) observe.Observation {
 	return d.h.observed(project, name)
 }
 
-func (d agentDeps) Deliver(project, name, text string, del workflow.Delivery) error {
-	return d.h.Deliver(project, name, text, del)
+func (d agentDeps) Deliver(project, name, text string, del mail.Delivery) error {
+	return d.h.mail.Deliver(project, name, text, del)
 }
 
 // ForgetFill drops the observer's fill for one agent, so the board stops reporting a figure the
@@ -134,7 +149,36 @@ func (d agentDeps) AgentClients(project, name string) int {
 }
 
 func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
-	return d.h.projectConfig(project)
+	return d.h.projects.Config(project)
+}
+
+// mailDeps adapts the hub to mail.Deps: the mailbox owns the message, the hub owns the session it
+// is typed into. Both under the hub's lifetime — a push must land whether or not whoever triggered
+// it is still there.
+type mailDeps struct{ h *Hub }
+
+func (d mailDeps) Push(project, name, text string) error {
+	return d.h.agents.InjectWhenReady(d.h.lifetime, project, name, text)
+}
+func (d mailDeps) Notify()                        { d.h.notify() }
+func (d mailDeps) RepoName(project string) string { return d.h.repoName(project) }
+
+// MailArrived tells the one agent whose count moved, which is as far as this topic reaches.
+func (d mailDeps) MailArrived(project, name string) {
+	d.h.wf.Wake(project, name, topic.MailArrived)
+}
+
+// Reachable is the watchdog's standing reading, not a probe: announcing sweeps the whole fleet, and
+// a fresh exec per agent per sweep is exactly what the watchdog exists to spare.
+func (d mailDeps) Reachable(project, name string) bool {
+	return d.h.observed(project, name).Up
+}
+
+// MayWake asks the surface, which is where "the hub told it to wait" is decided — so the mailbox
+// carries no second copy of a rule about retirement or a gated feature.
+func (d mailDeps) MayWake(project, name string) bool {
+	s, err := d.h.sit.Of(project, name)
+	return err == nil && !s.ParkedByTheHub()
 }
 
 // chatDelivery adapts the hub to chat.Delivery.
@@ -179,7 +223,7 @@ func (d projectDeps) RepoName(project string) string { return d.h.repoName(proje
 func (d projectDeps) RepoTag(root string) string     { return repoTag(root) }
 func (d projectDeps) Notify()                        { d.h.notify() }
 
-// agentchanDeps adapts the hub to agentchan.Deps: the channel owns transport, the hub behaviour.
+// agentchanDeps adapts the hub to channel.Deps: the channel owns transport, the hub behaviour.
 type agentchanDeps struct{ h *Hub }
 
 func (d agentchanDeps) Commands(project, name string) (any, error) {
@@ -195,20 +239,26 @@ func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, 
 	return d.h.agents.ForToken(token)
 }
 func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler {
-	return server.LogRequests(label, next)
+	return serve.LogRequests(label, next)
 }
 
-// workflowDeps adapts the hub to workflow.Deps, so workflow need not import the hub.
+// workflowDeps adapts the hub to fleet.Deps, so workflow need not import the hub.
 type workflowDeps struct{ h *Hub }
 
 func (d workflowDeps) ProjectRoot(project string) string { return d.h.projectRoot(project) }
 
 func (d workflowDeps) ProjectConfig(project string) (config.Config, error) {
-	return d.h.projectConfig(project)
+	return d.h.projects.Config(project)
 }
 
-func (d workflowDeps) ArchitectureDoc(project string) string { return d.h.architectureDoc(project) }
+func (d workflowDeps) ArchitectureDoc(project string) string {
+	return d.h.projects.ArchitectureDoc(project)
+}
 
+// Notify tells the BOARD, and nothing else. It used to wake every subject on topic.SessionRead as
+// well, which said "something happened somewhere" to states asking about a session — so a write
+// nothing was watching for woke the fleet, and the one thing that does read a session published
+// nothing (-> watchdog.announce). Each writer now publishes the topic naming what it changed.
 func (d workflowDeps) Notify() { d.h.notify() }
 
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
@@ -220,15 +270,11 @@ func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
 }
 
 func (d workflowDeps) Escalate(project, name, question string) (string, error) {
-	return d.h.Escalate(project, name, question)
+	return d.h.AgentFlow().Escalate(project, name, question)
 }
 
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps
-}
-
-func (d workflowDeps) ModelForTier(tier string) (string, bool) {
-	return d.h.agents.ModelForTier(tier)
 }

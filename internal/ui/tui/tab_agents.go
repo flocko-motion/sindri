@@ -256,7 +256,13 @@ func observationLine(a api.AgentView) string {
 	if a.Clients > 0 {
 		parts = append(parts, fmt.Sprintf("%d attached", a.Clients))
 	}
-	return strings.Join(parts, ", ")
+	line := strings.Join(parts, ", ")
+	// Last and in its own colour: it is the one thing here that BLOCKS the hub, so it must not read
+	// as another figure in a dim row.
+	if a.InputPending {
+		line += ", " + stWarn.Render(warnGlyph+" a line is waiting unsent — no push lands until it clears")
+	}
+	return line
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.
@@ -388,14 +394,10 @@ func (m model) agentItems() []metaItem {
 	}
 	// The question an escalated agent stopped on, beside the status word that says it is. Readable
 	// here on purpose: several escalations can be triaged before deciding which to sit down with,
-	// which attaching to each pane in turn does not allow. ⏎ clears it — the user's own release,
-	// for an agent that cannot do it itself.
+	// which attaching to each pane in turn does not allow. READ-ONLY, though: releasing the agent is
+	// an action, so it lives with the other agent actions in the menu (keyResume), not on this row.
 	if a.Escalation != "" {
-		items = append(items, metaItem{
-			text:  "escalated: " + a.Escalation + dimStyle.Render("  (⏎ resume)"),
-			kind:  "resume",
-			value: a.Name,
-		})
+		items = append(items, metaItem{text: "escalated: " + a.Escalation})
 	}
 	items = append(items,
 		taskIt, featIt, prIt,

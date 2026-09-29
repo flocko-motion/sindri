@@ -7,7 +7,7 @@
 // limits:  no hub policy here — a Source just fetches + normalizes.
 package tasks
 
-import "github.com/flo-at/sindri/internal/hub/task"
+import "github.com/flo-at/sindri/internal/hub/world/task"
 
 // Source is a place tasks come from (td, openspec, GitHub), mapping its own world onto task.Task
 // and namespacing its ids (the scheme is hub/task/ids.go's; no caller compares a

@@ -1,0 +1,355 @@
+// package: hub/flow/task / task_act
+// type:    logic (the act → report → idle loop + PR-as-merge-intent)
+// job:     the worker verbs and task assignment. Tasks are a cached read model
+// synced from td (D15); `next` claims one and branches; the directive loop
+// decides the next action. All state is per-project — methods take a
+// project (repoTag) and work through store.For(project).
+// limits:  git is entirely hub-side (the agent edits /workspace, the hub commits
+// and merges); writes to td go through the td adapter (D15).
+package task
+
+import (
+	"fmt"
+	"github.com/flo-at/sindri/internal/hub/core"
+	"github.com/flo-at/sindri/internal/hub/messaging/mail"
+	"github.com/flo-at/sindri/internal/hub/prompts"
+	ownedpkg "github.com/flo-at/sindri/internal/hub/world/owned"
+	"path/filepath"
+	"strings"
+
+	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/brokkr/lint"
+	"github.com/flo-at/sindri/internal/hub/flow/topic"
+	"github.com/flo-at/sindri/internal/hub/world/store"
+	"github.com/flo-at/sindri/internal/hub/world/task"
+)
+
+// Tasks refreshes from td and returns all cached tasks for a project (for `task
+// list`). A sync failure is surfaced, never swallowed.
+func (a *Act) Tasks(project string) ([]store.Task, error) {
+	if err := a.SyncTasks(project); err != nil {
+		return nil, err
+	}
+	// Repair any stale status (in_review with no PR, in_progress with no assignee)
+	// against reality — a listing is a natural, infrequent point to do the sweep.
+	_ = a.ReconcileTasks(project)
+	return a.Store.For(project).AllTasks()
+}
+
+// TaskInfo returns one task, refreshed from its source of truth: sindri's own from the store, a
+// mirrored id from the cache (the store errors on a foreign id).
+func (a *Act) TaskInfo(project, id string) (store.Task, error) {
+	if !task.IsOwned(id) {
+		t, ok, err := a.Store.For(project).GetTask(id)
+		if err != nil {
+			return store.Task{}, err
+		}
+		if !ok {
+			return store.Task{}, fmt.Errorf("%w %q", core.ErrNoSuchTask, id)
+		}
+		t.Comments = a.Deps.TaskComments(project, id)
+		return t, nil
+	}
+	// Repair this one task's status against reality before returning it (task info /
+	// detail is a natural single-task check point).
+	_ = a.ReconcileTask(project, id)
+	ps := a.Store.For(project)
+	owned, ok, err := ps.OwnedTask(id)
+	if err != nil {
+		return store.Task{}, err
+	}
+	if !ok {
+		return store.Task{}, fmt.Errorf("%w %q", core.ErrNoSuchTask, id)
+	}
+	_ = ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
+	// Read the row back rather than returning what was just written: the approval gate lives in its
+	// own table and reaches a task only through that join, so a hand-built row reports none.
+	st, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return store.Task{}, err
+	}
+	st.Comments = a.Deps.TaskComments(project, id)
+	return st, nil
+}
+
+// TaskSpec is the full editable shape of a task, the payload of both create and edit — it crosses
+// the wire, so it is internal/api.TaskSpec under the name every existing caller here already uses.
+type TaskSpec = api.TaskSpec
+
+// CreateTask creates a task via the td tool in a project and returns its id.
+func (a *Act) CreateTask(project string, s TaskSpec) (string, error) {
+	if err := checkTier(s.Tier); err != nil {
+		return "", err
+	}
+	if err := a.checkParent(project, s.Parent, ""); err != nil {
+		return "", err
+	}
+	id, err := task.MintID()
+	if err != nil {
+		return "", err
+	}
+	typ := s.Type
+	if typ == "" {
+		typ = "task"
+	}
+	ps := a.Store.For(project)
+	if err := ps.PutOwnedTask(store.OwnedTask{
+		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Tier: s.Tier, Type: typ,
+		Labels: strings.Join(s.Labels, ","), Description: s.Description,
+	}); err != nil {
+		return "", err
+	}
+	if err := ps.SetParent(id, s.Parent); err != nil {
+		return "", err
+	}
+	a.RefreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
+	a.AdoptChild(project, s.Parent, id)
+	a.Deps.Notify()
+	a.Flow.WakeProject(project, topic.TaskAvailable) // a new task may be the next one for any of them
+	return id, nil
+}
+
+// UnassignTask releases a task in a project back to the backlog and clears it from whatever agent
+// held it. A live holder is taken off it too: the human asked for the task back, and a refusal that
+// hands them a chore ("stop or delete it first") leaves the backlog reading a lie until they do it.
+// So this does the necessary work instead — ESC, tell the agent, scrap the PR it can no longer land.
+func (a *Act) UnassignTask(project, id string) error {
+	ps := a.Store.For(project)
+	roster, _ := ps.Roster()
+	for _, ag := range roster {
+		st, _ := ps.GetState(ag.Name)
+		if st.Task != id {
+			continue
+		}
+		// A container holder rests back onto its FEATURE, not fully idle: unassigning one subtask
+		// does not mean the feature it lives under is done (sd-5ef393 — the same shape as
+		// FinishTask's own fix).
+		held, branch := st.Container, st.Container
+		_ = ps.SetHolding(ag.Name, "", branch, held, store.ReasonFreed, "unassigned: "+id)
+		_ = ps.Log(ag.Name, "unassign", id)
+		a.announceHolding(project, ag.Name)
+		a.settleReleasedPR(ps, project, ag.Name, id, "its task was unassigned and is back on the backlog")
+		// ESC first, so the notice lands on an idle prompt rather than queuing behind the work it is
+		// stopping. Only the interrupt needs the agent up; the delivery is made either way, since
+		// mail is precisely what reaches one that is down (-> pr.FinishTask, the same shape).
+		if a.Harness.Observe(project, ag.Name).Up {
+			_ = a.Harness.Interrupt(project, ag.Name)
+		}
+		_ = a.Harness.Say(project, ag.Name, prompts.MsgTaskUnassigned(id), mail.MailAndPush)
+	}
+	if err := a.pr().SetStatus(project, id, "open"); err != nil {
+		return err
+	}
+	_ = a.RefreshTask(project, id)
+	a.Deps.Notify()
+	return nil
+}
+
+// The approval gate (approve/reject) lives in approve_act.go; the planner's verbs in planner_act.go.
+
+// dash renders "-" for an empty string (agent-facing output helper).
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// commentBlock renders a task's thread oldest-first, shaped like the CLI's `task info` so the two
+// read alike. Source is on the head line: it says who else has already seen the comment.
+func commentBlock(comments []store.Comment) string {
+	var b strings.Builder
+	for _, c := range comments {
+		fmt.Fprintf(&b, "\n— %s (%s, %s)\n%s\n", dash(c.Author), c.Source, c.CreatedAt,
+			strings.TrimRight(c.Body, "\n"))
+	}
+	return b.String()
+}
+
+// EditTask applies a spec to an existing task in a project.
+func (a *Act) EditTask(project, id string, s TaskSpec) error {
+	if err := checkTier(s.Tier); err != nil {
+		return err
+	}
+	if err := a.checkParent(project, s.Parent, id); err != nil {
+		return err
+	}
+	ps := a.Store.For(project)
+	// Parentage first, and for any task: the hierarchy is sindri's own, so re-parenting an openspec
+	// change or a GitHub issue is as ordinary as re-parenting one of its own.
+	gained := false
+	if s.Parent != "" {
+		// Diff rather than echo: re-parenting a task to where it already sits adds no child, and
+		// telling that parent's holder one arrived is noise about work it has had all along.
+		gained = ps.ParentOf(id) != s.Parent
+		if err := ps.SetParent(id, s.Parent); err != nil {
+			return err
+		}
+	}
+	if owned, ok, oerr := ps.OwnedTask(id); oerr != nil {
+		return oerr
+	} else if ok {
+		// Only what the spec carries changes; an empty field leaves the stored one as it is.
+		ownedpkg.ApplySpec(&owned, s)
+		if err := ps.PutOwnedTask(owned); err != nil {
+			return err
+		}
+	} else {
+		// A mirrored task's CONTENT belongs to its source; priority and tier do not — no source
+		// carries either, so both are sindri's to assign on any task. Tier was dropped here, which
+		// left every openspec change stuck at the default and handed to a mid-tier model.
+		if s.Priority != "" {
+			if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
+				return err
+			}
+		}
+		if s.Tier != "" {
+			if err := ps.SetTierOverride(id, s.Tier); err != nil {
+				return err
+			}
+		}
+	}
+	a.RefreshCachedTask(project, id) // targeted refresh of the edited task
+	// Re-parenting adds a child as surely as creating one does, so the same growth applies: whoever
+	// is working the new parent takes this on too, rather than merging over it.
+	if gained {
+		a.AdoptChild(project, s.Parent, id)
+	}
+	a.Deps.Notify()
+	return nil
+}
+
+// PrRejected reports a rejected PR for the work IN HAND and its feedback, so the worker is handed the
+// comments directly. Scoped to target because matching any rejected PR by this author served an old
+// one for ever: an agent was told its current task was rejected, over feedback about a finished one.
+func (a *Act) PrRejected(project, agent, target string) (feedback string, rejected bool, err error) {
+	if target == "" {
+		return "", false, nil // nothing held, so no rejection of it to report
+	}
+	prs, err := a.Store.For(project).PRs()
+	if err != nil {
+		return "", false, fmt.Errorf("load PRs for %s: %w", agent, err)
+	}
+	for _, p := range prs {
+		if p.Agent == agent && p.Status == "rejected" && p.Task == target {
+			return p.Feedback, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// RejectionRound is how many times this PR has come back, 1 for the first. Told to the author
+// because the count is the fact that should change its approach: 171 of the fleet's 409 submissions
+// were rejected, one of them nine times, each round costing a gate run and an exhaustive read.
+func (a *Act) RejectionRound(project, target string) int {
+	evs, err := a.Store.For(project).PREvents("pr-" + target)
+	if err != nil {
+		return 1
+	}
+	n := 0
+	for _, ev := range evs {
+		if ev.Type == "rejected" {
+			n++
+		}
+	}
+	if n == 0 {
+		return 1
+	}
+	return n
+}
+
+// CommentBudget resolves the SAME two numbers the submit gate's own trend check uses — the ceiling
+// via lint.MaxCommentAvgFor, and the aim lint.AimFor derives from it — so the two can never drift apart.
+func (a *Act) CommentBudget(project string) (aim, ceiling float64) {
+	cfg, _ := a.Deps.ProjectConfig(project) // unreadable: cfg is the zero value, which resolves the default
+	ceiling = lint.MaxCommentAvgFor(cfg)
+	return lint.AimFor(ceiling), ceiling
+}
+
+// Brief is what a worker is told about the work it now holds — a subtask of a feature, a feature
+// with nothing left open under it, or a standalone task on its own branch. Rendered from the row at
+// HAND-OVER time rather than by whatever claimed the work, so the agent hears the same words
+// however it came to hold them, and a claim carries no undelivered message.
+func (a *Act) Brief(project, worker string, aim, ceiling float64) (string, error) {
+	ps := a.Store.For(project)
+	st, err := ps.GetState(worker)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case st.Container != "" && st.Task != "":
+		return prompts.DirContainerWorking(st.Container, st.Task, aim, ceiling), nil
+	case st.Container != "":
+		return prompts.DirContainerDone(st.Container), nil
+	case st.Task == "":
+		return "", fmt.Errorf("worker %q holds nothing, so there is nothing to hand over", worker)
+	}
+	t, ok, err := ps.GetTask(st.Task)
+	if err != nil || !ok {
+		return "", fmt.Errorf("worker %q holds task %q, which is not in the backlog: %v", worker, st.Task, err)
+	}
+	return prompts.DirClaimed(st.Task, t.Title, st.Branch, a.Deps.ArchitectureDoc(project)), nil
+}
+
+// HeldTier is the rating of the unit a worker holds — what the session is prepared FOR, read after
+// the claim rather than from the backlog it came out of, since by then it is no longer waiting.
+func (a *Act) HeldTier(project, worker string) (string, error) {
+	ps := a.Store.For(project)
+	st, err := ps.GetState(worker)
+	if err != nil {
+		return "", err
+	}
+	held := st.Task
+	if held == "" {
+		held = st.Container
+	}
+	if held == "" {
+		return "", fmt.Errorf("worker %q holds nothing, so no rating says which model it wants", worker)
+	}
+	t, ok, err := ps.GetTask(held)
+	if err != nil || !ok {
+		return "", fmt.Errorf("worker %q holds %q, which is not in the backlog: %v", worker, held, err)
+	}
+	return api.TierOrDefault(t.Tier), nil
+}
+
+// ClaimLeaf claims one standalone task for a worker, branching on it. It says nothing to the agent:
+// the hand-over does that, once the session behind the claim has been prepared (-> Brief).
+func (a *Act) ClaimLeaf(project, worker string, t store.Task) (bool, error) {
+	ps := a.Store.For(project)
+	root := a.Deps.ProjectRoot(project)
+	base, err := a.BaseBranch(root)
+	if err != nil {
+		return false, err
+	}
+	ag, ok, err := ps.GetAgent(worker)
+	if err != nil || !ok {
+		return false, fmt.Errorf("agent %s missing: %v", worker, err)
+	}
+	wt := filepath.Join(root, ag.Workspace)
+	branch := t.ID
+	if err := a.pr().SetStatus(project, t.ID, "in_progress"); err != nil {
+		return false, err
+	}
+	_ = a.RefreshTask(project, t.ID)
+	// Lay the new branch on a CLEAN base: leftover WIP from a cancelled task would bleed in.
+	// Reset at claim time, not at cancel — the agent may work on after the push.
+	if err := git.CheckoutDetachedClean(wt, base); err != nil {
+		return false, err
+	}
+	if err := git.CreateBranch(wt, branch, base); err != nil {
+		return false, err
+	}
+	// A claim is what earns the right to speak to the user, so the note grant is given here and
+	// REPLACES whatever was left (-> store.GrantNotes).
+	if err := ps.GrantNotes(worker, prompts.NotesPerClaim); err != nil {
+		return false, err
+	}
+	if err := ps.SetHolding(worker, t.ID, branch, "", store.ReasonClaimed, "claimed "+t.ID); err != nil {
+		return false, err
+	}
+	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)
+	a.announceHolding(project, worker)
+	return true, nil
+}

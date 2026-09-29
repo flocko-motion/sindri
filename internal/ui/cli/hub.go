@@ -36,6 +36,7 @@ type backend interface {
 	ResumeAgent(name, answer string) error
 	MailBody(id int64) (api.Mail, error)
 	MarkMailRead(id int64) error
+	MarkAllMailRead() error
 	MailAgent(name, msg string) error
 	ReplyToMail(id int64, msg string) error
 	DeleteAgent(name string) error
@@ -155,7 +156,7 @@ func NewHubCmd() *cobra.Command {
 			"  sindri hub start        run the hub in the foreground\n" +
 			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
 			"  sindri hub restart      stop it and start a fresh detached one (pick up a rebuild)\n" +
-			"  sindri hub status       show the running hub (pid, version, uptime)\n" +
+			"  sindri hub info         show the running hub (pid, version, uptime) and its flow debug view's URL\n" +
 			"  sindri hub stop         stop the running hub\n" +
 			"  sindri hub logs         show its log (--agent/--grep to filter, --follow to stream)",
 	}
@@ -434,7 +435,7 @@ func prLintCmd() *cobra.Command {
 		Use: "lint <pr-id>", Short: "Ask for the quality gate's verdict on the commit a PR's branch names", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			// It may answer without running anything: the commit's verdict is stored, and one that has
-			// none queues the gate rather than running it here (-> workflow.LintPR).
+			// none queues the gate rather than running it here (-> fleet.LintPR).
 			return withBackend(func(b backend) error {
 				out, err := b.LintPR(args[0])
 				if err != nil {

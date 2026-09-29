@@ -3,7 +3,7 @@
 // job:     how far a priority setting reaches (PriorityScope), and what reaching below a task
 // would ACTUALLY do to the tasks down there (PriorityEffect) — the fact both front-ends
 // state before offering the choice.
-// limits:  data and pure derivation only; applying a scope is the hub's (-> workflow.SetPriority).
+// limits:  data and pure derivation only; applying a scope is the hub's (-> fleet.SetPriority).
 // How a priority is styled is a front-end's (-> internal/ui/theme); the vocabulary is here,
 // since the hub parses the same words off an agent's command.
 package api

@@ -1,9 +1,10 @@
-// package: hosttools
-// type:    adapter (external tool)
-// job:     reports the host's installed go/node/openspec/brokkr versions — the one place the core
-// (-> hub/toolskew.go) goes for them (openspec's own exec lives in adapter/tasks/spec,
-// which this calls, so the core itself still never shells out directly).
-// limits:  best-effort per tool; a missing or failing tool is simply absent from the result.
+// package: adapter/hosttools / hosttools
+// type:    adapter (external tools: go, node, openspec, brokkr)
+// job:     report what the HOST has installed, by asking each tool its own version. One half of a
+// comparison whose other half is the pod's manifest; both are read by hub/toolskew.go, which is
+// this package's only caller.
+// limits:  best-effort per tool — a missing or failing one is simply absent, never an error. What
+// a difference MEANS, and who is told, is hub/toolskew.go's.
 package hosttools
 
 import (
@@ -15,7 +16,7 @@ import (
 )
 
 // Versions reports whatever of go/node/openspec/brokkr is found on the host's PATH — the same
-// binaries a gate invocation (hub/repo.runVerify) would reach for, not the toolchain that built the
+// binaries a gate invocation (adapter/git.runVerify) would reach for, not the toolchain that built the
 // caller.
 func Versions(ctx context.Context) map[string]string {
 	versions := map[string]string{}

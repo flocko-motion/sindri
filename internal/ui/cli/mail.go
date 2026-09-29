@@ -33,7 +33,7 @@ func NewMailCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	c.AddCommand(mailListCmd(), mailShowCmd(), mailReplyCmd())
+	c.AddCommand(mailListCmd(), mailShowCmd(), mailReplyCmd(), mailReadAllCmd())
 	return c
 }
 
@@ -163,6 +163,24 @@ func mailReplyCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "replied — it reads this at its next `sindri`, threaded with what you answered\n")
+				return nil
+			})
+		},
+	}
+}
+
+// mailReadAllCmd retires the user's whole unread backlog. Scoped to the user by the hub, not by
+// this flag list: an agent's unread mail is what it has yet to be told, so nothing here can retire it.
+func mailReadAllCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "read-all", Short: "Mark every message waiting for YOU as read (agents' mail is untouched)",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.MarkAllMailRead(); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "your mail is marked read — the rows stay, and agents' own mail is untouched\n")
 				return nil
 			})
 		},

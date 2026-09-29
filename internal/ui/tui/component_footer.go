@@ -7,7 +7,8 @@
 // the active tab).
 package tui
 
-// footer renders the two footer rows (global nav, context actions) at width.
+// footer renders the two footer rows (global nav, context actions) at width. Both arrive already
+// fitted to it (-> shedMiddle, shedTail); padTrunc's own cut is the backstop, and cuts mid-word.
 func footer(global, context string, width int) string {
 	return dimStyle.Render(padTrunc(global, width)) + "\n" + dimStyle.Render(padTrunc(context, width))
 }

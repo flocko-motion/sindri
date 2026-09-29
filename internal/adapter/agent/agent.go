@@ -8,7 +8,7 @@ package agent
 
 import (
 	"io"
-	"math"
+	"regexp"
 )
 
 // State is what the agent tool is doing now, not sindri's workflow phase.
@@ -66,10 +66,6 @@ type Agent interface {
 	// only the backend knows which model answers; a caller that assumed one retired workers with
 	// most of 1M unused. ok=false when nothing has been recorded yet.
 	ContextUsage(home string) (tokens, window int, model string, ok bool)
-	// CompactionThreshold is the token count above which a session filling window tokens is worth
-	// compacting — from the same backend ContextUsage's window came from, since only it knows the
-	// shape of its own context-management economics.
-	CompactionThreshold(window int) int
 	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
 	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
 	ModelWindow(model string) (window int, ok bool)
@@ -85,6 +81,10 @@ type Agent interface {
 	// (a plain tier id) — not always a bare string equality, since a backend may run a tier's model
 	// under a more specific id than the one it dispatches to.
 	ModelMatches(want, detected string) bool
+	// InputPending reports the pane's input box holding text that has been typed and not sent. The
+	// hub types into these panes, and typing into a box somebody is already using appends to their
+	// line and submits both — so this is what makes a push safe rather than destructive.
+	InputPending(screen string) bool
 	// ToolRunning reports whether the pane shows a tool call in flight (a shell, or anything else the
 	// backend renders the same way) — evidence the screen is quiet because nothing has RETURNED yet,
 	// not because the turn is stuck. Separate from DetectState: the state stays Working either way,
@@ -100,6 +100,17 @@ func Use(a Agent) { active = a }
 
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
+
+// InputPending reports somebody's unsent text sitting in the pane's input box, via the wired backend.
+func InputPending(screen string) bool { return active.InputPending(screen) }
+
+// ansi matches any SGR escape. Stripping is the port's, not a backend's: reading a pane as the text
+// it renders is what every terminal-driven tool needs, whichever one is wired.
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Plain is a captured pane with its escapes removed — what the screen SAYS, for every rule that
+// matches on words rather than on how they are drawn.
+func Plain(screen string) string { return ansi.ReplaceAllString(screen, "") }
 
 // Runtime is the single source of the "working"|"blocked"|"idle"|"signed-out" word every reader
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.
@@ -123,9 +134,6 @@ func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
 
 // ContextUsage reports the wired backend's context size, window and model for the session under home.
 func ContextUsage(home string) (int, int, string, bool) { return active.ContextUsage(home) }
-
-// CompactionThreshold reports the wired backend's compaction threshold for a window this size.
-func CompactionThreshold(window int) int { return active.CompactionThreshold(window) }
 
 // ModelWindow resolves model to its window via the wired backend.
 func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
@@ -159,8 +167,6 @@ func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 
 func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }
 
-func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure
-
 func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised
 
 func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing wired, nothing recognised
@@ -168,3 +174,7 @@ func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing 
 func (noop) ModelMatches(want, detected string) bool { return want == detected }
 
 func (noop) ToolRunning(string) bool { return false }
+
+// InputPending answers FALSE with no backend wired, which is the same answer a pane it cannot read
+// gets: a guard that refuses every push on no evidence would silence the fleet.
+func (noop) InputPending(string) bool { return false }

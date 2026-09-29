@@ -1,4 +1,4 @@
-// package: adapter/pod / pod
+// package: adapter/container/pod / pod
 // type:    adapter (external tool: podman) — implements container.Runtime
 // job:     the podman backend for the container-runtime port: run a detached agent
 // pod, exec/attach, liveness, logs, remove, orphan-list, VM pre-flight, and

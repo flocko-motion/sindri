@@ -9,7 +9,7 @@ package hub
 import (
 	"fmt"
 
-	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/api/agents/registry"
 )
 
 // reviewerTasks is what a reviewer may comment on, newest first: the task of the review it HOLDS,
@@ -34,7 +34,7 @@ func (h *Hub) reviewerTasks(c registry.Caller) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range prs {
-		p, ok, gerr := h.store.For(h.wf.PRProject(c.Project, id)).GetPR(id)
+		p, ok, gerr := h.store.For(h.PRFlow().PRProject(c.Project, id)).GetPR(id)
 		if gerr != nil {
 			return nil, gerr
 		}
@@ -54,6 +54,6 @@ func (h *Hub) reviewerTasks(c registry.Caller) ([]string, error) {
 }
 
 // replyNothingRuledOn refuses the verb to a reviewer with nothing in reach. It names what WOULD be
-// reachable, since a reviewer holding no review still has everything it has ruled on.
+// Reachable, since a reviewer holding no review still has everything it has ruled on.
 const replyNothingRuledOn = "You have no review in hand and haven't ruled on a PR yet, so there's " +
 	"no task to comment on. Once you approve or reject one, its task stays open to you."

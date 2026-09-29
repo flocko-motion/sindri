@@ -2,7 +2,7 @@
 // type:    adapter (hub HTTP client)
 // job:     the two ways a message reaches an agent, as a front-end sees them: PUSH it into the
 // live session now, or read what is waiting in its mailbox. That pair is the same one
-// every sender inside the hub answers (-> workflow.Delivery).
+// every sender inside the hub answers (-> mail.Delivery).
 // limits:  transport only; which path a message deserves is its sender's decision, and the
 // mailbox itself is the hub's.
 package client
@@ -44,4 +44,10 @@ func (c *HTTP) MailBody(id int64) (api.Mail, error) {
 // message addressed to the user is ever retired this way, no matter who calls this.
 func (c *HTTP) MarkMailRead(id int64) error {
 	return c.post("/mail/mark-read", api.TellReq{Name: fmt.Sprint(id), Source: api.SenderUser})
+}
+
+// MarkAllMailRead retires every message waiting for the user. The hub holds the same scope rule as
+// the single-message call: an agent's own unread mail is untouched whoever asks.
+func (c *HTTP) MarkAllMailRead() error {
+	return c.post("/mail/mark-all-read", api.TellReq{Source: api.SenderUser})
 }

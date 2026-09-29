@@ -155,7 +155,14 @@
       `sindri pr approve` then `sindri pr merge` are two deliberate acts, and a TUI-only
       shortcut past the one gate no agent may pass would be a capability the other
       front-end lacks. A is offered on the same row, so the way through is one keystroke.
-      DEFERRED, sd-6e972c: shedding drops declaration order, not usefulness order.
+      DECIDED IN sd-6e972c: declaration order stays and is now stated on `keymap`, with one
+      measured exception. Rendered at 80/100/120 columns, only Tasks (132) and PRs (97)
+      overflow, and the sole thing order dropped that "?" cannot replace was the live
+      `filter:`/`scope:`/`who:` readout — so those carry `readout` and shed last. The worse
+      find was that the row was `padTrunc`'d mid-word ("/ s…" at 80), against view-tui's own
+      "the active filter SHALL be shown in the footer"; `shedTail` now drops whole entries
+      and marks the cut, as row one already did. No spec delta: the requirement was already
+      there, this makes it hold at a narrow width.
 
 ## 7. Review fixes, round 7
 

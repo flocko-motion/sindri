@@ -143,3 +143,29 @@ func TestVerifyIsACommandNotAPath(t *testing.T) {
 		}
 	}
 }
+
+// TestARelativeRootIsStillInsideItself is the containment check's own blind spot: a caller in the
+// repo loads its config as Load("."), where joining the root and a repo-relative path leaves no
+// "./" for a prefix test to match — so every path read as an escape, and the whole config was
+// silently dropped for the defaults.
+func TestARelativeRootIsStillInsideItself(t *testing.T) {
+	root := repoWith(t, "verify: make check\nlint:\n  max_lines: 300\n")
+	t.Chdir(root)
+	c, err := Load(".")
+	if err != nil {
+		t.Fatalf(`Load("."): %v`, err)
+	}
+	if c.Lint.MaxLines == nil || *c.Lint.MaxLines != 300 {
+		t.Errorf("max_lines = %v, want 300", c.Lint.MaxLines)
+	}
+}
+
+// TestEscapingARelativeRootIsStillRefused: the fix must not buy the relative case by letting ".."
+// through, which is the whole reason the check exists.
+func TestEscapingARelativeRootIsStillRefused(t *testing.T) {
+	root := repoWith(t, "containerfile: ../evil\n")
+	t.Chdir(root)
+	if _, err := Load("."); err == nil {
+		t.Error("../evil was accepted from a relative root")
+	}
+}

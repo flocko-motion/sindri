@@ -44,16 +44,19 @@ type Event struct {
 	Payload string `json:"payload"`
 }
 
-// StateEvent is one row of the debug state log: a stored AgentState write with its reason, or a
-// derived status-word change (-> hub/store.StateReason). Purged at hub restart and capped per agent
-// — a diagnostic instrument, never the durable activity log Event is.
+// StateEvent is one row of an agent's own record: a stored AgentState write with its reason, a
+// derived status-word change (-> hub/store.StateReason), or one step of a reconcile pass over it.
+// Durable and capped per agent — the failures worth reconstructing are the ones that span a restart.
 type StateEvent struct {
 	ID      int64  `json:"id"`
 	Project string `json:"project"`
 	Agent   string `json:"agent"`
 	TS      string `json:"ts"`
 	Reason  string `json:"reason"`
-	Detail  string `json:"detail"`
+	// Pass ties every line of one reconcile pass together — the event, the decision, the action and
+	// the outcome. '' for a write made outside a pass.
+	Pass   string `json:"pass,omitempty"`
+	Detail string `json:"detail"`
 }
 
 // CmdInfo is a command as advertised to a browser (name + help).

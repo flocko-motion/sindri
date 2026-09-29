@@ -10,7 +10,6 @@ package claude
 import (
 	"encoding/json"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,27 +77,6 @@ func (Claude) ModelForTier(tier string) (model string, ok bool) {
 // real id carries a dated snapshot suffix (claude-haiku-4-5-20251001) the plain tier id never names.
 func (Claude) ModelMatches(want, detected string) bool {
 	return strings.Contains(detected, want)
-}
-
-// The compaction threshold falls as the window grows: pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k). The same
-// absolute overhead is a smaller fraction of a bigger window, so the bar for compacting falls with it.
-const (
-	compactW0   = 200_000 // the window the curve is anchored to
-	compactP0   = 0.375   // the fraction worth compacting at compactW0
-	compactPInf = 0.05    // the floor the fraction falls toward as the window grows
-	compactK    = 0.863   // how fast it falls between the two — fit to the epic's own table (sd-43fa4a):
-	// every anchor past the 200k one it's pinned at (500k/1M/2M/4M/8M) only reproduces near this k,
-	// not the 0.6 first written down; 200k fits any k since (W/W0)^-k is 1 there regardless.
-)
-
-// CompactionThreshold implements agent.Agent: the curve above, in tokens rather than a bare
-// fraction, since that is what a live reading is compared against.
-func (Claude) CompactionThreshold(window int) int {
-	if window <= 0 {
-		return 0
-	}
-	pct := compactPInf + (compactP0-compactPInf)*math.Pow(float64(window)/compactW0, -compactK)
-	return int(pct * float64(window))
 }
 
 // ContextUsage implements agent.Agent: what the session under home carries, the window it fills, and

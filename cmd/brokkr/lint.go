@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
@@ -61,6 +62,7 @@ func newLintCmd() *cobra.Command {
 			"repo root: one pattern per line (same syntax; '#' comments and blank lines " +
 			"ignored). It's read automatically by every run — the right home for a " +
 			"generated file's exception, since the file itself can't carry a marker.\n\n" +
+			optInConvention + "\n\n" +
 			commentsConvention,
 		Args: cobra.ArbitraryArgs,
 		// Failures report themselves via exitCodeError, so cobra must not echo them too.
@@ -77,11 +79,14 @@ func newLintCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// The repo's own bar where it set one; an explicit flag still wins.
-			lines, avg := repoLintBar(cmd, maxLines, maxAvg)
+			// The repo's own bar and its opt-in linters; an explicit flag still wins on a bar.
+			lines, avg, enabled, err := repoLint(cmd, maxLines, maxAvg)
+			if err != nil {
+				return err
+			}
 			o := lintOpts{
 				tags: tags, maxLines: lines, maxAvg: avg, maxLine: maxLine,
-				blocks: blocks, paths: paths, ig: ig,
+				blocks: blocks, paths: paths, ig: ig, enabled: enabled,
 				// ONE budget for the whole run — every linter printing its own share is the
 				// wall this bounds, and why `brokkr lint` needs no --tail.
 				cap: lint.NewCap(limit),
@@ -104,7 +109,7 @@ func newLintCmd() *cobra.Command {
 // lintNames are the linters, and what tells a name from a path in the arguments.
 var lintNames = map[string]bool{
 	"deadcode": true, "loc": true, "comments": true, "comment-length": true,
-	"gofmt": true, "js": true, "openspec": true,
+	"gofmt": true, "js": true, "openspec": true, "test-home": true, "verb-help": true, "header-path": true,
 }
 
 // splitLintArgs reads an optional linter name then paths, so scoping needs no flag or placeholder.
@@ -138,12 +143,20 @@ func pkgPatterns(paths []string) []string {
 	return out
 }
 
-// repoLintBar reads the repo's `lint:` config unless a flag overrides it; an unreadable one defaults.
-func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float64) {
+// optIn are the linters a repo has to ask for. Each holds a CONVENTION a project adopts — a test
+// file named after its subject, a header naming its own directory, one catalogue per verb — where
+// the rest check a property of Go itself. brokkr is a toolbelt pointed at any repo, so a repo that
+// never adopted a convention would otherwise fail a gate it never agreed to.
+var optIn = map[string]bool{"test-home": true, "verb-help": true, "header-path": true}
+
+// repoLint reads the repo's `lint:` block: the bars it set, unless a flag overrides one, and the
+// opt-in linters it asked for. A config that won't parse is an error — silently defaulting would
+// drop the linters it names, turning a broken file into a gate that quietly checks less.
+func repoLint(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float64, map[string]bool, error) {
 	lines, avg := flagLines, flagAvg
 	cfg, err := config.Load(".")
 	if err != nil {
-		return lines, avg
+		return 0, 0, nil, err
 	}
 	if cfg.Lint.MaxLines != nil && !cmd.Flags().Changed("max") {
 		lines = *cfg.Lint.MaxLines
@@ -151,7 +164,35 @@ func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float
 	if !cmd.Flags().Changed("max-comment-avg") {
 		avg = lint.MaxCommentAvgFor(cfg)
 	}
-	return lines, avg
+	enabled, err := enabledLinters(cfg.Lint.Enable)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return lines, avg, enabled, nil
+}
+
+// enabledLinters is the opt-in set a repo listed, as a lookup. A name outside optIn is an error:
+// the two ways to write one are a typo and a linter that already runs, and both leave a repo
+// believing it asked for something.
+func enabledLinters(names []string) (map[string]bool, error) {
+	on := make(map[string]bool, len(names))
+	for _, n := range names {
+		if !optIn[n] {
+			return nil, fmt.Errorf(".sindri/config.yaml: lint.enable: %q — the opt-in linters are %s; every other one runs in any repo", n, strings.Join(optInNames(), ", "))
+		}
+		on[n] = true
+	}
+	return on, nil
+}
+
+// optInNames lists optIn in a stable order, since a map's own order would reshuffle the message.
+func optInNames() []string {
+	out := make([]string, 0, len(optIn))
+	for n := range optIn {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // lintOpts is one run's resolved configuration. A struct because the thresholds outgrew being
@@ -165,9 +206,12 @@ type lintOpts struct {
 	paths    []string
 	cap      *lint.Cap
 	ig       *lint.Ignore
+	enabled  map[string]bool // the opt-in linters this repo asked for
 }
 
-// runLinters runs the named linter, or all of them when which is empty, scoped to o.paths.
+// runLinters runs the named linter, or all of them when which is empty, scoped to o.paths. Naming
+// one is its own opt-in, so `brokkr lint test-home` answers in a repo whose config lists nothing —
+// that is how you see what adopting a convention would cost before committing to it.
 func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 	switch which {
 	case "deadcode":
@@ -180,6 +224,12 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 		return lint.CommentAvg(orDot(o.paths), o.maxAvg, o.maxLine, o.blocks, o.cap, o.ig, out)
 	case "gofmt":
 		return lint.Gofmt(orDot(o.paths), o.cap, o.ig, out)
+	case "test-home":
+		return lint.TestHome(orDot(o.paths), o.cap, o.ig, out)
+	case "verb-help":
+		return lint.VerbHelp(orDot(o.paths), o.cap, o.ig, out)
+	case "header-path":
+		return lint.HeaderPath(orDot(o.paths), o.cap, o.ig, out)
 	case "js":
 		return runJS(out, o)
 	case "openspec":
@@ -187,7 +237,7 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 	case "":
 		return runAll(out, o)
 	default:
-		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|gofmt|js|openspec)", which)
+		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|gofmt|js|openspec|test-home|verb-help|header-path)", which)
 	}
 }
 
@@ -216,14 +266,17 @@ func runComments(out io.Writer, o lintOpts) (bool, error) {
 	return found, nil
 }
 
-// runAll runs every linter and NAMES the failures. A section banner marks findings, so a linter with
-// none contributes nothing to read: a clean run is its last line. Anything a PASSING linter says (an
-// openspec verdict, a skip note) prints plainly — it is evidence, not a finding.
-func runAll(out io.Writer, o lintOpts) (bool, error) {
-	linters := []struct {
-		name string
-		run  func(io.Writer) (bool, error)
-	}{
+// linter is one entry of the whole-run table: the name a section banner and the summary use, and
+// the call bound to this run's options.
+type linter struct {
+	name string
+	run  func(io.Writer) (bool, error)
+}
+
+// lintersFor is the run's table, in output order, with the opt-in linters this repo did not ask
+// for dropped. Separate from runAll so what a repo is held to can be read off without linting it.
+func lintersFor(o lintOpts) []linter {
+	all := []linter{
 		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode(pkgPatterns(o.paths), o.tags, o.cap, o.ig, w) }},
 		{"loc", func(w io.Writer) (bool, error) { return lint.LOC(orDot(o.paths), o.maxLines, o.cap, o.ig, w) }},
 		{"comments", func(w io.Writer) (bool, error) { return runComments(w, o) }},
@@ -231,9 +284,29 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 			return lint.CommentAvg(orDot(o.paths), o.maxAvg, o.maxLine, o.blocks, o.cap, o.ig, w)
 		}},
 		{"gofmt", func(w io.Writer) (bool, error) { return lint.Gofmt(orDot(o.paths), o.cap, o.ig, w) }},
+		{"test-home", func(w io.Writer) (bool, error) { return lint.TestHome(orDot(o.paths), o.cap, o.ig, w) }},
+		{"verb-help", func(w io.Writer) (bool, error) { return lint.VerbHelp(orDot(o.paths), o.cap, o.ig, w) }},
+		{"header-path", func(w io.Writer) (bool, error) { return lint.HeaderPath(orDot(o.paths), o.cap, o.ig, w) }},
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, o) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w, o.cap.Quiet()), nil }},
 	}
+	out := make([]linter, 0, len(all))
+	for _, l := range all {
+		if optIn[l.name] && !o.enabled[l.name] {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// runAll runs every linter this repo is held to and NAMES the failures. A section banner marks
+// findings, so a linter with none contributes nothing to read: a clean run is its last line.
+// Anything a PASSING linter says (an openspec verdict, a skip note) prints plainly — it is
+// evidence, not a finding. An opt-in linter the repo never asked for stays out of the run, and out
+// of the closing line, which names what actually ran.
+func runAll(out io.Writer, o lintOpts) (bool, error) {
+	linters := lintersFor(o)
 	var failed, names []string
 	for _, l := range linters {
 		names = append(names, l.name)
@@ -308,6 +381,20 @@ func lintOutcome(out io.Writer, fn func() (bool, error)) int {
 	}()
 	return code
 }
+
+// optInConvention explains the opt-in set in --help, where a repo owner decides what to adopt.
+const optInConvention = `Three linters check a convention a project ADOPTS rather than a property of
+Go, so a repo asks for them by name in .sindri/config.yaml:
+
+    lint:
+      enable: [test-home, header-path, verb-help]
+
+  - test-home     a test file's stem names a source file beside it
+  - header-path   a file header's path segment is the file's own directory
+  - verb-help     one catalogue for every verb, under the name it is served as
+
+Naming one on the command line runs it either way (` + "`brokkr lint test-home`" + `), so a repo can
+see what adopting it would cost first.`
 
 // commentsConvention explains what the comments linter expects, shown in --help and after a
 // violation so the fix needs no trip elsewhere.

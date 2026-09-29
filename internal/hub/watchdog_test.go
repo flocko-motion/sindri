@@ -1,25 +1,25 @@
 package hub
 
 import (
-	"github.com/flo-at/sindri/internal/hub/observe"
+	"github.com/flo-at/sindri/internal/hub/world/observe"
 	"testing"
 	"time"
 
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/harness"
+	"github.com/flo-at/sindri/internal/hub/world/store"
 )
 
 // seen builds the pair one capture yields: what the pane said, and what it looked like. A distinct
 // digest per call stands for a screen that changed since the last look.
-func seen(runtime, digest string) agent.Observation {
-	return agent.Observation{Runtime: runtime, Digest: digest}
+func seen(runtime, digest string) harness.Observation {
+	return harness.Observation{Runtime: runtime, Digest: digest}
 }
 
 // busy is seen with a tool call reported in flight — a shell whose output has not landed yet, so the
 // digest holds still exactly as a stall would, and only this bit tells them apart.
-func busy(runtime, digest string) agent.Observation {
-	return agent.Observation{Runtime: runtime, Digest: digest, ToolRunning: true}
+func busy(runtime, digest string) harness.Observation {
+	return harness.Observation{Runtime: runtime, Digest: digest, ToolRunning: true}
 }
 
 // TestOneLostProbeDoesNotFlipAnAgentDown is the bug the watchdog exists for. A probe that loses
@@ -39,7 +39,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	// Failures short of the threshold hold the previous state, dial-in count and runtime
 	// included: a probe that could not read the agent must not blank what the last one did.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, agent.Observation{})
+		w.record(a, false, 0, harness.Observation{})
 		l, _ := w.get("proj", "galar")
 		if !l.up {
 			t.Errorf("strike %d of %d already reported down", i, downStrikes)
@@ -50,7 +50,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	}
 
 	// The threshold reached, it is no longer one bad reading but a pattern.
-	w.record(a, false, 0, agent.Observation{})
+	w.record(a, false, 0, harness.Observation{})
 	if l, _ := w.get("proj", "galar"); l.up {
 		t.Errorf("%d consecutive failures should report down", downStrikes)
 	}
@@ -64,14 +64,14 @@ func TestSuccessClearsStrikes(t *testing.T) {
 	a := store.Agent{Project: "proj", Name: "galar"}
 
 	w.record(a, true, 0, seen("idle", "d1"))
-	w.record(a, false, 0, agent.Observation{}) // one strike
+	w.record(a, false, 0, harness.Observation{}) // one strike
 	w.record(a, true, 2, seen("working", "d2"))
 	if l, _ := w.get("proj", "galar"); l.strikes != 0 || l.clients != 2 || l.state != observe.Working {
 		t.Errorf("a success must reset strikes and take the fresh reading, got %+v", l)
 	}
 	// From clean, it again takes the full threshold to go down.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, agent.Observation{})
+		w.record(a, false, 0, harness.Observation{})
 		if l, _ := w.get("proj", "galar"); !l.up {
 			t.Errorf("strike %d after a success reported down too early", i)
 		}
@@ -92,7 +92,7 @@ func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 	a := store.Agent{Project: "proj", Name: "galar"}
 
 	w.record(a, true, 1, seen("working", "d1"))
-	w.record(a, false, 0, agent.Observation{}) // absent from one listing — not yet a verdict
+	w.record(a, false, 0, harness.Observation{}) // absent from one listing — not yet a verdict
 	l, _ := w.get("proj", "galar")
 	if !l.up {
 		t.Error("one listing that missed the pod must not declare the agent down")
@@ -101,7 +101,7 @@ func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 		t.Errorf("the last good detail should be held, got clients=%d state=%v", l.clients, l.state)
 	}
 	for i := 2; i <= downStrikes; i++ {
-		w.record(a, false, 0, agent.Observation{})
+		w.record(a, false, 0, harness.Observation{})
 	}
 	if l, _ := w.get("proj", "galar"); l.up {
 		t.Errorf("%d consecutive absences are a pattern and must report down", downStrikes)
@@ -238,7 +238,7 @@ func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
 	w.record(a, true, 0, seen("idle", "d1"))
 	started, _ := w.get("proj", "dvalin")
 
-	w.record(a, false, 0, agent.Observation{}) // one lost probe, short of downStrikes
+	w.record(a, false, 0, harness.Observation{}) // one lost probe, short of downStrikes
 	held, _ := w.get("proj", "dvalin")
 	if held.state != observe.AtPrompt {
 		t.Fatalf("a lost probe should hold the last state, got %v", held.state)

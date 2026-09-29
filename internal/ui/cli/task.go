@@ -186,7 +186,7 @@ func scrapExtent(subtasks, prs bool) string {
 
 func taskUnassignCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "unassign <id>", Short: "Release a task back to the backlog (refused if a live agent holds it)", Args: cobra.ExactArgs(1),
+		Use: "unassign <id>", Short: "Release a task back to the backlog, taking any holder off it", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.UnassignTask(args[0]); err != nil {
